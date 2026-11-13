@@ -1,7 +1,7 @@
 -- Experimental integration; requires validation against the target client.
 local finder = OldKraken.GroupFinder
 local comm = OldKraken.Communication
-local active, storage, nextQuery, nextBroadcast, lastQuery = false, nil, 0, 0, -60
+local active, storage, nextQuery, nextBroadcast, nextRetry, lastQuery = false, nil, 0, 0, 0, -60
 local currentKey, tickerStarted = nil, false
 
 local function profileKey(name, guild)
@@ -24,6 +24,9 @@ local function saveOwned()
     storage.records = records
     storage.pending = {}
     for key, value in pairs(finder.pending) do storage.pending[key] = value end
+    storage.pendingVersions, storage.pendingRoles = {}, {}
+    for key, value in pairs(finder.pendingVersions) do storage.pendingVersions[key] = value end
+    for key, value in pairs(finder.pendingRoles) do storage.pendingRoles[key] = value end
     storage.requests = {}
     for id, requests in pairs(finder.requests) do
         local owned = finder.groups[finder.identity .. '\001' .. id]
@@ -35,6 +38,13 @@ local function saveOwned()
     storage.requestVersions = {}
     for key, value in pairs(finder.requestVersions) do storage.requestVersions[key] = value end
     storage.requestSequence = finder.requestSequence
+    storage.decisions = {}
+    for id, decisions in pairs(finder.decisions) do
+        if finder.groups[finder.identity .. '\001' .. id] then
+            storage.decisions[id] = {}
+            for applicant, version in pairs(decisions) do storage.decisions[id][applicant] = version end
+        end
+    end
 end
 
 local function receiveGroup(sender, _, payload)
@@ -89,10 +99,23 @@ frame:SetScript('OnEvent', function()
         for entry, value in pairs(storage.pending) do
             if count >= 100 then break end
             if type(entry) == 'string' and #entry <= 193 and
-                (value == 'pending' or value == 'accept' or value == 'reject' or value == 'closed') then
+                (value == 'pending' or value == 'accept' or value == 'reject' or value == 'closed' or value == 'retry') then
                 finder.pending[entry] = value; count = count + 1
             end
         end
+    end
+    if type(storage.pendingVersions) == 'table' and type(storage.pendingRoles) == 'table' then
+        for entry, version in pairs(storage.pendingVersions) do
+            local role = storage.pendingRoles[entry]
+            if finder.pending[entry] == 'pending' and type(version) == 'number' and version > 0 and version < 9000000000000000
+                and (role == '' or role == 'tank' or role == 'healer' or role == 'dps' or role == 'flex') then
+                finder.pendingVersions[entry], finder.pendingRoles[entry] = version, role
+            end
+        end
+    end
+    -- Pre-versioned pending requests cannot be correlated safely with a decision.
+    for entry, value in pairs(finder.pending) do
+        if value == 'pending' and not finder.pendingVersions[entry] then finder.pending[entry] = 'retry' end
     end
     if type(storage.requests) == 'table' then
         for id, requests in pairs(storage.requests) do
@@ -120,10 +143,26 @@ frame:SetScript('OnEvent', function()
     end
     if type(storage.requestSequence) == 'number' and storage.requestSequence > finder.requestSequence
         and storage.requestSequence < 9000000000000000 then finder.requestSequence = storage.requestSequence end
+    if type(storage.decisions) == 'table' then
+        local count = 0
+        for id, decisions in pairs(storage.decisions) do
+            if type(id) == 'string' and finder.groups[name .. '\001' .. id] and type(decisions) == 'table' then
+                for applicant, version in pairs(decisions) do
+                    if count >= 2000 then break end
+                    if type(applicant) == 'string' and #applicant > 0 and #applicant <= 128
+                        and type(version) == 'number' and version > 0 and version < 9000000000000000 then
+                        finder.decisions[id] = finder.decisions[id] or {}
+                        finder.decisions[id][applicant] = version
+                        count = count + 1
+                    end
+                end
+            end
+        end
+    end
     active = true
     finder.active = true
     currentKey = key
-    nextQuery, nextBroadcast, lastQuery = 0, 0, -60
+    nextQuery, nextBroadcast, nextRetry, lastQuery = 0, 0, 0, -60
     if not tickerStarted and C_Timer and C_Timer.NewTicker then
         tickerStarted = true
         C_Timer.NewTicker(3, function()
@@ -137,6 +176,7 @@ frame:SetScript('OnEvent', function()
             local now = GetTime()
             if now >= nextQuery and comm:RequestSync() then nextQuery = now + 180 end
             if now >= nextBroadcast then finder:OnQuery(); nextBroadcast = now + 300 end
+            if now >= nextRetry and finder:RetryPending() then nextRetry = now + 180 end
             finder:SyncStep()
             finder:Prune()
         end)

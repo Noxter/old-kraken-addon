@@ -1,4 +1,4 @@
--- Experimental model; not loaded by the addon until its integration is complete.
+-- Group Finder model and owner-authoritative state.
 local Finder = {}
 OldKraken.GroupFinder = Finder
 
@@ -51,6 +51,8 @@ function Finder:Initialize(identity, send)
     assert(validText(identity, 1, 128) and type(send) == 'function')
     self.identity, self.send = identity, send
     self.groups, self.requests, self.pending, self.syncPending, self.requestVersions = {}, {}, {}, {}, {}
+    self.pendingVersions, self.pendingRoles, self.decisions, self.decisionSync = {}, {}, {}, {}
+    self.retryKeys, self.retryIndex = nil, nil
     self.sequence = 0
     self.requestSequence = GetServerTime() * 1000
 end
@@ -125,7 +127,7 @@ function Finder:Prune()
     local now = GetTime()
     for key, group in pairs(self.groups) do
         if group.owner ~= self.identity and now - group.seenAt > GROUP_TTL then
-            self.groups[key], self.pending[key] = nil, nil
+            self.groups[key] = nil
         end
     end
 end
@@ -135,8 +137,9 @@ function Finder:Apply(owner, id, role)
     local group = self.groups[key]
     if not roles[role] or not group or group.closed or owner == self.identity then return false end
     self.requestSequence = math.max(self.requestSequence + 1, GetServerTime() * 1000)
-    if not self.send('JOIN', pack({owner, id, role, 'apply', self.requestSequence})) then return false end
+    if not self.send('JOIN', pack({owner, id, role, 'apply', string.format('%.0f', self.requestSequence)})) then return false end
     self.pending[key] = 'pending'
+    self.pendingVersions[key], self.pendingRoles[key] = self.requestSequence, role
     return true
 end
 
@@ -144,8 +147,9 @@ function Finder:Withdraw(owner, id)
     local key = owner .. '\001' .. id
     if self.pending[key] ~= 'pending' then return false end
     self.requestSequence = math.max(self.requestSequence + 1, GetServerTime() * 1000)
-    if not self.send('JOIN', pack({owner, id, '', 'withdraw', self.requestSequence})) then return false end
+    if not self.send('JOIN', pack({owner, id, '', 'withdraw', string.format('%.0f', self.requestSequence)})) then return false end
     self.pending[key] = nil
+    self.pendingVersions[key], self.pendingRoles[key] = nil, nil
     return true
 end
 
@@ -167,6 +171,7 @@ function Finder:ReceiveJoin(sender, payload)
     self.requestVersions[versionKey] = version
     self.requests[id] = self.requests[id] or {}
     self.requests[id][sender] = action == 'apply' and role or nil
+    if self.decisions[id] then self.decisions[id][sender] = nil end
     return true
 end
 
@@ -185,23 +190,29 @@ function Finder:Decide(id, applicant, accept)
             return false
         end
     end
-    -- Membership in the owner's snapshot is authoritative for acceptance.
-    -- Rejections still need a response; keep the request when it cannot be queued.
-    if not accept and not self.send('RESPONSE', pack({self.identity, id, applicant, 'reject'})) then
-        return false
+    -- Retain a versioned rejection for later anti-entropy, even if the peer is offline.
+    if not accept then
+        local version = self.requestVersions[id .. '\001' .. applicant]
+        if not version then return false end
+        self.decisions[id] = self.decisions[id] or {}
+        self.decisions[id][applicant] = version
+        self.decisionSync[id .. '\001' .. applicant] = true
     end
     requests[applicant] = nil
     return true
 end
 
 function Finder:ReceiveResponse(sender, payload)
-    local f = unpackFields(payload, 4)
-    if not f or #f ~= 4 then return false end
-    local owner, id, applicant, decision = unpack(f)
+    local f = unpackFields(payload, 5)
+    if not f or #f ~= 5 then return false end
+    local owner, id, applicant, decision, version = unpack(f)
+    version = tonumber(version)
     local key = owner .. '\001' .. id
     if sender ~= owner or applicant ~= self.identity or not self.groups[key]
-        or self.pending[key] ~= 'pending' or (decision ~= 'accept' and decision ~= 'reject') then return false end
+        or self.pending[key] ~= 'pending' or decision ~= 'reject'
+        or not version or version ~= self.pendingVersions[key] then return false end
     self.pending[key] = decision
+    self.pendingRoles[key] = nil
     return true
 end
 
@@ -256,12 +267,24 @@ function Finder:OnQuery()
     for key, group in pairs(self.groups) do
         if group.owner == self.identity then self.syncPending[key] = true end
     end
+    for id, entries in pairs(self.decisions) do
+        for applicant in pairs(entries) do self.decisionSync[id .. '\001' .. applicant] = true end
+    end
 end
 
 -- Drain snapshots incrementally; a saturated transport retains the snapshot for retry.
 function Finder:SyncStep()
     local key = next(self.syncPending)
-    if not key then return true end
+    if not key then
+        local decisionKey = next(self.decisionSync)
+        if not decisionKey then return true end
+        local id, applicant = decisionKey:match('^([^\001]+)\001(.+)$')
+        local version = id and self.decisions[id] and self.decisions[id][applicant]
+        if not version then self.decisionSync[decisionKey] = nil; return true end
+        if not self.send('RESPONSE', pack({self.identity, id, applicant, 'reject', string.format('%.0f', version)})) then return false end
+        self.decisionSync[decisionKey] = nil
+        return true
+    end
     local group = self.groups[key]
     if not group or group.owner ~= self.identity then
         self.syncPending[key] = nil
@@ -270,6 +293,26 @@ function Finder:SyncStep()
     if not self.send('SYNC', self:EncodeGroup(group)) then return false end
     self.syncPending[key] = nil
     return true
+end
+
+-- A lost JOIN is retried with the original version; owner-side deduplication makes this safe.
+function Finder:RetryPending()
+    if not self.retryKeys then
+        self.retryKeys = {}
+        for key, state in pairs(self.pending) do
+            if state == 'pending' then self.retryKeys[#self.retryKeys + 1] = key end
+        end
+        table.sort(self.retryKeys)
+        self.retryIndex = 1
+    end
+    local key = self.retryKeys[self.retryIndex]
+    if not key then self.retryKeys = nil; return true end
+    local owner, id = key:match('^([^\001]+)\001(.+)$')
+    local version, role = self.pendingVersions[key], self.pendingRoles[key]
+    if self.pending[key] == 'pending' and owner and id and version and role
+        and not self.send('JOIN', pack({owner, id, role, 'apply', string.format('%.0f', version)})) then return false end
+    self.retryIndex = self.retryIndex + 1
+    return false
 end
 
 Finder._pack, Finder._unpackFields = pack, unpackFields

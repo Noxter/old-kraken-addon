@@ -1,4 +1,4 @@
--- Experimental UI; not loaded until integration has been verified.
+-- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
 local window, selected
 local tab = 'all'
@@ -9,7 +9,7 @@ local categories = {'dungeon', 'quest', 'world', 'raid', 'pvp', 'other'}
 local categoryLabels = {dungeon='Підземелля', quest='Квести', world='Відкритий світ', raid='Рейд', pvp='PvP', other='Інше'}
 local roles = {'', 'tank', 'healer', 'dps', 'flex'}
 local roleLabels = {['']='Без ролі', tank='Танк', healer='Лікар', dps='DPS', flex='Гнучка'}
-local pendingLabels = {pending='Очікує', accept='Прийнято', reject='Відхилено', closed='Закрито'}
+local pendingLabels = {pending='Очікує', accept='Прийнято', reject='Відхилено', closed='Закрито', retry='Подайте заявку знову'}
 
 local function cycle(values, value)
     for i, item in ipairs(values) do if item == value then return values[i % #values + 1] end end

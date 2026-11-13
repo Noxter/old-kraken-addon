@@ -49,5 +49,10 @@ assert(cleared == 2 and f.active)
 local restored
 for _, value in pairs(f.groups) do restored=value end
 assert(restored and restored.title == 'Dungeon' and f.requests[restored.id].Bob == 'dps')
+local stored = OldKraken.DB.groupFinder['' .. '\\001' .. 'Guild' .. '\\001' .. 'Alice']
+stored.pending = {['OldOwner\\001oldid']='pending'}
+stored.pendingVersions, stored.pendingRoles = nil, nil
+guild = 'Other'; login(); guild = 'Guild'; login()
+assert(f.pending['OldOwner\\001oldid'] == 'retry')
 ''')
 print('Integration checks passed')
