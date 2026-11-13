@@ -2,7 +2,7 @@
 ## Title: Old Kraken Guild Addon
 ## Notes: Ukrainian guild management tools for WoW Forever
 ## Author: Noxter
-## Version: 0.3.0
+## Version: 0.3.1
 ## SavedVariables: OldKrakenDB
 
 Core.lua
