@@ -45,7 +45,7 @@ remote:Initialize('Bob', function() return true end)
 assert(remote:Create('Remote group','quest','',5))
 local remoteGroup
 for _, value in pairs(remote.groups) do remoteGroup=value end
-handlers.ANNOUNCE('Bob Moon', 'remote-id', remote:EncodeGroup(remoteGroup))
+OldKraken.Communication.handlers.ANNOUNCE('Bob Moon', 'remote-id', remote:EncodeGroup(remoteGroup))
 assert(f.groups['Bob\001' .. remoteGroup.id].title == 'Remote group')
 assert(OldKraken.events.GROUP_FINDER_CHANGED > 0)
 guild = 'Other'
