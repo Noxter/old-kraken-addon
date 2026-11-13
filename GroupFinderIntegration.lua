@@ -10,6 +10,24 @@ local function profileKey(name, guild)
     return realm .. '\001' .. guild .. '\001' .. name
 end
 
+-- CHAT_MSG_ADDON sender may include the local realm ("Name Realm" or
+-- "Name-Realm"), while UnitName("player") and group owners use "Name".
+-- Only strip a suffix that exactly matches this client's realm.
+local function normalizeSender(sender)
+    if type(sender) ~= 'string' or sender == '' or #sender > 128 then return nil end
+    if sender == finder.identity then return sender end
+    local realm = GetRealmName and GetRealmName() or ''
+    if type(realm) ~= 'string' or realm == '' then return nil end
+    for _, separator in ipairs({' ', '-'}) do
+        local suffix = separator .. realm
+        if #sender > #suffix and sender:sub(-#suffix) == suffix then
+            local name = sender:sub(1, #sender - #suffix)
+            if name ~= '' then return name end
+        end
+    end
+    return nil
+end
+
 local function deactivate()
     if active then comm:ClearProtocolState() end
     active, finder.active, storage, currentKey = false, false, nil, nil
@@ -49,17 +67,29 @@ end
 
 local function receiveGroup(sender, _, payload)
     if not active then return end
-    if finder:ReceiveGroup(sender, payload) then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
+    local name = normalizeSender(sender)
+    if name and finder:ReceiveGroup(name, payload) then
+        saveOwned()
+        OldKraken:Fire('GROUP_FINDER_CHANGED')
+    end
 end
 
 for _, kind in ipairs({'ANNOUNCE', 'UPDATE', 'SYNC', 'CANCEL'}) do
     comm:RegisterHandler(kind, receiveGroup)
 end
 comm:RegisterHandler('JOIN', function(sender, _, payload)
-    if active and finder:ReceiveJoin(sender, payload) then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
+    local name = active and normalizeSender(sender)
+    if name and finder:ReceiveJoin(name, payload) then
+        saveOwned()
+        OldKraken:Fire('GROUP_FINDER_CHANGED')
+    end
 end)
 comm:RegisterHandler('RESPONSE', function(sender, _, payload)
-    if active and finder:ReceiveResponse(sender, payload) then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
+    local name = active and normalizeSender(sender)
+    if name and finder:ReceiveResponse(name, payload) then
+        saveOwned()
+        OldKraken:Fire('GROUP_FINDER_CHANGED')
+    end
 end)
 comm:RegisterHandler('QUERY', function(_, _, payload)
     if active and payload == '' and GetTime() - lastQuery >= 20 then
