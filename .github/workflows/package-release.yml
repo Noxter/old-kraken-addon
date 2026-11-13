@@ -19,7 +19,7 @@ jobs:
       - name: Build installable ZIP
         run: |
           mkdir -p package/OldKraken
-          cp OldKraken.toc Core.lua GuildRoster.lua package/OldKraken/
+          cp OldKraken.toc Core.lua Communication.lua GuildRoster.lua package/OldKraken/
           cd package
           zip -r ../OldKraken.zip OldKraken
 
