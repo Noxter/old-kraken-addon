@@ -166,7 +166,7 @@ local function createWindow()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:Decide(g.id, f.applicantBox:GetText(), false) then Finder:Changed(); refresh() end
     end)
-    button(f, 'Видалити', 750, -500, 95, function()
+    button(f, 'Видалити учасника', 750, -500, 125, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:RemoveMember(g.id, f.applicantBox:GetText()) then Finder:Changed(); refresh() end
     end)
