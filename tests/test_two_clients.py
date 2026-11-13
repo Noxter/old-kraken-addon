@@ -6,16 +6,19 @@ sources = [(root / name).read_text(encoding='utf-8') for name in
            ['Communication.lua', 'GroupFinder.lua', 'GroupFinderIntegration.lua']]
 
 
-def client(name):
+def client(name, realm):
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.globals().player = name
+    lua.globals().realm = realm
     lua.execute('''
         OldKraken={DB={groupFinder={}}}; frames={}; timers={}; outgoing={}
         function OldKraken:Fire(...) end
         function print(...) end
-        function UnitName() return player end
+        function UnitName() return player, realm end
         function GetGuildInfo() return 'Guild' end
-        function GetRealmName() return 'Moon' end
+        function GetRealmName() return realm end
+        function GetNumGuildMembers() return 2 end
+        function GetGuildRosterInfo(i) if i == 1 then return 'Alice Moon' else return 'Bob Other Realm' end end
         function IsInGuild() return true end
         function GetServerTime() return 1700000000 end
         function GetTime() return 100 end
@@ -39,7 +42,7 @@ def client(name):
     return lua
 
 
-alice, bob = client('Alice'), client('Bob')
+alice, bob = client('Alice', 'Moon'), client('Bob', 'Other Realm')
 
 
 def flush(sender, recipients):
@@ -50,7 +53,7 @@ def flush(sender, recipients):
     for packet in packets:
         for recipient in recipients:
             recipient.globals().OldKraken.Communication.OnAddonMessage(
-                recipient.globals().OldKraken.Communication, 'OLDKRKN', packet, 'GUILD', sender.globals().player + ' Moon')
+                recipient.globals().OldKraken.Communication, 'OLDKRKN', packet, 'GUILD', sender.globals().player + ' ' + sender.globals().realm)
 
 
 def reload(client):
@@ -74,14 +77,14 @@ bob.execute('''
 flush(bob, [alice])
 alice.execute('''
     group = nil; for _, value in pairs(OldKraken.GroupFinder.groups) do group=value end
-    assert(OldKraken.GroupFinder.requests[group.id].Bob == 'healer')
-    assert(OldKraken.GroupFinder:Decide(group.id, 'Bob', true))
+    assert(OldKraken.GroupFinder.requests[group.id]['Bob Other Realm'] == 'healer')
+    assert(OldKraken.GroupFinder:Decide(group.id, 'Bob Other Realm', true))
 ''')
 flush(alice, [bob])
-bob.execute("assert(OldKraken.GroupFinder.pending['Alice'..'\\001'..group.id] == 'accept')")
+bob.execute("assert(OldKraken.GroupFinder.pending['Alice Moon'..'\\001'..group.id] == 'accept')")
 alice.execute('assert(OldKraken.GroupFinder:Cancel(group.id))')
 flush(alice, [bob])
-bob.execute("assert(OldKraken.GroupFinder.groups['Alice'..'\\001'..group.id].closed)")
+bob.execute("assert(OldKraken.GroupFinder.groups['Alice Moon'..'\\001'..group.id].closed)")
 
 # Reject while the applicant is offline, drop the response, restart both peers,
 # and recover the versioned decision through a new synchronization request.
@@ -95,7 +98,7 @@ bob.execute('''
 flush(bob, [alice])
 alice.execute('''
   for _, g in pairs(OldKraken.GroupFinder.groups) do if g.title=='Second' then second=g end end
-  assert(OldKraken.GroupFinder:Decide(second.id, 'Bob', false)); OldKraken.GroupFinder:Changed()
+  assert(OldKraken.GroupFinder:Decide(second.id, 'Bob Other Realm', false)); OldKraken.GroupFinder:Changed()
   assert(OldKraken.GroupFinder:SyncStep())
 ''')
 flush(alice, [])
@@ -133,9 +136,9 @@ alice.execute('''
 flush(alice, [bob])
 bob.execute('''
   local f=OldKraken.GroupFinder
-  assert(f.pending['Alice'..'\\001'..second.id] == 'pending')
+  assert(f.pending['Alice Moon'..'\\001'..second.id] == 'pending')
   while not f:RetryPending() do end
 ''')
 flush(bob, [alice])
-alice.execute("assert(OldKraken.GroupFinder.requests[second.id].Bob == 'tank')")
+alice.execute("assert(OldKraken.GroupFinder.requests[second.id]['Bob Other Realm'] == 'tank')")
 print('Two simulated clients passed')

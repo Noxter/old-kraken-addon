@@ -4,63 +4,66 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {DB={groupFinder={}}, listeners={}, events={}}
-function OldKraken:Fire(name, ...) self.events[name] = (self.events[name] or 0) + 1 end
-function UnitName() return 'Alice' end
-guild = 'Guild'
+OldKraken={DB={groupFinder={}}, events={}}
+function OldKraken:Fire(name) self.events[name]=(self.events[name] or 0)+1 end
+function UnitName() return 'Hok', 'Mon' end
+function GetRealmName() return 'CAMWOW EU4 Realm 5 PvE' end
+guild='Guild'
 function GetGuildInfo() return guild end
-function GetRealmName() return 'Moon' end
-function GetServerTime() return 12345 end
+function GetServerTime() return 1700000000 end
 function GetTime() return 100 end
-function CreateFrame() return {RegisterEvent=function() end, SetScript=function(_, _, fn) login = fn end} end
-C_Timer = {NewTicker=function(_, fn) tick = fn end}
-local handlers = {}
-OldKraken.Communication = {handlers=handlers}
-function OldKraken.Communication:RegisterHandler(kind, fn) handlers[kind]=fn end
-sent = {}
-function OldKraken.Communication:SendProtocol(kind, payload) sent[#sent+1]={kind,payload}; return true end
-function OldKraken.Communication:RequestSync() sent[#sent+1]={'QUERY',''}; return true end
-cleared = 0
-function OldKraken.Communication:ClearProtocolState() cleared = cleared + 1 end
+function CreateFrame() return {RegisterEvent=function() end, SetScript=function(_,_,fn) login=fn end} end
+C_Timer={NewTicker=function(_,fn) tick=fn end}
+handlers={}; OldKraken.Communication={}
+function OldKraken.Communication:RegisterHandler(kind,fn) handlers[kind]=fn end
+function OldKraken.Communication:SendProtocol() return true end
+function OldKraken.Communication:RequestSync() return true end
+cleared=0
+function OldKraken.Communication:ClearProtocolState() cleared=cleared+1 end
 ''')
 for name in ['GroupFinder.lua', 'GroupFinderIntegration.lua']:
     lua.execute((root / name).read_text(encoding='utf-8'))
 lua.execute('''
+local f=OldKraken.GroupFinder
+-- Owned groups migrate; ambiguous short-name application data is discarded.
+local profile='CAMWOW EU4 Realm 5 PvE'..'\\001'..'Guild'..'\\001'..'Hok'
+local old=setmetatable({}, {__index=f}); old:Initialize('Hok', function() return true end)
+assert(old:Create('Old group','dungeon','',5))
+local oldGroup; for _,g in pairs(old.groups) do oldGroup=g end
+oldGroup.members={'Hok','Noxter','Hok Moon'}
+OldKraken.DB.groupFinder[profile]={records={old:EncodeGroup(oldGroup)},pending={legacy='pending'}}
 login()
-local f = OldKraken.GroupFinder
-assert(f.active and f:Create('Dungeon','dungeon','',5))
+assert(f.identity == 'Hok Mon')
+local migrated=f.groups['Hok Mon'..'\\001'..oldGroup.id]
+assert(migrated and migrated.members[1]=='Hok Mon' and #migrated.members == 2 and migrated.members[2] == 'Hok Moon')
+assert(migrated.revision == oldGroup.revision + 1)
+local forged=migrated.revision
+local forgedGroup={}
+for k,v in pairs(migrated) do forgedGroup[k]=v end
+forgedGroup.revision=forged+1
+handlers.UPDATE('Hok Moon','spoof',f:EncodeGroup(forgedGroup))
+assert(f.groups['Hok Mon'..'\\001'..oldGroup.id].revision == forged)
+assert(OldKraken.DB.groupFinder[profile].legacyShortNames == nil)
+assert(next(f.pending) == nil)
+local other=setmetatable({}, {__index=f}); other:Initialize('Noxter Moon',function() return true end)
+assert(other:Create('Remote group','quest','',5))
+local group; for _,g in pairs(other.groups) do group=g end
+local payload=other:EncodeGroup(group)
+handlers.ANNOUNCE('Noxter Forged','1',payload)
+assert(not f.groups['Noxter Moon'..'\\001'..group.id])
+handlers.ANNOUNCE('Noxter Moon','2',payload)
+assert(f.groups['Noxter Moon'..'\\001'..group.id])
+-- Two distinct characters with the same given name are not conflated.
+local twin=setmetatable({}, {__index=f}); twin:Initialize('Hok Moon',function() return true end)
+assert(twin:Create('Twin group','quest','',5))
+local twinGroup; for _,g in pairs(twin.groups) do twinGroup=g end
+handlers.ANNOUNCE('Hok Moon','3',twin:EncodeGroup(twinGroup))
+assert(f.groups['Hok Moon'..'\\001'..twinGroup.id])
+assert(f.groups['Hok Mon'..'\\001'..oldGroup.id])
 f:Changed()
-local saved = OldKraken.DB.groupFinder['Moon' .. '\\001' .. 'Guild' .. '\\001' .. 'Alice'].records
-assert(#saved == 1)
-tick()
-assert(sent[1][1] == 'ANNOUNCE' and sent[2][1] == 'QUERY')
-assert(sent[3][1] == 'SYNC')
-local g
-for _, value in pairs(f.groups) do g=value end
-local payload = f._pack({'Alice',g.id,'dps','apply','12345001'})
-OldKraken.Communication.handlers.JOIN('Bob Moon', 'id', payload)
-assert(f.requests[g.id].Bob == 'dps')
-local remote = setmetatable({}, {__index=f})
-remote:Initialize('Bob', function() return true end)
-assert(remote:Create('Remote group','quest','',5))
-local remoteGroup
-for _, value in pairs(remote.groups) do remoteGroup=value end
-OldKraken.Communication.handlers.ANNOUNCE('Bob Moon', 'remote-id', remote:EncodeGroup(remoteGroup))
-assert(f.groups['Bob\001' .. remoteGroup.id].title == 'Remote group')
-assert(OldKraken.events.GROUP_FINDER_CHANGED > 0)
-guild = 'Other'
-login()
-assert(cleared == 1 and f.active and next(f.groups) == nil)
-guild = 'Guild'
-login()
-assert(cleared == 2 and f.active)
-local restored
-for _, value in pairs(f.groups) do restored=value end
-assert(restored and restored.title == 'Dungeon' and f.requests[restored.id].Bob == 'dps')
-local stored = OldKraken.DB.groupFinder['Moon' .. '\\001' .. 'Guild' .. '\\001' .. 'Alice']
-stored.pending = {['OldOwner\\001oldid']='pending'}
-stored.pendingVersions, stored.pendingRoles = nil, nil
-guild = 'Other'; login(); guild = 'Guild'; login()
-assert(f.pending['OldOwner\\001oldid'] == 'retry')
+guild='Other'; login()
+assert(cleared==1 and f.active and next(f.groups)==nil)
+guild='Guild'; login()
+assert(cleared==2 and f.groups['Hok Mon'..'\\001'..oldGroup.id])
 ''')
 print('Integration checks passed')

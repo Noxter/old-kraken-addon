@@ -3,6 +3,7 @@ local finder = OldKraken.GroupFinder
 local comm = OldKraken.Communication
 local active, storage, nextQuery, nextBroadcast, nextRetry, lastQuery = false, nil, 0, 0, 0, -60
 local currentKey, tickerStarted = nil, false
+local diagnostics = { received = 0, accepted = 0, rejected = 0 }
 
 local function profileKey(name, guild)
     local realm = GetRealmName and GetRealmName() or ''
@@ -10,24 +11,19 @@ local function profileKey(name, guild)
     return realm .. '\001' .. guild .. '\001' .. name
 end
 
--- CHAT_MSG_ADDON sender may include the local realm ("Name Realm" or
--- "Name-Realm"), while UnitName("player") and group owners use "Name".
--- Only strip a suffix that exactly matches this client's realm.
+-- The Forever client returns given name and surname from UnitName; GUILD
+-- sender carries both separated by a space. Preserve the entire server sender.
 local function normalizeSender(sender)
     if type(sender) ~= 'string' or sender == '' or #sender > 128 then return nil end
-    if sender == finder.identity then return sender end
-    -- Some client builds provide only the character name.
-    if not sender:find('[ %-]') then return sender end
-    local realm = GetRealmName and GetRealmName() or ''
-    if type(realm) ~= 'string' or realm == '' then return nil end
-    for _, separator in ipairs({' ', '-'}) do
-        local suffix = separator .. realm
-        if #sender > #suffix and sender:sub(-#suffix) == suffix then
-            local name = sender:sub(1, #sender - #suffix)
-            if name ~= '' then return name end
-        end
-    end
-    return nil
+    return sender
+end
+
+local function playerIdentity()
+    if type(UnitName) ~= 'function' then return nil end
+    local name, surname = UnitName('player')
+    if type(name) ~= 'string' or name == '' then return nil end
+    if type(surname) == 'string' and surname ~= '' then return name .. ' ' .. surname, name end
+    return name, name
 end
 
 local function deactivate()
@@ -69,10 +65,16 @@ end
 
 local function receiveGroup(sender, _, payload)
     if not active then return end
+    diagnostics.received = diagnostics.received + 1
+    diagnostics.lastSender = sender
     local name = normalizeSender(sender)
+    diagnostics.lastNormalized = name
     if name and finder:ReceiveGroup(name, payload) then
+        diagnostics.accepted = diagnostics.accepted + 1
         saveOwned()
         OldKraken:Fire('GROUP_FINDER_CHANGED')
+    else
+        diagnostics.rejected = diagnostics.rejected + 1
     end
 end
 
@@ -105,11 +107,32 @@ function finder:Changed()
     OldKraken:Fire('GROUP_FINDER_CHANGED')
 end
 
+function finder:PrintSyncStatus()
+    local total = 0
+    for _ in pairs(self.groups or {}) do total = total + 1 end
+    local realm = GetRealmName and GetRealmName() or 'невідомо'
+    print('|cff2ec4b6Old Kraken|r: Group Finder: ' .. (active and 'активний' or 'не ініціалізований') ..
+        '; гравець: ' .. tostring(self.identity or '-') .. '; realm: ' .. tostring(realm) .. '; груп: ' .. total)
+    print('|cff2ec4b6Old Kraken|r: отримано оголошень: ' .. diagnostics.received ..
+        '; додано/оновлено: ' .. diagnostics.accepted .. '; не додано (включно з повторами): ' .. diagnostics.rejected)
+    print('|cff2ec4b6Old Kraken|r: останній sender: ' .. tostring(diagnostics.lastSender or '-') ..
+        '; після перевірки: ' .. tostring(diagnostics.lastNormalized or 'не визначено'))
+end
+
+function finder:RequestSyncNow()
+    if not active then print('|cffff5555Old Kraken|r: Group Finder не ініціалізований.'); return false end
+    if C_GuildInfo and type(C_GuildInfo.GuildRoster) == 'function' then pcall(C_GuildInfo.GuildRoster) end
+    if not comm:RequestSync() then print('|cffff5555Old Kraken|r: не вдалося додати запит синхронізації до черги.'); return false end
+    self:OnQuery()
+    print('|cff2ec4b6Old Kraken|r: запит синхронізації додано до черги.')
+    return true
+end
+
 local frame = CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
 frame:RegisterEvent('GUILD_ROSTER_UPDATE')
 frame:SetScript('OnEvent', function()
-    local name = UnitName and UnitName('player')
+    local identity, name = playerIdentity()
     local guild = GetGuildInfo and GetGuildInfo('player')
     if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == ''
         or not OldKraken.DB or type(OldKraken.DB.groupFinder) ~= 'table' then
@@ -122,9 +145,38 @@ frame:SetScript('OnEvent', function()
     deactivate()
     storage = OldKraken.DB.groupFinder[key]
     if type(storage) ~= 'table' then storage = {}; OldKraken.DB.groupFinder[key] = storage end
-    finder:Initialize(name, function(kind, payload) return comm:SendProtocol(kind, payload) end)
+    finder:Initialize(identity, function(kind, payload) return comm:SendProtocol(kind, payload) end)
+    -- Short-name requests and decisions cannot identify a unique character.
+    if identity ~= name and storage.identityFormat ~= 2 then
+        local migrated = {}
+        for _, record in ipairs(type(storage.records) == 'table' and storage.records or {}) do
+            local fields = finder._unpackFields(record, 212)
+            if fields and fields[2] == name and fields[13] == name then
+                fields[2], fields[13] = identity, identity
+                local cleaned, members = {}, 1
+                for i = 1, 13 do cleaned[i] = fields[i] end
+                for i = 14, #fields do
+                    -- Short-name members are ambiguous; only retain full names.
+                    if fields[i]:find(' ', 1, true) then
+                        members = members + 1
+                        cleaned[12 + members] = fields[i]
+                    end
+                end
+                cleaned[9] = tostring(members)
+                local revision = tonumber(cleaned[3])
+                if revision and revision < 2147483647 then
+                    cleaned[3] = tostring(revision + 1)
+                    migrated[#migrated + 1] = finder._pack(cleaned)
+                end
+            end
+        end
+        storage.records, storage.pending, storage.pendingVersions, storage.pendingRoles = migrated, {}, {}, {}
+        storage.requests, storage.requestVersions, storage.decisions = {}, {}, {}
+        storage.legacyShortNames = nil
+        storage.identityFormat = 2
+    end
     if type(storage.records) == 'table' then
-        for _, record in ipairs(storage.records) do finder:ReceiveGroup(name, record) end
+        for _, record in ipairs(storage.records) do finder:ReceiveGroup(identity, record) end
     end
     if type(storage.pending) == 'table' then
         local count = 0
@@ -151,7 +203,7 @@ frame:SetScript('OnEvent', function()
     end
     if type(storage.requests) == 'table' then
         for id, requests in pairs(storage.requests) do
-            if type(id) == 'string' and finder.groups[name .. '\001' .. id] and type(requests) == 'table' then
+            if type(id) == 'string' and finder.groups[identity .. '\001' .. id] and type(requests) == 'table' then
                 finder.requests[id] = {}
                 local count = 0
                 for applicant, role in pairs(requests) do
@@ -178,7 +230,7 @@ frame:SetScript('OnEvent', function()
     if type(storage.decisions) == 'table' then
         local count = 0
         for id, decisions in pairs(storage.decisions) do
-            if type(id) == 'string' and finder.groups[name .. '\001' .. id] and type(decisions) == 'table' then
+            if type(id) == 'string' and finder.groups[identity .. '\001' .. id] and type(decisions) == 'table' then
                 for applicant, version in pairs(decisions) do
                     if count >= 2000 then break end
                     if type(applicant) == 'string' and #applicant > 0 and #applicant <= 128
@@ -195,6 +247,7 @@ frame:SetScript('OnEvent', function()
     finder.active = true
     currentKey = key
     nextQuery, nextBroadcast, nextRetry, lastQuery = 0, 0, 0, -60
+    if C_GuildInfo and type(C_GuildInfo.GuildRoster) == 'function' then pcall(C_GuildInfo.GuildRoster) end
     if not tickerStarted and C_Timer and C_Timer.NewTicker then
         tickerStarted = true
         C_Timer.NewTicker(3, function()
