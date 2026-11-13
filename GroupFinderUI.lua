@@ -3,6 +3,7 @@ local Finder = OldKraken.GroupFinder
 local window, selected
 local tab = 'all'
 local offset, editing = 0, nil
+local requestOffset = 0
 local category, role = 'dungeon', ''
 local filterCategory, filterRole, filterFree = 'all', '', false
 local categories = {'dungeon', 'quest', 'world', 'raid', 'pvp', 'other'}
@@ -67,16 +68,36 @@ local function refresh()
     end
     local g = selected and Finder.groups[selected]
     if g then
-        local applicants = {}
-        for name, applicantRole in pairs(Finder.requests[g.id] or {}) do
-            applicants[#applicants + 1] = name .. ' (' .. (roleLabels[applicantRole] or applicantRole) .. ')'
-        end
         local applicationStatus = Finder.pending[selected]
         window.details:SetText(string.format('%s — %s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСклад: %s\nСтатус: %s%s',
             g.title, categoryLabels[g.category], g.owner, g.minLevel, g.maxLevel, roleLabels[g.role],
-            g.description .. '\nЗаявки: ' .. table.concat(applicants, ', '), table.concat(g.members, ', '), g.closed and 'Закрито' or 'Відкрито',
+            g.description, table.concat(g.members, ', '), g.closed and 'Закрито' or 'Відкрито',
             applicationStatus and (' | Заявка: ' .. (pendingLabels[applicationStatus] or applicationStatus)) or ''))
     else window.details:SetText('Виберіть оголошення у списку.') end
+    local canManage = g and g.owner == Finder.identity and not g.closed
+    local applicants = {}
+    if canManage then
+        for name, applicantRole in pairs(Finder.requests[g.id] or {}) do
+            applicants[#applicants + 1] = { name=name, role=applicantRole }
+        end
+        table.sort(applicants, function(a, b) return a.name < b.name end)
+    end
+    if requestOffset >= #applicants then requestOffset = math.max(0, math.floor((#applicants - 1) / 4) * 4) end
+    window.requestTitle:SetText(#applicants == 0 and 'Заявок немає' or ('Заявки: ' .. #applicants))
+    if canManage then window.requestTitle:Show() else window.requestTitle:Hide() end
+    for i, row in ipairs(window.requestRows) do
+        local applicant = applicants[requestOffset + i]
+        row.applicant = applicant
+        if canManage and applicant then
+            row.name:SetText(applicant.name .. ' (' .. (roleLabels[applicant.role] or applicant.role) .. ')')
+            row.name:Show(); row.accept:Show(); row.reject:Show()
+        else
+            row.name:Hide(); row.accept:Hide(); row.reject:Hide()
+        end
+    end
+    if canManage and #applicants > 4 then window.requestPrev:Show(); window.requestNext:Show()
+    else window.requestPrev:Hide(); window.requestNext:Hide() end
+    window.requestCount = #applicants
     for _, box in ipairs(window.createFields) do
         if tab == 'create' then box:Show(); box.label:Show() else box:Hide(); box.label:Hide() end
     end
@@ -90,14 +111,14 @@ local function createWindow()
     f:SetClampedToScreen(true); f:Hide()
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
-        button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; editing=nil; offset=0; refresh() end)
+        button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; editing=nil; offset=0; requestOffset=0; refresh() end)
     end
     f.rows, f.deleteButtons = {}, {}
     for i=1,10 do
         local index = i
         f.rows[i] = button(f, '', 18, -65-(i-1)*25, 490, function()
             local entry = f.visible and f.visible[index + offset]
-            if entry then selected=entry.key; refresh() end
+            if entry then if selected ~= entry.key then requestOffset=0 end; selected=entry.key; refresh() end
         end)
         local remove = CreateFrame('Button', nil, f)
         remove:SetSize(24, 23)
@@ -134,7 +155,32 @@ local function createWindow()
     button(f, '‹', 18, -318, 50, function() offset=math.max(0, offset-10); refresh() end)
     button(f, '›', 75, -318, 50, function() if f.visible and offset+10 < #f.visible then offset=offset+10 end; refresh() end)
     f.details = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.details:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.details:SetWidth(320); f.details:SetJustifyH('LEFT')
+    f.details:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.details:SetWidth(320); f.details:SetHeight(86); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.requestTitle = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    f.requestTitle:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -165)
+    f.requestRows = {}
+    for i=1,4 do
+        local row = {}
+        local y = -184 - (i-1)*25
+        row.name = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        row.name:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, y); row.name:SetWidth(140); row.name:SetHeight(22)
+        row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
+        local function decide(accept)
+            local group = selected and Finder.groups[selected]
+            local applicant = row.applicant
+            if not group or group.owner ~= Finder.identity or group.closed or not applicant
+                or not Finder.requests[group.id] or Finder.requests[group.id][applicant.name] == nil then return end
+            if Finder:Decide(group.id, applicant.name, accept) then Finder:Changed(); refresh()
+            else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
+        end
+        row.accept = button(f, 'Прийняти', 695, y, 85, function() decide(true) end)
+        row.reject = button(f, 'Відхилити', 785, y, 85, function() decide(false) end)
+        row.name:Hide(); row.accept:Hide(); row.reject:Hide()
+        f.requestRows[i] = row
+    end
+    f.requestPrev = button(f, '‹', 695, -286, 50, function() requestOffset=math.max(0, requestOffset-4); refresh() end)
+    f.requestNext = button(f, '›', 755, -286, 50, function() if requestOffset+4 < (f.requestCount or 0) then requestOffset=requestOffset+4 end; refresh() end)
+    f.requestTitle:Hide(); f.requestPrev:Hide(); f.requestNext:Hide()
     f.levelFilter = input(f, 'Фільтр рівня', 20, -465, 80, '')
     f.levelFilter:SetScript('OnTextChanged', refresh)
     button(f, 'Категорія: усі', 120, -485, 155, function(self)
@@ -193,15 +239,7 @@ local function createWindow()
         f.maxBox:SetText(tostring(g.maxSize)); f.minBox:SetText(tostring(g.minLevel)); f.maxLevelBox:SetText(tostring(g.maxLevel))
         f.categoryButton:SetText(categoryLabels[category]); refresh()
     end)
-    f.applicantBox = input(f, 'Ім’я заявника / учасника', 550, -445, 200, '')
-    button(f, 'Прийняти', 550, -500, 95, function()
-        local g=selected and Finder.groups[selected]
-        if g and g.owner==Finder.identity and Finder:Decide(g.id, f.applicantBox:GetText(), true) then Finder:Changed(); refresh() end
-    end)
-    button(f, 'Відхилити', 650, -500, 95, function()
-        local g=selected and Finder.groups[selected]
-        if g and g.owner==Finder.identity and Finder:Decide(g.id, f.applicantBox:GetText(), false) then Finder:Changed(); refresh() end
-    end)
+    f.applicantBox = input(f, 'Ім’я учасника', 550, -445, 200, '')
     button(f, 'Видалити учасника', 750, -500, 125, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:RemoveMember(g.id, f.applicantBox:GetText()) then Finder:Changed(); refresh() end
