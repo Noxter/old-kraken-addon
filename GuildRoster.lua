@@ -4,10 +4,56 @@ local Roster = {}
 OldKraken.GuildRoster = Roster
 
 local ROW_HEIGHT = 22
-local VISIBLE_ROWS = 16
+local CONTENT_WIDTH = 840
 local rosterFrame
 local rowFrames = {}
 local rosterData = {}
+local filteredData = {}
+
+local CLASS_ORDER = {
+    "DRUID", "HUNTER", "MAGE", "PALADIN", "PRIEST",
+    "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
+}
+
+local STATUS_LABELS = {
+    all = "Усі",
+    online = "Онлайн",
+    offline = "Офлайн",
+}
+
+local SORT_LABELS = {
+    name = "Ім'я",
+    level = "Рівень",
+    class = "Клас",
+    rank = "Ранг",
+}
+
+local settings
+
+local function GetSettings()
+    OldKrakenDB = OldKrakenDB or {}
+    OldKrakenDB.settings = OldKrakenDB.settings or {}
+    OldKrakenDB.settings.roster = OldKrakenDB.settings.roster or {}
+    settings = OldKrakenDB.settings.roster
+
+    if settings.status ~= "online" and settings.status ~= "offline" then
+        settings.status = "all"
+    end
+    if settings.sort ~= "name" and settings.sort ~= "class" and settings.sort ~= "rank" then
+        settings.sort = "level"
+    end
+    if settings.ascending == nil then
+        settings.ascending = true
+    end
+    if not settings.class then
+        settings.class = "ALL"
+    end
+    if settings.search == nil then
+        settings.search = ""
+    end
+
+    return settings
+end
 
 local function SafeText(value, fallback)
     if value == nil or value == "" then
@@ -16,13 +62,104 @@ local function SafeText(value, fallback)
     return tostring(value)
 end
 
+local function ClassLabel(classToken)
+    if not classToken or classToken == "" then
+        return "Усі класи"
+    end
+
+    for _, member in ipairs(rosterData) do
+        if member.classFile == classToken and member.class then
+            return member.class
+        end
+    end
+
+    return classToken
+end
+
+local function UpdateFilterButtonLabels()
+    if not rosterFrame then
+        return
+    end
+
+    rosterFrame.statusButton:SetText("Статус: " .. (STATUS_LABELS[settings.status] or "Усі"))
+    rosterFrame.classButton:SetText("Клас: " .. (settings.class == "ALL" and "Усі" or ClassLabel(settings.class)))
+end
+
+local function MatchesFilters(member)
+    local query = string.lower(settings.search or "")
+    if query ~= "" and not string.find(string.lower(member.name or ""), query, 1, true) then
+        return false
+    end
+
+    if settings.status == "online" and not member.isOnline then
+        return false
+    elseif settings.status == "offline" and member.isOnline then
+        return false
+    end
+
+    if settings.class ~= "ALL" and member.classFile ~= settings.class then
+        return false
+    end
+
+    return true
+end
+
+local function SortMembers(a, b)
+    if a.isOnline ~= b.isOnline then
+        return a.isOnline
+    end
+
+    local key = settings.sort
+    local left, right
+
+    if key == "name" then
+        left = string.lower(a.name or "")
+        right = string.lower(b.name or "")
+    elseif key == "class" then
+        left = a.class or a.classFile or ""
+        right = b.class or b.classFile or ""
+    elseif key == "rank" then
+        left = tonumber(a.rankIndex) or 0
+        right = tonumber(b.rankIndex) or 0
+    else
+        left = tonumber(a.level) or 0
+        right = tonumber(b.level) or 0
+    end
+
+    if left == right then
+        return string.lower(a.name or "") < string.lower(b.name or "")
+    end
+
+    if settings.ascending then
+        return left < right
+    end
+    return left > right
+end
+
+local function CreateColumnHeader(parent, label, key, x, width)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width, 22)
+    button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -105)
+    button:SetText(label)
+    button:SetScript("OnClick", function()
+        if settings.sort == key then
+            settings.ascending = not settings.ascending
+        else
+            settings.sort = key
+            settings.ascending = true
+        end
+        Roster:Render()
+    end)
+    return button
+end
+
 local function CreateRosterWindow()
     if rosterFrame then
         return rosterFrame
     end
 
     local frame = CreateFrame("Frame", "OldKrakenRosterFrame", UIParent, "BasicFrameTemplateWithInset")
-    frame:SetSize(720, 470)
+    frame:SetSize(900, 590)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -37,29 +174,82 @@ local function CreateRosterWindow()
     end
 
     local refreshButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    refreshButton:SetSize(100, 24)
+    refreshButton:SetSize(92, 24)
     refreshButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -38, -30)
     refreshButton:SetText("Оновити")
     refreshButton:SetScript("OnClick", function()
         Roster:RequestUpdate()
     end)
 
+    local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
+    searchBox:SetSize(190, 24)
+    searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -38)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetTextInsets(6, 6, 0, 0)
+    searchBox:SetText(settings.search or "")
+    searchBox:SetScript("OnTextChanged", function(self)
+        settings.search = self:GetText() or ""
+        Roster:Render()
+    end)
+    frame.searchBox = searchBox
+
+    local statusButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    statusButton:SetSize(125, 24)
+    statusButton:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
+    statusButton:SetScript("OnClick", function()
+        if settings.status == "all" then
+            settings.status = "online"
+        elseif settings.status == "online" then
+            settings.status = "offline"
+        else
+            settings.status = "all"
+        end
+        Roster:Render()
+    end)
+    frame.statusButton = statusButton
+
+    local classButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    classButton:SetSize(155, 24)
+    classButton:SetPoint("LEFT", statusButton, "RIGHT", 8, 0)
+    classButton:SetScript("OnClick", function()
+        local currentIndex = 0
+        for index, classToken in ipairs(CLASS_ORDER) do
+            if classToken == settings.class then
+                currentIndex = index
+                break
+            end
+        end
+
+        if settings.class == "ALL" then
+            settings.class = CLASS_ORDER[1]
+        elseif currentIndex >= #CLASS_ORDER then
+            settings.class = "ALL"
+        else
+            settings.class = CLASS_ORDER[currentIndex + 1]
+        end
+        Roster:Render()
+    end)
+    frame.classButton = classButton
+
     local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -38)
+    summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -72)
     summary:SetJustifyH("LEFT")
     frame.summaryText = summary
 
-    local header = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    header:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -67)
-    header:SetText("ІМ'Я                         РАНГ                 РІВ.    КЛАС             ЛОКАЦІЯ                         СТАТУС")
+    CreateColumnHeader(frame, "ІМ'Я", "name", 18, 190)
+    CreateColumnHeader(frame, "РАНГ", "rank", 210, 150)
+    CreateColumnHeader(frame, "РІВ.", "level", 366, 52)
+    CreateColumnHeader(frame, "КЛАС", "class", 422, 112)
+    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 538, 220)
+    CreateColumnHeader(frame, "СТАТУС", "status", 764, 100)
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -88)
+    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -132)
     scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 14)
     scroll:EnableMouseWheel(true)
 
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(660, 1)
+    content:SetSize(CONTENT_WIDTH, 1)
     scroll:SetScrollChild(content)
 
     scroll:SetScript("OnMouseWheel", function(self, delta)
@@ -73,58 +263,117 @@ local function CreateRosterWindow()
     frame.contentFrame = content
     rosterFrame = frame
 
+    UpdateFilterButtonLabels()
     return frame
 end
 
 local function CreateRow(index, parent)
-    local row = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row:SetJustifyH("LEFT")
-    row:SetWordWrap(false)
-    row:SetHeight(ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -((index - 1) * ROW_HEIGHT))
-    row:SetWidth(650)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(CONTENT_WIDTH, ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
+
+    local columns = {
+        { x = 6, width = 190 },
+        { x = 198, width = 150 },
+        { x = 354, width = 52 },
+        { x = 410, width = 112 },
+        { x = 526, width = 220 },
+        { x = 752, width = 82 },
+    }
+
+    row.cells = {}
+    for cellIndex, column in ipairs(columns) do
+        local cell = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cell:SetPoint("LEFT", row, "LEFT", column.x, 0)
+        cell:SetWidth(column.width)
+        cell:SetHeight(ROW_HEIGHT)
+        cell:SetJustifyH("LEFT")
+        cell:SetWordWrap(false)
+        row.cells[cellIndex] = cell
+    end
+
     rowFrames[index] = row
     return row
 end
 
-local function RenderRoster()
-    local frame = CreateRosterWindow()
-    local content = frame.contentFrame
+local function UpdateSummary()
     local total = #rosterData
     local online = 0
-
     for _, member in ipairs(rosterData) do
         if member.isOnline then
             online = online + 1
         end
     end
 
-    frame.summaryText:SetText(string.format("Учасників: %d | Онлайн: %d", total, online))
-    content:SetHeight(math.max(1, total * ROW_HEIGHT))
+    local visibleOnline = 0
+    for _, member in ipairs(filteredData) do
+        if member.isOnline then
+            visibleOnline = visibleOnline + 1
+        end
+    end
 
-    for index, member in ipairs(rosterData) do
+    rosterFrame.summaryText:SetText(string.format(
+        "Учасників: %d | Онлайн: %d | Показано: %d (онлайн: %d)",
+        total, online, #filteredData, visibleOnline
+    ))
+end
+
+function Roster:Render()
+    if not rosterFrame then
+        CreateRosterWindow()
+    end
+
+    filteredData = {}
+    for _, member in ipairs(rosterData) do
+        if MatchesFilters(member) then
+            filteredData[#filteredData + 1] = member
+        end
+    end
+    table.sort(filteredData, SortMembers)
+
+    UpdateSummary()
+    UpdateFilterButtonLabels()
+
+    local content = rosterFrame.contentFrame
+    content:SetHeight(math.max(1, #filteredData * ROW_HEIGHT))
+
+    for index, member in ipairs(filteredData) do
         local row = rowFrames[index] or CreateRow(index, content)
-        local name = SafeText(member.name)
-        local rank = SafeText(member.rank)
-        local level = SafeText(member.level)
-        local class = SafeText(member.class)
-        local zone = SafeText(member.zone)
-        local status = member.isOnline and "Онлайн" or "Офлайн"
+        local cells = row.cells
 
-        row:SetText(string.format("%-22s %-20s %3s   %-15s %-28s %s",
-            name, rank, level, class, zone, status))
+        cells[1]:SetText(SafeText(member.name))
+        cells[2]:SetText(SafeText(member.rank))
+        cells[3]:SetText(SafeText(member.level))
+        cells[4]:SetText(SafeText(member.class))
+        cells[5]:SetText(SafeText(member.zone))
+        cells[6]:SetText(member.isOnline and "Онлайн" or "Офлайн")
+
+        local classColor = member.classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.classFile]
+        if classColor then
+            cells[1]:SetTextColor(classColor.r, classColor.g, classColor.b)
+            cells[4]:SetTextColor(classColor.r, classColor.g, classColor.b)
+        else
+            cells[1]:SetTextColor(1, 1, 1)
+            cells[4]:SetTextColor(1, 1, 1)
+        end
+
+        if member.isOnline then
+            cells[6]:SetTextColor(0.25, 1, 0.25)
+        else
+            cells[6]:SetTextColor(0.55, 0.55, 0.55)
+        end
+
         row:Show()
     end
 
-    for index = total + 1, #rowFrames do
+    for index = #filteredData + 1, #rowFrames do
         rowFrames[index]:Hide()
     end
 end
 
 function Roster:Load()
-    local total, online = GetNumGuildMembers()
+    local total = GetNumGuildMembers()
     total = tonumber(total) or 0
-    online = tonumber(online) or 0
 
     rosterData = {}
 
@@ -136,17 +385,18 @@ function Roster:Load()
             rosterData[#rosterData + 1] = {
                 name = name,
                 rank = rankName,
-                rankIndex = rankIndex,
-                level = level,
+                rankIndex = tonumber(rankIndex) or 0,
+                level = tonumber(level) or 0,
                 class = className or classFileName,
+                classFile = classFileName,
                 zone = zone,
                 isOnline = isOnline == true,
             }
         end
     end
 
-    RenderRoster()
-    return total, online
+    self:Render()
+    return #rosterData
 end
 
 function Roster:RequestUpdate()
@@ -189,3 +439,5 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         Roster:Show()
     end
 end
+
+GetSettings()
