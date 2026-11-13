@@ -67,23 +67,48 @@ local function saveOwned()
     end
 end
 
-local function receiveGroup(sender, _, payload)
+function finder:GroupAlertsEnabled()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    return type(settings) == 'table' and settings.groupFinderNotifications ~= false
+end
+
+function finder:SetGroupAlertsEnabled(enabled)
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    if type(settings) ~= 'table' then return false end
+    settings.groupFinderNotifications = enabled and true or false
+    OldKraken:Fire('GROUP_FINDER_ALERT_SETTING')
+    return true
+end
+
+local function receiveGroup(kind, sender, _, payload)
     if not active then return end
     diagnostics.received = diagnostics.received + 1
     diagnostics.lastSender = sender
     local name = normalizeSender(sender)
     diagnostics.lastNormalized = name
+    local fields = kind == 'ANNOUNCE' and finder._unpackFields(payload, 212) or nil
+    local key = fields and fields[1] and fields[2] and (fields[2] .. '\001' .. fields[1]) or nil
+    local isNew = key and not finder.groups[key]
     if name and finder:ReceiveGroup(name, payload) then
         diagnostics.accepted = diagnostics.accepted + 1
         saveOwned()
         OldKraken:Fire('GROUP_FINDER_CHANGED')
+        if kind == 'ANNOUNCE' and isNew and name ~= finder.identity and finder:GroupAlertsEnabled() then
+            local group = finder.groups[key]
+            local created = group and tonumber(group.id:match('^(%d+)%-'))
+            local age = created and (GetServerTime() - created)
+            if group and not group.closed and group.revision == 1 and age and age >= 0 and age <= 60 then
+                OldKraken:Fire('GROUP_FINDER_NEW', group)
+            end
+        end
     else
         diagnostics.rejected = diagnostics.rejected + 1
     end
 end
 
 for _, kind in ipairs({'ANNOUNCE', 'UPDATE', 'SYNC', 'CANCEL'}) do
-    comm:RegisterHandler(kind, receiveGroup)
+    local messageKind = kind
+    comm:RegisterHandler(kind, function(sender, id, payload) receiveGroup(messageKind, sender, id, payload) end)
 end
 comm:RegisterHandler('JOIN', function(sender, _, payload)
     local name = active and normalizeSender(sender)

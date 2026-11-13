@@ -1,6 +1,7 @@
 -- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
 local window, selected
+local groupAlert
 local tab = 'all'
 local offset, editing = 0, nil
 local requestOffset = 0
@@ -37,6 +38,7 @@ end
 
 local function refresh()
     if not window or not window:IsShown() then return end
+    window.alertButton:SetText(Finder:GroupAlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local lines = {}
     for key, group in pairs(Finder.groups or {}) do
         local level = tonumber(window.levelFilter:GetText())
@@ -113,6 +115,10 @@ local function createWindow()
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
         button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; editing=nil; offset=0; requestOffset=0; refresh() end)
     end
+    f.alertButton = button(f, 'Сповіщення', 700, -32, 175, function()
+        if Finder:SetGroupAlertsEnabled(not Finder:GroupAlertsEnabled()) then refresh()
+        else print('Old Kraken: не вдалося зберегти налаштування сповіщень.') end
+    end)
     f.rows, f.deleteButtons = {}, {}
     for i=1,10 do
         local index = i
@@ -253,3 +259,32 @@ function Finder:Show()
     window:Show(); refresh()
 end
 OldKraken:On('GROUP_FINDER_CHANGED', refresh)
+OldKraken:On('GROUP_FINDER_ALERT_SETTING', function()
+    if groupAlert and not Finder:GroupAlertsEnabled() then groupAlert:Hide() end
+    refresh()
+end)
+
+OldKraken:On('GROUP_FINDER_NEW', function(group)
+    if not Finder:GroupAlertsEnabled() then return end
+    local free = math.max(0, group.maxSize - #group.members)
+    local message = group.owner .. ' шукає групу: ' .. group.title ..
+        ' | рівень ' .. group.minLevel .. '–' .. group.maxLevel .. ' | місць: ' .. free
+    print('|cff2ec4b6Old Kraken|r: ' .. message .. '. /okr group')
+    if not groupAlert then
+        groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
+        groupAlert:SetSize(500, 48)
+        groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
+        groupAlert:SetFrameStrata('DIALOG')
+        groupAlert:SetScript('OnClick', function(self) self:Hide(); Finder:Show() end)
+        groupAlert:SetScript('OnUpdate', function(self, elapsed)
+            self.remaining = (self.remaining or 0) - elapsed
+            if self.remaining <= 0 then self:Hide() end
+        end)
+    end
+    groupAlert:SetText(message .. '\nНатисніть, щоб відкрити пошук груп')
+    groupAlert.remaining = 10
+    groupAlert:Show()
+    if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK then
+        pcall(PlaySound, SOUNDKIT.READY_CHECK)
+    end
+end)
