@@ -137,6 +137,16 @@ local function SortMembers(a, b)
 end
 
 local function CreateColumnHeader(parent, label, key, x, width)
+    if not key then
+        local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        header:SetPoint("LEFT", parent, "TOPLEFT", x + 6, -116)
+        header:SetWidth(width - 8)
+        header:SetHeight(22)
+        header:SetJustifyH("LEFT")
+        header:SetText(label)
+        return header
+    end
+
     local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     button:SetSize(width, 22)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -105)
@@ -240,8 +250,8 @@ local function CreateRosterWindow()
     CreateColumnHeader(frame, "РАНГ", "rank", 210, 150)
     CreateColumnHeader(frame, "РІВ.", "level", 366, 52)
     CreateColumnHeader(frame, "КЛАС", "class", 422, 112)
-    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 538, 220)
-    CreateColumnHeader(frame, "СТАТУС", "status", 764, 100)
+    CreateColumnHeader(frame, "ЛОКАЦІЯ", nil, 538, 220)
+    CreateColumnHeader(frame, "СТАТУС", nil, 764, 100)
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -132)
