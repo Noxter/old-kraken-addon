@@ -176,7 +176,20 @@ local function createWindow()
             local applicant = row.applicant
             if not group or group.owner ~= Finder.identity or group.closed or not applicant
                 or not Finder.requests[group.id] or Finder.requests[group.id][applicant.name] == nil then return end
-            if Finder:Decide(group.id, applicant.name, accept) then Finder:Changed(); refresh()
+            if Finder:Decide(group.id, applicant.name, accept) then
+                Finder:Changed(); refresh()
+                if accept then
+                    if C_PartyInfo and type(C_PartyInfo.InviteUnit) == 'function' then
+                        local ok, result = pcall(C_PartyInfo.InviteUnit, applicant.name)
+                        if ok and result ~= false then
+                            print('|cff2ec4b6Old Kraken|r: Спроба запросити ' .. applicant.name .. ' у паті. Перевірте повідомлення гри.')
+                        else
+                            print('|cffff5555Old Kraken|r: Заявку прийнято, але запросити ' .. applicant.name .. ' не вдалося. Запросіть гравця вручну.')
+                        end
+                    else
+                        print('|cffff5555Old Kraken|r: Заявку прийнято, але API запрошення недоступний. Запросіть ' .. applicant.name .. ' вручну.')
+                    end
+                end
             else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
         end
         row.accept = button(f, 'Прийняти', 695, y, 85, function() decide(true) end)
