@@ -455,6 +455,11 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
+    if command == 'group' or command == 'groups' then
+        if OldKraken.GroupFinder then OldKraken.GroupFinder:Show() end
+        return
+    end
+
     if command == "refresh" then
         Roster:RequestUpdate()
     else

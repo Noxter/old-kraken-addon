@@ -74,12 +74,25 @@ function Communication:SendProtocol(kind, payload)
         if #message > 240 then return false, "message too long" end
         messages[part] = message
     end
-    for _, message in ipairs(messages) do self:QueueMessage(message) end
+    local originalCount = #self.queue
+    for _, message in ipairs(messages) do
+        if not self:QueueMessage(message) then
+            while #self.queue > originalCount do table.remove(self.queue) end
+            return false, "transport unavailable"
+        end
+    end
     return true, id
 end
 
 function Communication:RequestSync()
     return self:SendProtocol("QUERY", "")
+end
+
+function Communication:ClearProtocolState()
+    for i = #self.queue, 1, -1 do
+        if self.queue[i].message:sub(1, 4) == 'GF2^' then table.remove(self.queue, i) end
+    end
+    assemblies, completed = {}, {}
 end
 
 local function PlayerName()
@@ -145,7 +158,12 @@ function Communication:QueueMessage(message)
         return false
     end
 
-    self.queue[#self.queue + 1] = { message = message, attempts = 0 }
+    local guild
+    if message:sub(1, 4) == 'GF2^' then
+        guild = GetGuildInfo and GetGuildInfo('player')
+        if type(guild) ~= 'string' or guild == '' then return false end
+    end
+    self.queue[#self.queue + 1] = { message = message, attempts = 0, guild = guild }
     return true
 end
 
@@ -156,6 +174,12 @@ function Communication:Pump()
     end
 
     if not IsInGuild or not IsInGuild() then
+        return
+    end
+
+    if entry.guild and (not GetGuildInfo or GetGuildInfo('player') ~= entry.guild) then
+        table.remove(self.queue, 1)
+        self.stats.dropped = self.stats.dropped + 1
         return
     end
 
@@ -231,7 +255,7 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
         return
     end
 
-    if not sender or sender == "" then
+    if type(sender) ~= "string" or sender == "" or #sender > 128 then
         return
     end
 
@@ -278,14 +302,18 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
             for k, v in pairs(completed) do if not oldestTime or v < oldestTime then oldestKey, oldestTime = k, v end end
             completed[oldestKey] = nil
         end
-        completed[key] = now
         payload = table.concat(item.parts)
-        self.stats.received = self.stats.received + 1
         local handler = self.handlers[kind]
         if handler then
             local ok, err = pcall(handler, sender, id, payload)
-            if not ok then Print("Помилка обробника протоколу: " .. tostring(err)) end
+            if not ok then
+                self.stats.invalid = self.stats.invalid + 1
+                Print("Помилка обробника протоколу: " .. tostring(err))
+                return
+            end
         end
+        completed[key] = now
+        self.stats.received = self.stats.received + 1
         return
     end
 
@@ -356,4 +384,3 @@ frame:SetScript("OnEvent", function(_, event, ...)
         Communication:OnAddonMessage(...)
     end
 end)
-

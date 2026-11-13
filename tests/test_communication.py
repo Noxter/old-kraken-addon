@@ -9,8 +9,10 @@ function print(...) end
 function CreateFrame() return {RegisterEvent=function() end, SetScript=function() end} end
 function UnitName() return 'Tester' end
 function IsInGuild() return true end
+function GetGuildInfo() return 'Guild' end
 function GetServerTime() return 1234567890 end
-function GetTime() return 100 end
+now = 100
+function GetTime() return now end
 function strsplit(delimiter, s)
   return s:match('^([^%^]*)%^([^%^]*)%^([^%^]*)%^([^%^]*)$')
 end
@@ -46,8 +48,8 @@ assert(messages[#messages]:match('^TEST%^'))
 c:OnAddonMessage(c.PREFIX, 'TEST^id^Other^Other', 'GUILD', 'Other')
 c:Pump()
 assert(messages[#messages]:match('^ACK%^id%^Other%^Tester$'))
-local calls = 0
-assert(c:RegisterHandler('SYNC', function(sender, id, payload) calls = calls + 1; assert(payload == string.rep('ж', 100)) end))
+local calls, actual = 0, nil
+assert(c:RegisterHandler('SYNC', function(sender, id, payload) calls = calls + 1; actual = payload end))
 assert(c:SendProtocol('SYNC', string.rep('ж', 100)))
 local parts = {}
 for i, entry in ipairs(c.queue) do parts[i] = entry.message end
@@ -57,10 +59,30 @@ c:OnAddonMessage(c.PREFIX, parts[1], 'GUILD', 'Other')
 c:OnAddonMessage(c.PREFIX, parts[1], 'GUILD', 'Other')
 assert(calls == 0)
 c:OnAddonMessage(c.PREFIX, parts[2], 'GUILD', 'Other')
-assert(calls == 1)
+assert(calls == 1 and actual == string.rep('ж', 100))
 c:OnAddonMessage(c.PREFIX, parts[2], 'GUILD', 'Other')
 assert(calls == 1)
 assert(c:RequestSync())
+-- A missing part must not deliver; an expired assembly cannot be completed
+-- by a delayed fragment from that assembly.
+local received = c.stats.received
+local fresh = c:SendProtocol('SYNC', string.rep('x', 81))
+assert(fresh)
+local first, second = c.queue[#c.queue - 1].message, c.queue[#c.queue].message
+c:OnAddonMessage(c.PREFIX, first, 'GUILD', 'Late')
+now = now + 121
+c:OnAddonMessage(c.PREFIX, second, 'GUILD', 'Late')
+assert(c.stats.received == received)
+-- Atomic enqueue: insufficient space must not leave partial messages.
+while #c.queue < 49 do assert(c:QueueMessage('test')) end
+local queued = #c.queue
+assert(not c:SendProtocol('SYNC', string.rep('x', 81)))
+assert(#c.queue == queued)
+local before = c.stats.invalid
+assert(c:RegisterHandler('UPDATE', function() error('broken handler') end))
+c:OnAddonMessage(c.PREFIX, 'GF2^UPDATE^1-2-3^1^1^41', 'GUILD', 'Other')
+assert(c.stats.invalid == before + 1)
+c:OnAddonMessage(c.PREFIX, 'GF2^UPDATE^1-2-3^1^1^41', 'GUILD', 'Other')
+assert(c.stats.invalid == before + 2)
 ''')
 print('Communication checks passed')
-

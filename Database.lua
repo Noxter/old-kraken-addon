@@ -3,7 +3,7 @@ OldKraken = OldKraken or {}
 local Database = {}
 OldKraken.Database = Database
 
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 
 local function EnsureTable(parent, key)
     if type(parent[key]) ~= "table" then
@@ -77,12 +77,22 @@ function Database.Initialize()
     local db = OldKrakenDB
     local schemaVersion = tonumber(db.schemaVersion) or 0
 
+    if schemaVersion > SCHEMA_VERSION then
+        OldKraken.DB = db
+        return db
+    end
+
     -- Schema migrations must preserve existing SavedVariables wherever possible.
     if schemaVersion < 1 then
         EnsureTable(db, "settings")
         EnsureTable(db, "roster")
         EnsureTable(db, "events")
         db.schemaVersion = 1
+    end
+
+    if schemaVersion < 2 then
+        EnsureTable(db, "groupFinder")
+        db.schemaVersion = 2
     end
 
     EnsureTable(db, "settings")
