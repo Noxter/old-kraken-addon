@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.3.3"
+OldKraken.version = "0.4.0-alpha.1"
 OldKraken._listeners = OldKraken._listeners or {}
 
 function OldKraken:On(eventName, callback)
