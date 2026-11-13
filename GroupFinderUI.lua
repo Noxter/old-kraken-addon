@@ -36,6 +36,19 @@ local function input(parent, label, x, y, width, initial)
     return box
 end
 
+local function invitePlayer(name)
+    if not C_PartyInfo or type(C_PartyInfo.InviteUnit) ~= 'function' then
+        print('|cffff5555Old Kraken|r: API запрошення недоступний. Запросіть ' .. name .. ' вручну.')
+        return
+    end
+    local ok, result = pcall(C_PartyInfo.InviteUnit, name)
+    if ok and result ~= false then
+        print('|cff2ec4b6Old Kraken|r: Спроба запросити ' .. name .. ' у паті. Перевірте повідомлення гри.')
+    else
+        print('|cffff5555Old Kraken|r: Не вдалося запросити ' .. name .. '. Запросіть гравця вручну.')
+    end
+end
+
 local function refresh()
     if not window or not window:IsShown() then return end
     window.alertButton:SetText(Finder:GroupAlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
@@ -84,6 +97,7 @@ local function refresh()
     else window.details:SetText('Виберіть оголошення у списку.') end
     window.detailsContent:SetHeight(math.max(86, window.details:GetStringHeight() + 4))
     local canManage = g and g.owner == Finder.identity and not g.closed
+    if canManage then window.reinviteButton:Show() else window.reinviteButton:Hide() end
     local applicants = {}
     if canManage then
         for name, applicantRole in pairs(Finder.requests[g.id] or {}) do
@@ -189,18 +203,7 @@ local function createWindow()
                 or not Finder.requests[group.id] or Finder.requests[group.id][applicant.name] == nil then return end
             if Finder:Decide(group.id, applicant.name, accept) then
                 Finder:Changed(); refresh()
-                if accept then
-                    if C_PartyInfo and type(C_PartyInfo.InviteUnit) == 'function' then
-                        local ok, result = pcall(C_PartyInfo.InviteUnit, applicant.name)
-                        if ok and result ~= false then
-                            print('|cff2ec4b6Old Kraken|r: Спроба запросити ' .. applicant.name .. ' у паті. Перевірте повідомлення гри.')
-                        else
-                            print('|cffff5555Old Kraken|r: Заявку прийнято, але запросити ' .. applicant.name .. ' не вдалося. Запросіть гравця вручну.')
-                        end
-                    else
-                        print('|cffff5555Old Kraken|r: Заявку прийнято, але API запрошення недоступний. Запросіть ' .. applicant.name .. ' вручну.')
-                    end
-                end
+                if accept then invitePlayer(applicant.name) end
             else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
         end
         row.accept = button(f, 'Прийняти', 695, y, 85, function() decide(true) end)
@@ -270,6 +273,27 @@ local function createWindow()
         f.categoryButton:SetText(categoryLabels[category]); refresh()
     end)
     f.applicantBox = input(f, 'Ім’я учасника', 550, -445, 200, '')
+    f.reinviteButton = button(f, 'Запросити знову', 750, -468, 125, function()
+        local g = selected and Finder.groups[selected]
+        if not g or g.owner ~= Finder.identity or g.closed then return end
+        local name = f.applicantBox:GetText()
+        if not g.partyObserved then
+            print('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.')
+            return
+        end
+        for i = 2, #g.members do
+            if g.members[i] == name then
+                if g.partyObserved[name] then
+                    print('|cffff5555Old Kraken|r: ' .. name .. ' уже в паті.')
+                else
+                    invitePlayer(name)
+                end
+                return
+            end
+        end
+        print('|cffff5555Old Kraken|r: Введіть повне ім’я гравця із зарезервованим місцем.')
+    end)
+    f.reinviteButton:Hide()
     button(f, 'Видалити учасника', 750, -500, 125, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:RemoveMember(g.id, f.applicantBox:GetText()) then Finder:Changed(); refresh() end
