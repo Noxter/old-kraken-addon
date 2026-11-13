@@ -67,6 +67,10 @@ local function refresh()
     table.sort(lines, function(a,b) return a.group.title < b.group.title end)
     if offset >= #lines then offset = math.max(0, math.floor((#lines - 1) / 10) * 10) end
     window.visible = lines
+    window.emptyList:SetShown(#lines == 0 and tab ~= 'create')
+    for _, item in ipairs(window.tabs) do
+        if item.key == tab then item.button:LockHighlight() else item.button:UnlockHighlight() end
+    end
     for i, b in ipairs(window.rows) do
         local entry = lines[i + offset]
         if entry then
@@ -74,9 +78,11 @@ local function refresh()
             local status = Finder.pending[entry.key]
             b:SetText(string.format('%s | %s | %s | %d/%d%s', g.title, categoryLabels[g.category], g.owner, #g.members, g.maxSize,
                 status and (' | ' .. (pendingLabels[status] or status)) or ''))
+            if selected == entry.key then b:LockHighlight() else b:UnlockHighlight() end
             b:Show()
             if g.owner == Finder.identity and not g.hidden then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
         else
+            b:UnlockHighlight()
             b:Hide()
             window.deleteButtons[i]:Hide()
         end
@@ -84,20 +90,62 @@ local function refresh()
     local g = selected and Finder.groups[selected]
     if g then
         local applicationStatus = Finder.pending[selected]
-        local members = {}
-        for i, name in ipairs(g.members) do
-            local state = i == 1 and 'автор' or
-                (not g.partyObserved and 'статус невідомий' or (g.partyObserved[name] and 'у паті' or 'резерв'))
-            members[#members + 1] = name .. ' (' .. state .. ')'
-        end
-        window.details:SetText(string.format('%s — %s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСклад: %s\nСтатус: %s%s',
+        window.details:SetText(string.format('%s — %s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСтатус: %s%s\nСклад:',
             g.title, categoryLabels[g.category], g.owner, g.minLevel, g.maxLevel, roleLabels[g.role],
-            g.description, table.concat(members, ', '), g.closed and 'Закрито' or 'Відкрито',
+            g.description, g.closed and 'Закрито' or 'Відкрито',
             applicationStatus and (' | Заявка: ' .. (pendingLabels[applicationStatus] or applicationStatus)) or ''))
     else window.details:SetText('Виберіть оголошення у списку.') end
-    window.detailsContent:SetHeight(math.max(86, window.details:GetStringHeight() + 4))
-    local canManage = g and g.owner == Finder.identity and not g.closed
-    if canManage then window.reinviteButton:Show() else window.reinviteButton:Hide() end
+    local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
+    local members = g and g.members or {}
+    local top = window.details:GetStringHeight() + 5
+    for i = 1, math.max(#members, #window.memberRows) do
+        local row = window.memberRows[i]
+        if i <= #members then
+            if not row then
+                row = {}
+                row.name = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+                row.name:SetWidth(190); row.name:SetHeight(22); row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
+                row.hover = CreateFrame('Frame', nil, window.detailsContent)
+                row.hover:SetSize(190, 22); row.hover:EnableMouse(true)
+                row.hover:SetScript('OnEnter', function(self)
+                    if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(self.memberLabel); GameTooltip:Show() end
+                end)
+                row.hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+                row.invite = CreateFrame('Button', nil, window.detailsContent, 'UIPanelButtonTemplate')
+                row.invite:SetSize(105, 22); row.invite:SetText('Запросити')
+                row.invite:SetScript('OnClick', function(self)
+                    local current = selected and Finder.groups[selected]
+                    local name = self.memberName
+                    if not current or current.owner ~= Finder.identity or current.closed or not current.partyObserved or current.partyObserved[name] then return end
+                    for j = 2, #current.members do
+                        if current.members[j] == name then invitePlayer(name); return end
+                    end
+                end)
+                window.memberRows[i] = row
+            end
+            local name = members[i]
+            local state = i == 1 and 'автор' or
+                (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у паті' or 'резерв'))
+            row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 24)
+            row.name:SetText(name .. ' (' .. state .. ')'); row.name:Show()
+            row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. ' (' .. state .. ')'; row.hover:Show()
+            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 195, -top - (i - 1) * 24)
+            row.invite.memberName = name
+            if canManage and i > 1 and g.partyObserved and not g.partyObserved[name] then row.invite:Show() else row.invite:Hide() end
+        elseif row then
+            row.name:Hide(); row.hover:Hide(); row.invite:Hide()
+        end
+    end
+    window.detailsContent:SetHeight(math.max(86, top + #members * 24 + 4))
+    local isOther = tab ~= 'create' and g and g.owner ~= Finder.identity and not g.closed
+    local pending = selected and Finder.pending[selected]
+    window.applyButton:SetShown(isOther and pending ~= 'pending')
+    window.withdrawButton:SetShown(isOther and pending == 'pending')
+    window.cancelButton:SetShown(canManage)
+    window.editButton:SetShown(canManage)
+    window.applicantBox:SetShown(canManage); window.applicantBox.label:SetShown(canManage)
+    window.removeMemberButton:SetShown(canManage)
+    window.roleButton:SetShown(tab == 'create' or isOther)
     local applicants = {}
     if canManage then
         for name, applicantRole in pairs(Finder.requests[g.id] or {}) do
@@ -124,7 +172,10 @@ local function refresh()
     for _, box in ipairs(window.createFields) do
         if tab == 'create' then box:Show(); box.label:Show() else box:Hide(); box.label:Hide() end
     end
-    if tab == 'create' then window.createButton:Show(); window.categoryButton:Show() else window.createButton:Hide(); window.categoryButton:Hide() end
+    if tab == 'create' then
+        window.createButton:SetText(editing and 'Зберегти' or 'Створити')
+        window.createButton:Show(); window.categoryButton:Show()
+    else window.createButton:Hide(); window.categoryButton:Hide() end
 end
 
 local function createWindow()
@@ -133,19 +184,23 @@ local function createWindow()
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving); f:SetScript('OnDragStop', f.StopMovingOrSizing)
     f:SetClampedToScreen(true); f:Hide()
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
+    f.tabs = {}
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
-        button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; editing=nil; offset=0; requestOffset=0; refresh() end)
+        local b = button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; editing=nil; offset=0; requestOffset=0; refresh() end)
+        f.tabs[#f.tabs + 1] = {key=item[2], button=b}
     end
     f.alertButton = button(f, 'Сповіщення', 700, -32, 175, function()
         if Finder:SetGroupAlertsEnabled(not Finder:GroupAlertsEnabled()) then refresh()
         else print('Old Kraken: не вдалося зберегти налаштування сповіщень.') end
     end)
     f.rows, f.deleteButtons = {}, {}
+    f.emptyList = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.emptyList:SetPoint('TOPLEFT', f, 'TOPLEFT', 25, -75); f.emptyList:SetText('Оголошень немає.')
     for i=1,10 do
         local index = i
         f.rows[i] = button(f, '', 18, -65-(i-1)*25, 490, function()
             local entry = f.visible and f.visible[index + offset]
-            if entry then if selected ~= entry.key then requestOffset=0 end; selected=entry.key; refresh() end
+            if entry then if selected ~= entry.key then requestOffset=0; f.detailsScroll:SetVerticalScroll(0) end; selected=entry.key; refresh() end
         end)
         local remove = CreateFrame('Button', nil, f)
         remove:SetSize(24, 23)
@@ -187,6 +242,7 @@ local function createWindow()
     f.detailsContent:SetSize(300, 86); f.detailsScroll:SetScrollChild(f.detailsContent)
     f.details = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.details:SetPoint('TOPLEFT'); f.details:SetWidth(300); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.memberRows = {}
     f.requestTitle = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.requestTitle:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -165)
     f.requestRows = {}
@@ -240,7 +296,7 @@ local function createWindow()
     f.categoryButton = button(f, categoryLabels[category], 305, -408, 140, function(self)
         category = cycle(categories, category); self:SetText(categoryLabels[category])
     end)
-    button(f, 'Роль: без ролі', 550, -330, 150, function(self)
+    f.roleButton = button(f, 'Роль: без ролі', 550, -330, 150, function(self)
         role=cycle(roles, role); self:SetText('Роль: '..roleLabels[role])
     end)
     f.createButton = button(f, 'Створити', 460, -408, 120, function()
@@ -252,49 +308,28 @@ local function createWindow()
         end
         if ok then Finder:Changed(); editing=nil; tab='mine'; refresh() else print('Old Kraken: перевірте поля та стан зв’язку.') end
     end)
-    button(f, 'Подати заявку', 550, -385, 140, function()
+    f.applyButton = button(f, 'Подати заявку', 550, -385, 140, function()
         local g=selected and Finder.groups[selected]
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh() end
     end)
-    button(f, 'Відкликати', 700, -385, 140, function()
+    f.withdrawButton = button(f, 'Відкликати', 700, -385, 140, function()
         local g=selected and Finder.groups[selected]
         if g and Finder:Withdraw(g.owner, g.id) then Finder:Changed(); refresh() end
     end)
-    button(f, 'Закрити набір', 550, -415, 140, function()
+    f.cancelButton = button(f, 'Закрити набір', 550, -415, 140, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:Cancel(g.id) then Finder:Changed(); refresh() end
     end)
-    button(f, 'Редагувати', 700, -415, 140, function()
+    f.editButton = button(f, 'Редагувати', 700, -415, 140, function()
         local g=selected and Finder.groups[selected]
         if not g or g.owner~=Finder.identity or g.closed then return end
         editing=g.id; tab='create'; role=g.role; category=g.category
         f.titleBox:SetText(g.title); f.descriptionBox:SetText(g.description)
         f.maxBox:SetText(tostring(g.maxSize)); f.minBox:SetText(tostring(g.minLevel)); f.maxLevelBox:SetText(tostring(g.maxLevel))
-        f.categoryButton:SetText(categoryLabels[category]); refresh()
+        f.categoryButton:SetText(categoryLabels[category]); f.roleButton:SetText('Роль: '..roleLabels[role]); refresh()
     end)
     f.applicantBox = input(f, 'Ім’я учасника', 550, -445, 200, '')
-    f.reinviteButton = button(f, 'Запросити знову', 750, -468, 125, function()
-        local g = selected and Finder.groups[selected]
-        if not g or g.owner ~= Finder.identity or g.closed then return end
-        local name = f.applicantBox:GetText()
-        if not g.partyObserved then
-            print('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.')
-            return
-        end
-        for i = 2, #g.members do
-            if g.members[i] == name then
-                if g.partyObserved[name] then
-                    print('|cffff5555Old Kraken|r: ' .. name .. ' уже в паті.')
-                else
-                    invitePlayer(name)
-                end
-                return
-            end
-        end
-        print('|cffff5555Old Kraken|r: Введіть повне ім’я гравця із зарезервованим місцем.')
-    end)
-    f.reinviteButton:Hide()
-    button(f, 'Видалити учасника', 750, -500, 125, function()
+    f.removeMemberButton = button(f, 'Видалити учасника', 750, -500, 125, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:RemoveMember(g.id, f.applicantBox:GetText()) then Finder:Changed(); refresh() end
     end)
