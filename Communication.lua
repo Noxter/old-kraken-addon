@@ -7,6 +7,80 @@ Communication.PREFIX = "OLDKRKN"
 Communication.queue = {}
 Communication.ready = false
 Communication.lastTestID = nil
+Communication.handlers = {}
+Communication.stats = { sent = 0, retried = 0, dropped = 0, received = 0, invalid = 0 }
+local MAX_ATTEMPTS = 5
+local MAX_QUEUE = 50
+local PART_BYTES = 80
+local MAX_PARTS = 32
+local MAX_ASSEMBLIES = 20
+local CACHE_LIMIT = 256
+local CACHE_TTL = 120
+local messageSequence = 0
+local sessionID = tostring(GetServerTime()) .. "-" .. tostring(math.random(100000, 999999))
+local assemblies, completed = {}, {}
+
+local function Count(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
+local function Prune(now)
+    for k, v in pairs(assemblies) do
+        if now - v.time > CACHE_TTL then assemblies[k] = nil end
+    end
+    for k, v in pairs(completed) do
+        if now - v > CACHE_TTL then completed[k] = nil end
+    end
+end
+
+-- GF1 payloads are hexadecimal bytes. This preserves UTF-8 and reserves delimiters.
+local function Encode(payload)
+    return (payload:gsub(".", function(c) return string.format("%02X", string.byte(c)) end))
+end
+
+local function Decode(payload)
+    if #payload % 2 ~= 0 or payload:find("[^0-9A-F]") then return nil end
+    return (payload:gsub("%x%x", function(pair) return string.char(tonumber(pair, 16)) end))
+end
+
+local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = true,
+    UPDATE = true, QUERY = true, SYNC = true }
+
+function Communication:RegisterHandler(kind, callback)
+    if not VALID_TYPES[kind] or type(callback) ~= "function" or self.handlers[kind] then
+        return false
+    end
+    self.handlers[kind] = callback
+    return true
+end
+
+function Communication:SendProtocol(kind, payload)
+    if not VALID_TYPES[kind] or type(payload) ~= "string" or #payload > PART_BYTES * MAX_PARTS then
+        return false, "invalid payload or type"
+    end
+    if not self.ready or not IsInGuild or not IsInGuild() then
+        return false, "transport unavailable"
+    end
+    messageSequence = (messageSequence + 1) % 1000000
+    local id = sessionID .. "-" .. tostring(messageSequence)
+    local count = math.max(1, math.ceil(#payload / PART_BYTES))
+    if #self.queue + count > MAX_QUEUE then return false, "queue full" end
+    local messages = {}
+    for part = 1, count do
+        local data = payload:sub((part - 1) * PART_BYTES + 1, part * PART_BYTES)
+        local message = table.concat({ "GF2", kind, id, part, count, Encode(data) }, "^")
+        if #message > 240 then return false, "message too long" end
+        messages[part] = message
+    end
+    for _, message in ipairs(messages) do self:QueueMessage(message) end
+    return true, id
+end
+
+function Communication:RequestSync()
+    return self:SendProtocol("QUERY", "")
+end
 
 local function PlayerName()
     local name = UnitName and UnitName("player")
@@ -52,6 +126,8 @@ function Communication:PrintStatus()
         (status.restricted == nil and "невідомо" or (status.restricted and "так" or "ні")))
     Print("  Гільдія: " .. (status.inGuild and "так" or "ні") ..
         "; повідомлень у черзі: " .. status.queued)
+    Print("  Надіслано: " .. self.stats.sent .. "; повторів: " .. self.stats.retried ..
+        "; відкинуто: " .. self.stats.dropped .. "; некоректних: " .. self.stats.invalid)
 end
 
 function Communication:QueueMessage(message)
@@ -64,18 +140,18 @@ function Communication:QueueMessage(message)
         return false
     end
 
-    if #self.queue >= 50 then
+    if #self.queue >= MAX_QUEUE then
         Print("Черга обміну переповнена; повідомлення не додано.")
         return false
     end
 
-    self.queue[#self.queue + 1] = message
+    self.queue[#self.queue + 1] = { message = message, attempts = 0 }
     return true
 end
 
 function Communication:Pump()
-    local message = self.queue[1]
-    if not message then
+    local entry = self.queue[1]
+    if not entry then
         return
     end
 
@@ -86,27 +162,43 @@ function Communication:Pump()
     local chatInfo = C_ChatInfo
     if not chatInfo or type(chatInfo.SendAddonMessage) ~= "function" then
         table.remove(self.queue, 1)
+        self.stats.dropped = self.stats.dropped + 1
         Print("SendAddonMessage недоступний; повідомлення відкинуто.")
         return
     end
 
-    local ok, result = pcall(chatInfo.SendAddonMessage, self.PREFIX, message, "GUILD")
+    local ok, result = pcall(chatInfo.SendAddonMessage, self.PREFIX, entry.message, "GUILD")
     if not ok then
         table.remove(self.queue, 1)
+        self.stats.dropped = self.stats.dropped + 1
         Print("Помилка SendAddonMessage: " .. tostring(result))
         return
     end
 
     local results = Enum and Enum.SendAddonMessageResult
-    if results and (
-        result == results.AddonMessageThrottle
-        or result == results.ChannelThrottle
-        or result == results.AddOnMessageLockdown
+    if results and result ~= nil and (
+        (results.AddonMessageThrottle ~= nil and result == results.AddonMessageThrottle)
+        or (results.ChannelThrottle ~= nil and result == results.ChannelThrottle)
+        or (results.AddOnMessageLockdown ~= nil and result == results.AddOnMessageLockdown)
     ) then
+        entry.attempts = entry.attempts + 1
+        self.stats.retried = self.stats.retried + 1
+        if entry.attempts >= MAX_ATTEMPTS then
+            table.remove(self.queue, 1)
+            self.stats.dropped = self.stats.dropped + 1
+            Print("Повідомлення відкинуто після повторних спроб; оновіть дані.")
+        end
         return
     end
 
     table.remove(self.queue, 1)
+    -- A successful API call is not an acknowledgement of delivery.
+    if results and results.Success ~= nil and result ~= nil and result ~= results.Success then
+        self.stats.dropped = self.stats.dropped + 1
+        Print("Повідомлення не надіслано: " .. tostring(result))
+    else
+        self.stats.sent = self.stats.sent + 1
+    end
 end
 
 function Communication:SendTest()
@@ -140,6 +232,60 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     end
 
     if not sender or sender == "" then
+        return
+    end
+
+    if #message > 240 then
+        self.stats.invalid = self.stats.invalid + 1
+        return
+    end
+
+    if message:sub(1, 4) == "GF2^" then
+        local kind, id, part, count, encoded = message:match("^GF2%^([A-Z]+)%^(%d+%-%d+%-%d+)%^(%d+)%^(%d+)%^([0-9A-F]*)$")
+        part, count = tonumber(part), tonumber(count)
+        local payload = encoded and Decode(encoded)
+        if not kind or not VALID_TYPES[kind] or #id > 32 or not part or not count
+            or count < 1 or count > MAX_PARTS or part < 1 or part > count
+            or not payload or #payload > PART_BYTES
+            or (part < count and #payload ~= PART_BYTES) then
+            self.stats.invalid = self.stats.invalid + 1
+            return
+        end
+        local now = GetTime()
+        Prune(now)
+        local key = sender .. "\001" .. id
+        if completed[key] then return end
+        local item = assemblies[key]
+        if not item then
+            if Count(assemblies) >= MAX_ASSEMBLIES then self.stats.invalid = self.stats.invalid + 1; return end
+            item = { kind = kind, count = count, time = now, parts = {}, received = 0 }
+            assemblies[key] = item
+        elseif item.kind ~= kind or item.count ~= count then
+            assemblies[key] = nil
+            self.stats.invalid = self.stats.invalid + 1
+            return
+        end
+        if item.parts[part] then
+            if item.parts[part] ~= payload then assemblies[key] = nil; self.stats.invalid = self.stats.invalid + 1 end
+            return
+        end
+        item.parts[part] = payload
+        item.received = item.received + 1
+        if item.received ~= count then return end
+        assemblies[key] = nil
+        if Count(completed) >= CACHE_LIMIT then
+            local oldestKey, oldestTime
+            for k, v in pairs(completed) do if not oldestTime or v < oldestTime then oldestKey, oldestTime = k, v end end
+            completed[oldestKey] = nil
+        end
+        completed[key] = now
+        payload = table.concat(item.parts)
+        self.stats.received = self.stats.received + 1
+        local handler = self.handlers[kind]
+        if handler then
+            local ok, err = pcall(handler, sender, id, payload)
+            if not ok then Print("Помилка обробника протоколу: " .. tostring(err)) end
+        end
         return
     end
 
@@ -210,3 +356,4 @@ frame:SetScript("OnEvent", function(_, event, ...)
         Communication:OnAddonMessage(...)
     end
 end)
+
