@@ -1,3 +1,5 @@
+OldKraken = OldKraken or {}
+
 local Database = {}
 OldKraken.Database = Database
 
