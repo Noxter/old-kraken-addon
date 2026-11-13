@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.3.1"
+OldKraken.version = "0.3.2"
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
