@@ -227,6 +227,15 @@ function Finder:Cancel(id)
     return true
 end
 
+function Finder:Delete(id)
+    local group = self.groups[self.identity .. '\001' .. id]
+    if not group then return false end
+    if not group.closed and not self:Cancel(id) then return false end
+    -- Keep the closed record as a synchronization tombstone, but hide it locally.
+    group.hidden = true
+    return true
+end
+
 function Finder:Edit(id, title, description, maxSize, minLevel, maxLevel, role, category)
     local group = self.groups[self.identity .. '\001' .. id]
     maxSize, minLevel, maxLevel = tonumber(maxSize), tonumber(minLevel), tonumber(maxLevel)

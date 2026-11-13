@@ -43,12 +43,13 @@ local function refresh()
             and (filterRole == '' or group.role == filterRole)
             and (not filterFree or #group.members < group.maxSize)
             and (not level or (level >= group.minLevel and level <= group.maxLevel))
-        if (tab == 'all' and not group.closed and matches) or (tab == 'mine' and group.owner == Finder.identity)
+        if (tab == 'all' and not group.closed and matches) or (tab == 'mine' and group.owner == Finder.identity and not group.hidden)
             or (tab == 'applications' and Finder.pending[key]) then
             lines[#lines + 1] = {key=key, group=group}
         end
     end
     table.sort(lines, function(a,b) return a.group.title < b.group.title end)
+    if offset >= #lines then offset = math.max(0, math.floor((#lines - 1) / 10) * 10) end
     window.visible = lines
     for i, b in ipairs(window.rows) do
         local entry = lines[i + offset]
@@ -58,7 +59,11 @@ local function refresh()
             b:SetText(string.format('%s | %s | %s | %d/%d%s', g.title, categoryLabels[g.category], g.owner, #g.members, g.maxSize,
                 status and (' | ' .. (pendingLabels[status] or status)) or ''))
             b:Show()
-        else b:Hide() end
+            if g.owner == Finder.identity and not g.hidden then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
+        else
+            b:Hide()
+            window.deleteButtons[i]:Hide()
+        end
     end
     local g = selected and Finder.groups[selected]
     if g then
@@ -87,13 +92,44 @@ local function createWindow()
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
         button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; editing=nil; offset=0; refresh() end)
     end
-    f.rows = {}
+    f.rows, f.deleteButtons = {}, {}
     for i=1,10 do
         local index = i
-        f.rows[i] = button(f, '', 18, -65-(i-1)*25, 520, function()
+        f.rows[i] = button(f, '', 18, -65-(i-1)*25, 490, function()
             local entry = f.visible and f.visible[index + offset]
             if entry then selected=entry.key; refresh() end
         end)
+        local remove = CreateFrame('Button', nil, f)
+        remove:SetSize(24, 23)
+        remove:SetPoint('TOPLEFT', f, 'TOPLEFT', 514, -65-(i-1)*25)
+        -- Draw a small trash can using native textures, including on Forever clients
+        -- that do not provide the newer delete-icon atlas.
+        local function piece(x, y, width, height)
+            local texture = remove:CreateTexture(nil, 'ARTWORK')
+            texture:SetColorTexture(0.9, 0.32, 0.3, 1)
+            texture:SetSize(width, height)
+            texture:SetPoint('TOPLEFT', remove, 'TOPLEFT', x, -y)
+        end
+        piece(6, 6, 12, 2); piece(9, 4, 6, 2)
+        piece(7, 9, 2, 9); piece(15, 9, 2, 9); piece(7, 17, 10, 2)
+        remove:SetScript('OnClick', function()
+            local entry = f.visible and f.visible[index + offset]
+            local group = entry and Finder.groups[entry.key]
+            if not group or group.owner ~= Finder.identity then return end
+            if Finder:Delete(group.id) then
+                if selected == entry.key then selected = nil end
+                Finder:Changed()
+                refresh()
+            else
+                print('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.')
+            end
+        end)
+        remove:SetScript('OnEnter', function(self)
+            if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити групу'); GameTooltip:Show() end
+        end)
+        remove:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+        remove:Hide()
+        f.deleteButtons[i] = remove
     end
     button(f, '‹', 18, -318, 50, function() offset=math.max(0, offset-10); refresh() end)
     button(f, '›', 75, -318, 50, function() if f.visible and offset+10 < #f.visible then offset=offset+10 end; refresh() end)

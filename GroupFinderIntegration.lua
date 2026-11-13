@@ -38,6 +38,10 @@ local function saveOwned()
         if group.owner == finder.identity then records[#records + 1] = finder:EncodeGroup(group) end
     end
     storage.records = records
+    storage.hiddenGroups = {}
+    for _, group in pairs(finder.groups) do
+        if group.owner == finder.identity and group.closed and group.hidden then storage.hiddenGroups[group.id] = true end
+    end
     storage.pending = {}
     for key, value in pairs(finder.pending) do storage.pending[key] = value end
     storage.pendingVersions, storage.pendingRoles = {}, {}
@@ -177,6 +181,12 @@ frame:SetScript('OnEvent', function()
     end
     if type(storage.records) == 'table' then
         for _, record in ipairs(storage.records) do finder:ReceiveGroup(identity, record) end
+    end
+    if type(storage.hiddenGroups) == 'table' then
+        for id, hidden in pairs(storage.hiddenGroups) do
+            local group = type(id) == 'string' and finder.groups[identity .. '\001' .. id]
+            if group and group.closed and hidden == true then group.hidden = true end
+        end
     end
     if type(storage.pending) == 'table' then
         local count = 0
