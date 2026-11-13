@@ -16,8 +16,8 @@ local function unpackFields(payload, maxFields)
     local fields, pos = {}, 1
     while pos <= #payload do
         if #fields >= maxFields then return nil end
-        local first, last, size = payload:find('^(%d+):', pos)
-        if not first or #size > 4 then return nil end
+        local first, last, size = payload:find('(%d+):', pos)
+        if first ~= pos or not last or #size > 4 then return nil end
         size = tonumber(size)
         pos = last + 1
         if size > #payload - pos + 1 then return nil end
