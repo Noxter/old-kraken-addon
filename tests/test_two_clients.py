@@ -15,6 +15,7 @@ def client(name):
         function print(...) end
         function UnitName() return player end
         function GetGuildInfo() return 'Guild' end
+        function GetRealmName() return 'Moon' end
         function IsInGuild() return true end
         function GetServerTime() return 1700000000 end
         function GetTime() return 100 end
@@ -49,7 +50,7 @@ def flush(sender, recipients):
     for packet in packets:
         for recipient in recipients:
             recipient.globals().OldKraken.Communication.OnAddonMessage(
-                recipient.globals().OldKraken.Communication, 'OLDKRKN', packet, 'GUILD', sender.globals().player)
+                recipient.globals().OldKraken.Communication, 'OLDKRKN', packet, 'GUILD', sender.globals().player + ' Moon')
 
 
 def reload(client):
