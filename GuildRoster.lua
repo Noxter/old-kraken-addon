@@ -450,6 +450,11 @@ SLASH_OLDKRAKEN1 = "/okr"
 SLASH_OLDKRAKEN2 = "/oldkraken"
 SlashCmdList["OLDKRAKEN"] = function(message)
     local command = string.lower(message or "")
+
+    if OldKraken.Communication and OldKraken.Communication:HandleCommand(command) then
+        return
+    end
+
     if command == "refresh" then
         Roster:RequestUpdate()
     else
