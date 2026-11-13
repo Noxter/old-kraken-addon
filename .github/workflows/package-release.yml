@@ -17,11 +17,33 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
 
       - name: Build installable ZIP
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p package/OldKraken
-          cp OldKraken.toc Core.lua Communication.lua GuildRoster.lua package/OldKraken/
+
+          mapfile -t addon_files < <(awk '
+            /^[[:space:]]*#/ { next }
+            /^[[:space:]]*$/ { next }
+            /\.lua[[:space:]]*$/ { print $1 }
+          ' OldKraken.toc)
+
+          if [ "${#addon_files[@]}" -eq 0 ]; then
+            echo "No Lua files found in OldKraken.toc"
+            exit 1
+          fi
+
+          for file in "${addon_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "Missing file listed in OldKraken.toc: $file"
+              exit 1
+            fi
+          done
+
+          cp OldKraken.toc "${addon_files[@]}" package/OldKraken/
           cd package
           zip -r ../OldKraken.zip OldKraken
+          unzip -l ../OldKraken.zip
 
       - name: Attach ZIP to GitHub Release
         env:
