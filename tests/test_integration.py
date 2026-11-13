@@ -9,6 +9,7 @@ function OldKraken:Fire(name, ...) self.events[name] = (self.events[name] or 0) 
 function UnitName() return 'Alice' end
 guild = 'Guild'
 function GetGuildInfo() return guild end
+function GetRealmName() return 'Moon' end
 function GetServerTime() return 12345 end
 function GetTime() return 100 end
 function CreateFrame() return {RegisterEvent=function() end, SetScript=function(_, _, fn) login = fn end} end
@@ -37,8 +38,15 @@ assert(sent[3][1] == 'SYNC')
 local g
 for _, value in pairs(f.groups) do g=value end
 local payload = f._pack({'Alice',g.id,'dps','apply','12345001'})
-OldKraken.Communication.handlers.JOIN('Bob', 'id', payload)
+OldKraken.Communication.handlers.JOIN('Bob Moon', 'id', payload)
 assert(f.requests[g.id].Bob == 'dps')
+local remote = setmetatable({}, {__index=f})
+remote:Initialize('Bob', function() return true end)
+assert(remote:Create('Remote group','quest','',5))
+local remoteGroup
+for _, value in pairs(remote.groups) do remoteGroup=value end
+handlers.ANNOUNCE('Bob Moon', 'remote-id', remote:EncodeGroup(remoteGroup))
+assert(f.groups['Bob\001' .. remoteGroup.id].title == 'Remote group')
 assert(OldKraken.events.GROUP_FINDER_CHANGED > 0)
 guild = 'Other'
 login()
