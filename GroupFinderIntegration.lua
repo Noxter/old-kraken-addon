@@ -95,7 +95,7 @@ local function receiveGroup(kind, sender, _, payload)
     diagnostics.lastSender = sender
     local name = normalizeSender(sender)
     diagnostics.lastNormalized = name
-    local fields = kind == 'ANNOUNCE' and finder._unpackFields(payload, 212) or nil
+    local fields = kind == 'ANNOUNCE' and finder._unpackFields(payload, 213) or nil
     local key = fields and fields[1] and fields[2] and (fields[2] .. '\001' .. fields[1]) or nil
     local isNew = key and not finder.groups[key]
     if name and finder:ReceiveGroup(name, payload) then
@@ -225,7 +225,7 @@ frame:SetScript('OnEvent', function(_, event)
     if identity ~= name and storage.identityFormat ~= 2 then
         local migrated = {}
         for _, record in ipairs(type(storage.records) == 'table' and storage.records or {}) do
-            local fields = finder._unpackFields(record, 212)
+            local fields = finder._unpackFields(record, 213)
             if fields and fields[2] == name and fields[13] == name then
                 fields[2], fields[13] = identity, identity
                 local cleaned, members = {}, 1

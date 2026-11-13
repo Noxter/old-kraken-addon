@@ -71,11 +71,18 @@ local function refresh()
     local g = selected and Finder.groups[selected]
     if g then
         local applicationStatus = Finder.pending[selected]
+        local members = {}
+        for i, name in ipairs(g.members) do
+            local state = i == 1 and 'автор' or
+                (not g.partyObserved and 'статус невідомий' or (g.partyObserved[name] and 'у паті' or 'резерв'))
+            members[#members + 1] = name .. ' (' .. state .. ')'
+        end
         window.details:SetText(string.format('%s — %s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСклад: %s\nСтатус: %s%s',
             g.title, categoryLabels[g.category], g.owner, g.minLevel, g.maxLevel, roleLabels[g.role],
-            g.description, table.concat(g.members, ', '), g.closed and 'Закрито' or 'Відкрито',
+            g.description, table.concat(members, ', '), g.closed and 'Закрито' or 'Відкрито',
             applicationStatus and (' | Заявка: ' .. (pendingLabels[applicationStatus] or applicationStatus)) or ''))
     else window.details:SetText('Виберіть оголошення у списку.') end
+    window.detailsContent:SetHeight(math.max(86, window.details:GetStringHeight() + 4))
     local canManage = g and g.owner == Finder.identity and not g.closed
     local applicants = {}
     if canManage then
@@ -160,8 +167,12 @@ local function createWindow()
     end
     button(f, '‹', 18, -318, 50, function() offset=math.max(0, offset-10); refresh() end)
     button(f, '›', 75, -318, 50, function() if f.visible and offset+10 < #f.visible then offset=offset+10 end; refresh() end)
-    f.details = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.details:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.details:SetWidth(320); f.details:SetHeight(86); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.detailsScroll = CreateFrame('ScrollFrame', nil, f, 'UIPanelScrollFrameTemplate')
+    f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.detailsScroll:SetSize(300, 86)
+    f.detailsContent = CreateFrame('Frame', nil, f.detailsScroll)
+    f.detailsContent:SetSize(300, 86); f.detailsScroll:SetScrollChild(f.detailsContent)
+    f.details = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.details:SetPoint('TOPLEFT'); f.details:SetWidth(300); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     f.requestTitle = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.requestTitle:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -165)
     f.requestRows = {}

@@ -82,6 +82,15 @@ function Finder:EncodeGroup(group)
         group.title, group.category, group.description, group.maxSize, #group.members,
         group.minLevel, group.maxLevel, group.role}
     for _, member in ipairs(group.members) do fields[#fields + 1] = member end
+    if group.partyObserved then
+        local states = {'A'}
+        for i = 2, #group.members do
+            states[i] = group.partyObserved[group.members[i]] and 'P' or 'R'
+        end
+        fields[#fields + 1] = table.concat(states)
+    else
+        fields[#fields + 1] = '?'
+    end
     return pack(fields)
 end
 
@@ -116,26 +125,21 @@ function Finder:SyncPartyMembers(party)
             if not differs then
                 for i, name in ipairs(members) do if group.members[i] ~= name then differs = true; break end end
             end
-            local observedChanged = false
+            local observedChanged = group.partyObserved == nil
             for name in pairs(previous) do if not current[name] then observedChanged = true; break end end
             if not observedChanged then
                 for name in pairs(current) do if not previous[name] then observedChanged = true; break end end
             end
-            if differs then
-                local oldMembers, oldMax, oldRevision = group.members, group.maxSize, group.revision
+            if differs or observedChanged then
+                local oldMembers, oldMax, oldRevision, oldObserved = group.members, group.maxSize, group.revision, group.partyObserved
                 group.members = members
                 group.maxSize = math.max(group.maxSize, #members)
                 group.revision = group.revision + 1
+                group.partyObserved = current
                 if not self.send('UPDATE', self:EncodeGroup(group)) then
-                    group.members, group.maxSize, group.revision = oldMembers, oldMax, oldRevision
+                    group.members, group.maxSize, group.revision, group.partyObserved = oldMembers, oldMax, oldRevision, oldObserved
                     return false, changed
                 end
-                changed = true
-            end
-            if observedChanged then
-                local observed = {}
-                for name in pairs(current) do observed[name] = true end
-                group.partyObserved = observed
                 changed = true
             end
         end
@@ -144,7 +148,7 @@ function Finder:SyncPartyMembers(party)
 end
 
 function Finder:ReceiveGroup(sender, payload)
-    local f = unpackFields(payload, 212)
+    local f = unpackFields(payload, 213)
     if not f or #f < 12 then return false end
     local id, owner, rev, closed, title, category, description, maxSize, count = unpack(f, 1, 9)
     rev, maxSize, count = tonumber(rev), tonumber(maxSize), tonumber(count)
@@ -156,7 +160,8 @@ function Finder:ReceiveGroup(sender, payload)
         or not maxSize or maxSize % 1 ~= 0 or maxSize < 1 or maxSize > 200
         or not minLevel or not maxLevel or minLevel % 1 ~= 0 or maxLevel % 1 ~= 0
         or minLevel < 1 or maxLevel > 255 or minLevel > maxLevel or not roles[role]
-        or not count or count % 1 ~= 0 or count < 1 or count > maxSize or #f ~= 12 + count then return false end
+        or not count or count % 1 ~= 0 or count < 1 or count > maxSize
+        or (#f ~= 12 + count and #f ~= 13 + count) then return false end
     local members, seen = {}, {}
     for i=1,count do
         local name = f[12+i]
@@ -164,6 +169,13 @@ function Finder:ReceiveGroup(sender, payload)
         members[i], seen[name] = name, true
     end
     if members[1] ~= owner then return false end
+    local states = f[13 + count]
+    local observed
+    if states and states ~= '?' then
+        if #states ~= count or states:sub(1, 1) ~= 'A' or states:sub(2):find('[^PR]') then return false end
+        observed = {}
+        for i = 2, count do if states:sub(i, i) == 'P' then observed[members[i]] = true end end
+    end
     local key = owner .. '\001' .. id
     local existing = self.groups[key]
     if existing and existing.revision >= rev then
@@ -173,7 +185,7 @@ function Finder:ReceiveGroup(sender, payload)
     if not existing and countGroups(self.groups) >= MAX_GROUPS then return false end
     self.groups[key] = { id=id, owner=owner, revision=rev, closed=closed=='1', title=title,
         category=category, description=description, maxSize=maxSize, minLevel=minLevel,
-        maxLevel=maxLevel, role=role, members=members, seenAt=GetTime() }
+        maxLevel=maxLevel, role=role, members=members, partyObserved=observed, seenAt=GetTime() }
     if self.pending[key] == 'pending' then
         if seen[self.identity] then self.pending[key] = 'accept'
         elseif closed == '1' then self.pending[key] = 'closed' end
