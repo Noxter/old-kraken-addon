@@ -152,7 +152,7 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     if kind == "TEST" then
         Print("Отримано TEST від " .. sender .. ". Надсилаю ACK у GUILD.")
         self:QueueMessage(table.concat({ "ACK", id or "", target or "", me }, "^"))
-    elseif kind == "ACK" and target == me then
+    elseif kind == "ACK" and target == me and id == self.lastTestID then
         Print("Отримано ACK від " .. sender .. ". Двосторонній обмін працює.")
     end
 end
