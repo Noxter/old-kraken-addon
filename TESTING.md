@@ -35,13 +35,20 @@
 
 У разі розбіжностей не вважайте стан синхронізованим лише за повідомленням про додавання пакета в чергу. Відправлення не гарантує доставку. Автоматичне запрошення в ігрову групу не реалізовано.
 
-## Локальні тести
+## Локальні тести (Linux / Bazzite)
 
-Потрібні Python 3 і пакет `lupa` із модулем `lupa.lua51`. З кореня репозиторію:
+Потрібні Python 3 та `venv`. Із кореня клонованого репозиторію:
 
-```powershell
-python -m pip install lupa
-Get-ChildItem tests -Filter 'test_*.py' | ForEach-Object { python $_.FullName; if ($LASTEXITCODE -ne 0) { throw "Тест не пройшов: $($_.Name)" } }
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install lupa==2.8
+for test in tests/test_*.py; do
+  python "$test" || exit 1
+done
 ```
+
+На Bazzite це не змінює системний Python: залежність встановлюється лише у `.venv`.
 
 Це тести із заглушками API та симуляцією клієнтів; вони не підтверджують сумісність інтерфейсу чи API в реальній грі.
