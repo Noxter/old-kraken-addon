@@ -168,11 +168,12 @@ function Finder:ReceiveJoin(sender, payload)
     if not self.requestVersions[versionKey] and countGroups(self.requestVersions) >= 2000 then return false end
     if action == 'apply' and self.requests[id] and self.requests[id][sender] == nil
         and countGroups(self.requests[id]) >= 200 then return false end
+    local isNew = action == 'apply' and (not self.requests[id] or self.requests[id][sender] == nil)
     self.requestVersions[versionKey] = version
     self.requests[id] = self.requests[id] or {}
     self.requests[id][sender] = action == 'apply' and role or nil
     if self.decisions[id] then self.decisions[id][sender] = nil end
-    return true
+    return true, isNew, id, role
 end
 
 function Finder:Decide(id, applicant, accept)

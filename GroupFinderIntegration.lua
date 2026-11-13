@@ -87,9 +87,25 @@ for _, kind in ipairs({'ANNOUNCE', 'UPDATE', 'SYNC', 'CANCEL'}) do
 end
 comm:RegisterHandler('JOIN', function(sender, _, payload)
     local name = active and normalizeSender(sender)
-    if name and finder:ReceiveJoin(name, payload) then
+    if not name then return end
+    local updated, isNew, id, role = finder:ReceiveJoin(name, payload)
+    if updated then
         saveOwned()
         OldKraken:Fire('GROUP_FINDER_CHANGED')
+        if isNew then
+            local group = finder.groups[finder.identity .. '\001' .. id]
+            if group then
+                local roleLabels = { ['']='без ролі', tank='танк', healer='лікар', dps='DPS', flex='гнучка роль' }
+                local message = 'Нова заявка: ' .. name .. ' (' .. (roleLabels[role] or role) .. ') — ' .. group.title
+                print('|cff2ec4b6Old Kraken|r: ' .. message .. '. /okr group')
+                if UIErrorsFrame and type(UIErrorsFrame.AddMessage) == 'function' then
+                    pcall(UIErrorsFrame.AddMessage, UIErrorsFrame, message, 1, 0.82, 0)
+                end
+                if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK then
+                    pcall(PlaySound, SOUNDKIT.READY_CHECK)
+                end
+            end
+        end
     end
 end)
 comm:RegisterHandler('RESPONSE', function(sender, _, payload)
