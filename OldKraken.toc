@@ -7,4 +7,5 @@
 
 Database.lua
 Core.lua
+Communication.lua
 GuildRoster.lua
