@@ -55,11 +55,20 @@
 
 ```
 OldKraken.toc
+Database.lua
 Core.lua
 GuildRoster.lua
 README.md
 LICENSE
 ```
+
+### Ініціалізація та локальні дані
+
+- `Database.lua` — єдине місце ініціалізації `OldKrakenDB`, значень за замовчуванням і версії схеми `schemaVersion`.
+- `Core.lua` — життєвий цикл аддона та внутрішні події `OldKraken:On()` / `OldKraken:Fire()`.
+- `GuildRoster.lua` — інтерфейс і робота з ігровим API ростера; налаштування читаються з `OldKraken.DB.settings.roster`.
+- Існуючі таблиці `settings`, `roster` та `events` зберігаються під час ініціалізації. Нові поля додаються без очищення наявних даних.
+- Поточна схема БД — `1`. Поле `version` залишається версією аддона, а `schemaVersion` використовується для міграцій структури даних.
 
 ## Використання
 
