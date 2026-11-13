@@ -61,3 +61,20 @@ LICENSE
 ## Ліцензія
 
 MIT. Див. файл [LICENSE](LICENSE).
+
+## Готовий ZIP для встановлення
+
+Після публікації GitHub Release автоматично запускається GitHub Actions workflow
+`.github/workflows/package-release.yml`. Він створює `OldKraken.zip` із такою структурою:
+
+```
+OldKraken/
+  OldKraken.toc
+  Core.lua
+  GuildRoster.lua
+```
+
+Щоб створити реліз: відкрий **Releases** → **Draft a new release**, створи тег версії
+(наприклад, `v0.2.0`), вибери цільову гілку `main` і натисни **Publish release**.
+Після успішного виконання workflow файл `OldKraken.zip` з'явиться серед assets цього релізу.
+Встановлювати потрібно саме цей ZIP, а не стандартний архів **Source code (zip)**.
