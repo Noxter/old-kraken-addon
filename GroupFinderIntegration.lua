@@ -16,6 +16,8 @@ end
 local function normalizeSender(sender)
     if type(sender) ~= 'string' or sender == '' or #sender > 128 then return nil end
     if sender == finder.identity then return sender end
+    -- Some client builds provide only the character name.
+    if not sender:find('[ %-]') then return sender end
     local realm = GetRealmName and GetRealmName() or ''
     if type(realm) ~= 'string' or realm == '' then return nil end
     for _, separator in ipairs({' ', '-'}) do
