@@ -26,6 +26,7 @@ local SORT_LABELS = {
     level = "Рівень",
     class = "Клас",
     rank = "Ранг",
+    zone = "Локація",
 }
 
 local settings
@@ -39,7 +40,7 @@ local function GetSettings()
     if settings.status ~= "online" and settings.status ~= "offline" then
         settings.status = "all"
     end
-    if settings.sort ~= "name" and settings.sort ~= "class" and settings.sort ~= "rank" then
+    if settings.sort ~= "name" and settings.sort ~= "class" and settings.sort ~= "rank" and settings.sort ~= "zone" then
         settings.sort = "level"
     end
     if settings.ascending == nil then
@@ -124,6 +125,9 @@ local function SortMembers(a, b)
     elseif key == "rank" then
         left = tonumber(a.rankIndex) or 0
         right = tonumber(b.rankIndex) or 0
+    elseif key == "zone" then
+        left = string.lower(a.zone or "")
+        right = string.lower(b.zone or "")
     else
         left = tonumber(a.level) or 0
         right = tonumber(b.level) or 0
@@ -260,7 +264,7 @@ local function CreateRosterWindow()
     CreateColumnHeader(frame, "РАНГ", "rank", 210, 150)
     CreateColumnHeader(frame, "РІВ.", "level", 366, 52)
     CreateColumnHeader(frame, "КЛАС", "class", 422, 112)
-    CreateColumnHeader(frame, "ЛОКАЦІЯ", nil, 538, 220)
+    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 538, 220)
     CreateColumnHeader(frame, "СТАТУС", nil, 764, 100)
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
