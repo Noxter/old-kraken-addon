@@ -82,7 +82,10 @@ local function UpdateFilterButtonLabels()
     end
 
     rosterFrame.statusButton:SetText("Статус: " .. (STATUS_LABELS[settings.status] or "Усі"))
-    rosterFrame.classButton:SetText("Клас: " .. (settings.class == "ALL" and "Усі" or ClassLabel(settings.class)))
+    UIDropDownMenu_SetText(
+        rosterFrame.classDropdown,
+        settings.class == "ALL" and "Усі класи" or ClassLabel(settings.class)
+    )
 end
 
 local function MatchesFilters(member)
@@ -218,28 +221,35 @@ local function CreateRosterWindow()
     end)
     frame.statusButton = statusButton
 
-    local classButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    classButton:SetSize(155, 24)
-    classButton:SetPoint("LEFT", statusButton, "RIGHT", 8, 0)
-    classButton:SetScript("OnClick", function()
-        local currentIndex = 0
-        for index, classToken in ipairs(CLASS_ORDER) do
-            if classToken == settings.class then
-                currentIndex = index
-                break
-            end
-        end
-
-        if settings.class == "ALL" then
-            settings.class = CLASS_ORDER[1]
-        elseif currentIndex >= #CLASS_ORDER then
+    local classDropdown = CreateFrame("Frame", "OldKrakenClassDropdown", frame, "UIDropDownMenuTemplate")
+    classDropdown:SetPoint("LEFT", statusButton, "RIGHT", -8, -2)
+    UIDropDownMenu_SetWidth(classDropdown, 150)
+    UIDropDownMenu_JustifyText(classDropdown, "LEFT")
+    UIDropDownMenu_Initialize(classDropdown, function(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = "Усі класи"
+        info.value = "ALL"
+        info.checked = settings.class == "ALL"
+        info.func = function()
             settings.class = "ALL"
-        else
-            settings.class = CLASS_ORDER[currentIndex + 1]
+            Roster:Render()
         end
-        Roster:Render()
+        UIDropDownMenu_AddButton(info, level)
+
+        for _, classToken in ipairs(CLASS_ORDER) do
+            local token = classToken
+            local classInfo = UIDropDownMenu_CreateInfo()
+            classInfo.text = ClassLabel(token)
+            classInfo.value = token
+            classInfo.checked = settings.class == token
+            classInfo.func = function()
+                settings.class = token
+                Roster:Render()
+            end
+            UIDropDownMenu_AddButton(classInfo, level)
+        end
     end)
-    frame.classButton = classButton
+    frame.classDropdown = classDropdown
 
     local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -72)
