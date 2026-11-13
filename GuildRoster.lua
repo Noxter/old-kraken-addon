@@ -139,6 +139,7 @@ local function CreateColumnHeader(parent, label, key, x, width)
     end
 
     local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(button)
     button:SetSize(width, 22)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -105)
     button:SetText(label)
@@ -168,6 +169,8 @@ local function CreateRosterWindow()
     frame:SetScript("OnDragStart", frame.StartMoving)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:SetClampedToScreen(true)
+    OldKraken.UIStyle.Window(frame)
+    OldKraken.UIStyle.Panel(frame, 12, -132, 852, 440)
     frame:Hide()
 
     if frame.TitleText then
@@ -175,6 +178,7 @@ local function CreateRosterWindow()
     end
 
     local refreshButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(refreshButton)
     refreshButton:SetSize(92, 24)
     refreshButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -38, -30)
     refreshButton:SetText("Оновити")
@@ -195,6 +199,7 @@ local function CreateRosterWindow()
     frame.searchBox = searchBox
 
     local statusButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(statusButton)
     statusButton:SetSize(125, 24)
     statusButton:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
     statusButton:SetScript("OnClick", function()
@@ -279,6 +284,11 @@ local function CreateRow(index, parent)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(CONTENT_WIDTH, ROW_HEIGHT)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
+    if index % 2 == 0 then
+        local stripe = row:CreateTexture(nil, "BACKGROUND")
+        stripe:SetAllPoints(row)
+        stripe:SetColorTexture(0.18, 0.55, 0.53, 0.10)
+    end
 
     local columns = {
         { x = 6, width = 190 },

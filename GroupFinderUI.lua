@@ -13,6 +13,13 @@ local roles = {'', 'tank', 'healer', 'dps', 'flex'}
 local roleLabels = {['']='Без ролі', tank='Танк', healer='Лікар', dps='DPS', flex='Гнучка'}
 local pendingLabels = {pending='Очікує', accept='Прийнято', reject='Відхилено', closed='Закрито', retry='Подайте заявку знову'}
 
+StaticPopupDialogs.OLDKRAKEN_REMOVE_MEMBER = {
+    text = 'Видалити %s з групи? Якщо гравець у паті, аддон спробує виключити його з паті.',
+    button1 = 'Видалити', button2 = 'Скасувати', timeout = 0,
+    whileDead = true, hideOnEscape = true, preferredIndex = 3,
+    OnAccept = function(_, callback) if type(callback) == 'function' then callback() end end,
+}
+
 local function cycle(values, value)
     for i, item in ipairs(values) do if item == value then return values[i % #values + 1] end end
     return values[1]
@@ -20,6 +27,7 @@ end
 
 local function button(parent, label, x, y, width, callback)
     local b = CreateFrame('Button', nil, parent, 'UIPanelButtonTemplate')
+    OldKraken.UIStyle.Button(b)
     b:SetSize(width, 23); b:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y); b:SetText(label)
     b:SetScript('OnClick', callback)
     return b
@@ -104,15 +112,16 @@ local function refresh()
             if not row then
                 row = {}
                 row.name = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-                row.name:SetWidth(190); row.name:SetHeight(22); row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
+                row.name:SetWidth(155); row.name:SetHeight(22); row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
                 row.hover = CreateFrame('Frame', nil, window.detailsContent)
-                row.hover:SetSize(190, 22); row.hover:EnableMouse(true)
+                row.hover:SetSize(155, 22); row.hover:EnableMouse(true)
                 row.hover:SetScript('OnEnter', function(self)
                     if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(self.memberLabel); GameTooltip:Show() end
                 end)
                 row.hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
                 row.invite = CreateFrame('Button', nil, window.detailsContent, 'UIPanelButtonTemplate')
-                row.invite:SetSize(105, 22); row.invite:SetText('Запросити')
+                OldKraken.UIStyle.Button(row.invite)
+                row.invite:SetSize(100, 22); row.invite:SetText('Запросити')
                 row.invite:SetScript('OnClick', function(self)
                     local current = selected and Finder.groups[selected]
                     local name = self.memberName
@@ -120,6 +129,45 @@ local function refresh()
                     for j = 2, #current.members do
                         if current.members[j] == name then invitePlayer(name); return end
                     end
+                end)
+                row.remove = CreateFrame('Button', nil, window.detailsContent, 'UIPanelButtonTemplate')
+                OldKraken.UIStyle.Button(row.remove)
+                row.remove:SetSize(30, 22); row.remove:SetText('×')
+                row.remove:SetScript('OnEnter', function(self)
+                    if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити з оголошення або виключити з паті'); GameTooltip:Show() end
+                end)
+                row.remove:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+                row.remove:SetScript('OnClick', function(self)
+                    local name = self.memberName
+                    local key = selected
+                    local function remove()
+                    local current = key and Finder.groups[key]
+                    if not current or current.owner ~= Finder.identity or current.closed then return end
+                    local present = false
+                    for j = 2, #current.members do if current.members[j] == name then present = true; break end end
+                    if not present then return end
+                    if not current.partyObserved then
+                        print('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.')
+                    elseif current.partyObserved[name] then
+                        if type(UnitIsGroupLeader) == 'function' and not UnitIsGroupLeader('player') then
+                            print('|cffff5555Old Kraken|r: Для виключення гравця потрібні права лідера групи.')
+                        elseif not C_PartyInfo or type(C_PartyInfo.UninviteUnit) ~= 'function' then
+                            print('|cffff5555Old Kraken|r: API виключення недоступний. Видаліть гравця з паті вручну.')
+                        else
+                            local ok, result = pcall(C_PartyInfo.UninviteUnit, name)
+                            if ok and result ~= false then
+                                print('|cff2ec4b6Old Kraken|r: Спроба виключити ' .. name .. ' з паті. Перевірте повідомлення гри.')
+                            else
+                                print('|cffff5555Old Kraken|r: Не вдалося виключити ' .. name .. ' з паті.')
+                            end
+                        end
+                    elseif Finder:RemoveMember(current.id, name) then
+                        Finder:Changed(); refresh()
+                    else
+                        print('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.')
+                    end
+                    end
+                    StaticPopup_Show('OLDKRAKEN_REMOVE_MEMBER', name, nil, remove)
                 end)
                 window.memberRows[i] = row
             end
@@ -129,11 +177,14 @@ local function refresh()
             row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 24)
             row.name:SetText(name .. ' (' .. state .. ')'); row.name:Show()
             row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. ' (' .. state .. ')'; row.hover:Show()
-            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 195, -top - (i - 1) * 24)
+            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (i - 1) * 24)
             row.invite.memberName = name
             if canManage and i > 1 and g.partyObserved and not g.partyObserved[name] then row.invite:Show() else row.invite:Hide() end
+            row.remove:ClearAllPoints(); row.remove:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 265, -top - (i - 1) * 24)
+            row.remove.memberName = name
+            if canManage and i > 1 then row.remove:Show() else row.remove:Hide() end
         elseif row then
-            row.name:Hide(); row.hover:Hide(); row.invite:Hide()
+            row.name:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
         end
     end
     window.detailsContent:SetHeight(math.max(86, top + #members * 24 + 4))
@@ -143,8 +194,6 @@ local function refresh()
     window.withdrawButton:SetShown(isOther and pending == 'pending')
     window.cancelButton:SetShown(canManage)
     window.editButton:SetShown(canManage)
-    window.applicantBox:SetShown(canManage); window.applicantBox.label:SetShown(canManage)
-    window.removeMemberButton:SetShown(canManage)
     window.roleButton:SetShown(tab == 'create' or isOther)
     local applicants = {}
     if canManage then
@@ -183,6 +232,9 @@ local function createWindow()
     f:SetSize(900, 590); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true)
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving); f:SetScript('OnDragStop', f.StopMovingOrSizing)
     f:SetClampedToScreen(true); f:Hide()
+    OldKraken.UIStyle.Window(f)
+    OldKraken.UIStyle.Panel(f, 12, -60, 526, 255)
+    OldKraken.UIStyle.Panel(f, 542, -60, 335, 255)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
     f.tabs = {}
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
@@ -328,11 +380,6 @@ local function createWindow()
         f.maxBox:SetText(tostring(g.maxSize)); f.minBox:SetText(tostring(g.minLevel)); f.maxLevelBox:SetText(tostring(g.maxLevel))
         f.categoryButton:SetText(categoryLabels[category]); f.roleButton:SetText('Роль: '..roleLabels[role]); refresh()
     end)
-    f.applicantBox = input(f, 'Ім’я учасника', 550, -445, 200, '')
-    f.removeMemberButton = button(f, 'Видалити учасника', 750, -500, 125, function()
-        local g=selected and Finder.groups[selected]
-        if g and g.owner==Finder.identity and Finder:RemoveMember(g.id, f.applicantBox:GetText()) then Finder:Changed(); refresh() end
-    end)
     return f
 end
 
@@ -351,6 +398,7 @@ local function showAlert(message, kind, key)
     print('|cff2ec4b6Old Kraken|r: ' .. message .. '. /okr group')
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
+        OldKraken.UIStyle.Button(groupAlert)
         groupAlert:SetSize(500, 48)
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
         groupAlert:SetFrameStrata('DIALOG')
