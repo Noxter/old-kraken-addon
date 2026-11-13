@@ -158,7 +158,13 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
 end
 
 function Communication:HandleCommand(command)
-    local subcommand = string.match(command or "", "^comm%s*(.*)$")
+    command = command or ""
+    local subcommand
+    if command == "comm" then
+        subcommand = ""
+    else
+        subcommand = string.match(command, "^comm%s+(.+)$")
+    end
     if subcommand == nil then
         return false
     end
