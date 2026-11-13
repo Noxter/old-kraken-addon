@@ -32,27 +32,11 @@ local SORT_LABELS = {
 local settings
 
 local function GetSettings()
-    OldKrakenDB = OldKrakenDB or {}
-    OldKrakenDB.settings = OldKrakenDB.settings or {}
-    OldKrakenDB.settings.roster = OldKrakenDB.settings.roster or {}
-    settings = OldKrakenDB.settings.roster
-
-    if settings.status ~= "online" and settings.status ~= "offline" then
-        settings.status = "all"
-    end
-    if settings.sort ~= "name" and settings.sort ~= "class" and settings.sort ~= "rank" and settings.sort ~= "zone" then
-        settings.sort = "level"
-    end
-    if settings.ascending == nil then
-        settings.ascending = true
-    end
-    if not settings.class then
-        settings.class = "ALL"
-    end
-    if settings.search == nil then
-        settings.search = ""
+    if not OldKraken.DB then
+        return nil
     end
 
+    settings = OldKraken.DB.settings.roster
     return settings
 end
 
@@ -343,6 +327,10 @@ local function UpdateSummary()
 end
 
 function Roster:Render()
+    if not GetSettings() then
+        return
+    end
+
     if not rosterFrame then
         CreateRosterWindow()
     end
@@ -439,6 +427,11 @@ function Roster:RequestUpdate()
 end
 
 function Roster:Show()
+    if not GetSettings() then
+        print("|cff2ec4b6Old Kraken|r: база даних ще не ініціалізована.")
+        return
+    end
+
     local frame = CreateRosterWindow()
     frame:Show()
     self:Load()
@@ -464,4 +457,3 @@ SlashCmdList["OLDKRAKEN"] = function(message)
     end
 end
 
-GetSettings()
