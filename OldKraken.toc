@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Old Kraken Guild Addon
+## Notes: Ukrainian guild management tools for WoW Forever
+## Author: Noxter
+## Version: 0.1.0
+## SavedVariables: OldKrakenDB
+
+Core.lua
