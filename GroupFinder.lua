@@ -85,6 +85,64 @@ function Finder:EncodeGroup(group)
     return pack(fields)
 end
 
+-- Combine actual party members with accepted reservations that have not joined
+-- yet. A member previously observed in the party frees their place on leaving.
+function Finder:SyncPartyMembers(party)
+    if type(party) ~= 'table' or #party > 4 then return false, false end
+    local current, partyNames = {}, {}
+    for _, name in ipairs(party) do
+        if not validText(name, 1, 128) or name == self.identity or current[name] then return false, false end
+        current[name] = true
+        partyNames[#partyNames + 1] = name
+    end
+    table.sort(partyNames)
+    local changed = false
+    for _, group in pairs(self.groups) do
+        if group.owner == self.identity and not group.closed then
+            local previous = group.partyObserved or {}
+            local members, included = {self.identity}, {[self.identity] = true}
+            for i = 2, #group.members do
+                local name = group.members[i]
+                if (not previous[name] or current[name]) and not included[name] then
+                    members[#members + 1] = name
+                    included[name] = true
+                end
+            end
+            for _, name in ipairs(partyNames) do
+                if not included[name] then members[#members + 1] = name; included[name] = true end
+            end
+            if #members > 200 then return false, changed end
+            local differs = #members ~= #group.members
+            if not differs then
+                for i, name in ipairs(members) do if group.members[i] ~= name then differs = true; break end end
+            end
+            local observedChanged = false
+            for name in pairs(previous) do if not current[name] then observedChanged = true; break end end
+            if not observedChanged then
+                for name in pairs(current) do if not previous[name] then observedChanged = true; break end end
+            end
+            if differs then
+                local oldMembers, oldMax, oldRevision = group.members, group.maxSize, group.revision
+                group.members = members
+                group.maxSize = math.max(group.maxSize, #members)
+                group.revision = group.revision + 1
+                if not self.send('UPDATE', self:EncodeGroup(group)) then
+                    group.members, group.maxSize, group.revision = oldMembers, oldMax, oldRevision
+                    return false, changed
+                end
+                changed = true
+            end
+            if observedChanged then
+                local observed = {}
+                for name in pairs(current) do observed[name] = true end
+                group.partyObserved = observed
+                changed = true
+            end
+        end
+    end
+    return true, changed
+end
+
 function Finder:ReceiveGroup(sender, payload)
     local f = unpackFields(payload, 212)
     if not f or #f < 12 then return false end

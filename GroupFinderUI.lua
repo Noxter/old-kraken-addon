@@ -260,31 +260,48 @@ function Finder:Show()
 end
 OldKraken:On('GROUP_FINDER_CHANGED', refresh)
 OldKraken:On('GROUP_FINDER_ALERT_SETTING', function()
-    if groupAlert and not Finder:GroupAlertsEnabled() then groupAlert:Hide() end
+    if groupAlert and groupAlert.kind == 'group' and not Finder:GroupAlertsEnabled() then groupAlert:Hide() end
     refresh()
 end)
 
-OldKraken:On('GROUP_FINDER_NEW', function(group)
-    if not Finder:GroupAlertsEnabled() then return end
-    local free = math.max(0, group.maxSize - #group.members)
-    local message = group.owner .. ' шукає групу: ' .. group.title ..
-        ' | рівень ' .. group.minLevel .. '–' .. group.maxLevel .. ' | місць: ' .. free
+local function showAlert(message, kind, key)
     print('|cff2ec4b6Old Kraken|r: ' .. message .. '. /okr group')
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         groupAlert:SetSize(500, 48)
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
         groupAlert:SetFrameStrata('DIALOG')
-        groupAlert:SetScript('OnClick', function(self) self:Hide(); Finder:Show() end)
+        groupAlert:SetScript('OnClick', function(self)
+            local target = self.groupKey
+            self:Hide()
+            if target and Finder.groups[target] then
+                tab, selected, editing, offset, requestOffset = 'mine', target, nil, 0, 0
+            end
+            Finder:Show()
+        end)
         groupAlert:SetScript('OnUpdate', function(self, elapsed)
             self.remaining = (self.remaining or 0) - elapsed
             if self.remaining <= 0 then self:Hide() end
         end)
     end
+    groupAlert.kind, groupAlert.groupKey = kind, key
     groupAlert:SetText(message .. '\nНатисніть, щоб відкрити пошук груп')
     groupAlert.remaining = 10
     groupAlert:Show()
     if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK then
         pcall(PlaySound, SOUNDKIT.READY_CHECK)
     end
+end
+
+OldKraken:On('GROUP_FINDER_NEW', function(group)
+    if not Finder:GroupAlertsEnabled() then return end
+    local free = math.max(0, group.maxSize - #group.members)
+    local message = group.owner .. ' шукає групу: ' .. group.title ..
+        ' | рівень ' .. group.minLevel .. '–' .. group.maxLevel .. ' | місць: ' .. free
+    showAlert(message, 'group')
+end)
+
+OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
+    local message = 'Нова заявка: ' .. name .. ' (' .. (roleLabels[role] or role) .. ') — ' .. group.title
+    showAlert(message, 'request', group.owner .. '\001' .. group.id)
 end)

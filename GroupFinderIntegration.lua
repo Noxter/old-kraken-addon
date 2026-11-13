@@ -3,6 +3,7 @@ local finder = OldKraken.GroupFinder
 local comm = OldKraken.Communication
 local active, storage, nextQuery, nextBroadcast, nextRetry, lastQuery = false, nil, 0, 0, 0, -60
 local currentKey, tickerStarted = nil, false
+local partyDirty = true
 local diagnostics = { received = 0, accepted = 0, rejected = 0 }
 
 local function profileKey(name, guild)
@@ -29,6 +30,7 @@ end
 local function deactivate()
     if active then comm:ClearProtocolState() end
     active, finder.active, storage, currentKey = false, false, nil, nil
+    partyDirty = true
 end
 
 local function saveOwned()
@@ -38,6 +40,13 @@ local function saveOwned()
         if group.owner == finder.identity then records[#records + 1] = finder:EncodeGroup(group) end
     end
     storage.records = records
+    storage.observedParty = {}
+    for _, group in pairs(finder.groups) do
+        if group.owner == finder.identity and group.partyObserved then
+            storage.observedParty[group.id] = {}
+            for name in pairs(group.partyObserved) do storage.observedParty[group.id][name] = true end
+        end
+    end
     storage.hiddenGroups = {}
     for _, group in pairs(finder.groups) do
         if group.owner == finder.identity and group.closed and group.hidden then storage.hiddenGroups[group.id] = true end
@@ -120,15 +129,7 @@ comm:RegisterHandler('JOIN', function(sender, _, payload)
         if isNew then
             local group = finder.groups[finder.identity .. '\001' .. id]
             if group then
-                local roleLabels = { ['']='без ролі', tank='танк', healer='лікар', dps='DPS', flex='гнучка роль' }
-                local message = 'Нова заявка: ' .. name .. ' (' .. (roleLabels[role] or role) .. ') — ' .. group.title
-                print('|cff2ec4b6Old Kraken|r: ' .. message .. '. /okr group')
-                if UIErrorsFrame and type(UIErrorsFrame.AddMessage) == 'function' then
-                    pcall(UIErrorsFrame.AddMessage, UIErrorsFrame, message, 1, 0.82, 0)
-                end
-                if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK then
-                    pcall(PlaySound, SOUNDKIT.READY_CHECK)
-                end
+                OldKraken:Fire('GROUP_FINDER_NEW_REQUEST', group, name, role)
             end
         end
     end
@@ -148,8 +149,35 @@ comm:RegisterHandler('QUERY', function(_, _, payload)
 end)
 
 function finder:Changed()
+    partyDirty = true
     saveOwned()
     OldKraken:Fire('GROUP_FINDER_CHANGED')
+end
+
+local function readParty()
+    if type(IsInGroup) ~= 'function' or type(IsInRaid) ~= 'function'
+        or type(GetNumGroupMembers) ~= 'function' or type(UnitName) ~= 'function' then return nil end
+    local ok, result = pcall(function()
+        local function plain(value)
+            if type(issecretvalue) == 'function' and issecretvalue(value) then return nil end
+            return value
+        end
+        local raid, grouped = plain(IsInRaid()), plain(IsInGroup())
+        if type(raid) ~= 'boolean' or type(grouped) ~= 'boolean' or raid then return nil end
+        if not grouped then return {} end
+        local count = plain(GetNumGroupMembers())
+        if type(count) ~= 'number' or count % 1 ~= 0 or count < 2 or count > 5 then return nil end
+        local names = {}
+        for i = 1, count - 1 do
+            local name, surname = UnitName('party' .. i)
+            name, surname = plain(name), plain(surname)
+            if type(name) ~= 'string' or name == '' then return nil end
+            if finder.identity:find(' ', 1, true) and (type(surname) ~= 'string' or surname == '') then return nil end
+            names[#names + 1] = type(surname) == 'string' and surname ~= '' and (name .. ' ' .. surname) or name
+        end
+        return names
+    end)
+    return ok and result or nil
 end
 
 function finder:PrintSyncStatus()
@@ -176,7 +204,9 @@ end
 local frame = CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
 frame:RegisterEvent('GUILD_ROSTER_UPDATE')
-frame:SetScript('OnEvent', function()
+frame:RegisterEvent('GROUP_ROSTER_UPDATE')
+frame:SetScript('OnEvent', function(_, event)
+    if event == 'GROUP_ROSTER_UPDATE' then partyDirty = true; return end
     local identity, name = playerIdentity()
     local guild = GetGuildInfo and GetGuildInfo('player')
     if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == ''
@@ -227,6 +257,17 @@ frame:SetScript('OnEvent', function()
         for id, hidden in pairs(storage.hiddenGroups) do
             local group = type(id) == 'string' and finder.groups[identity .. '\001' .. id]
             if group and group.closed and hidden == true then group.hidden = true end
+        end
+    end
+    if type(storage.observedParty) == 'table' then
+        for id, observed in pairs(storage.observedParty) do
+            local group = type(id) == 'string' and finder.groups[identity .. '\001' .. id]
+            if group and type(observed) == 'table' then
+                group.partyObserved = {}
+                for _, member in ipairs(group.members) do
+                    if member ~= identity and observed[member] == true then group.partyObserved[member] = true end
+                end
+            end
         end
     end
     if type(storage.pending) == 'table' then
@@ -295,6 +336,7 @@ frame:SetScript('OnEvent', function()
         end
     end
     active = true
+    partyDirty = true
     finder.active = true
     currentKey = key
     nextQuery, nextBroadcast, nextRetry, lastQuery = 0, 0, 0, -60
@@ -310,6 +352,14 @@ frame:SetScript('OnEvent', function()
                 return
             end
             local now = GetTime()
+            if partyDirty then
+                local party = readParty()
+                if party then
+                    local complete, changed = finder:SyncPartyMembers(party)
+                    partyDirty = not complete
+                    if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
+                end
+            end
             if now >= nextQuery and comm:RequestSync() then nextQuery = now + 180 end
             if now >= nextBroadcast then finder:OnQuery(); nextBroadcast = now + 300 end
             if now >= nextRetry and finder:RetryPending() then nextRetry = now + 180 end
