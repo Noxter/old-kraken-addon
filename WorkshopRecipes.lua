@@ -52,13 +52,26 @@ local function connect()
     if type(db.workshop.guilds)~='table' then db.workshop.guilds={} end
     if type(db.workshop.guilds[k])~='table' then db.workshop.guilds[k]={} end
     scope=db.workshop.guilds[k]; if type(scope.recipes)~='table' then scope.recipes={} end
+    if type(scope.recipeSources)~='table' then scope.recipeSources={} end
+    if type(scope.recipeVersions)~='table' then scope.recipeVersions={} end
     active,identity,profile,people=true,name,k,scope.recipes
     if type(people[name])~='table' then people[name]={} end
+    if not integer(scope.recipeVersions[name],1,9000000000000000) then scope.recipeVersions[name]=GetServerTime()*1000 end
     if type(scope.pendingRecipes)~='table' then scope.pendingRecipes={} end
     if type(scope.pendingRecipes[name])~='table' then scope.pendingRecipes[name]={} end
     pendingLearned,learnAttempts=scope.pendingRecipes[name],{}
     activeQuery,sendQueue,lastIncoming,resultSet=nil,{}, {}, {}
     changed()
+end
+local function storeRecipe(owner,r,relayed)
+    if type(people[owner])~='table' then if count(people)>=1000 then return nil end; people[owner]={} end
+    if type(scope.recipeSources[owner])~='table' then scope.recipeSources[owner]={} end
+    local records,sources=people[owner],scope.recipeSources[owner]
+    local old=records[r.recipe]
+    if not validRecord(old) or (not relayed and sources[r.recipe]==true) or old.seen<=r.seen then
+        records[r.recipe]=r; sources[r.recipe]=relayed and true or false
+    end
+    return records[r.recipe]
 end
 local function callBool(api,name,required)
     if type(api[name])~='function' then return not required end
@@ -109,6 +122,9 @@ local function recordLearned(r)
     local own=people[identity]; local previous=own[r.recipe]
     if not previous and count(own)>=5000 then return false end
     if r.product=='' and type(previous)=='table' and previous.item==r.item and safeText(previous.product,0,120) then r.product=previous.product end
+    if not validRecord(previous) or previous.item~=r.item or previous.profession~=r.profession or previous.name~=r.name or previous.product~=r.product then
+        scope.recipeVersions[identity]=math.max((scope.recipeVersions[identity] or 0)+1,GetServerTime()*1000)
+    end
     own[r.recipe]=r
     if recipeCatalog and (recipeCatalog[r.recipe] or catalogSize<10000) then
         if not recipeCatalog[r.recipe] then catalogSize=catalogSize+1 end
@@ -273,7 +289,7 @@ comm:RegisterHandler('WRBATCH',function(sender,_,payload)
         if matches(r,activeQuery.query) and (people[sender][r.recipe] or cachedCount<5000) then
             local old=people[sender][r.recipe]
             if not old then cachedCount=cachedCount+1 end
-            if not validRecord(old) or old.seen<=r.seen then people[sender][r.recipe]=r end
+            storeRecipe(sender,r,false)
             local k=sender..'\001'..r.recipe
             if resultSet[k] or resultCount<5000 then if not resultSet[k] then resultCount=resultCount+1 end; resultSet[k]={owner=sender,record=people[sender][r.recipe]} end
             updated=true
@@ -289,8 +305,7 @@ comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if not matches(r,activeQuery.query) then return end
     if type(people[sender])~='table' then if count(people)>=1000 then return end; people[sender]={} end
     if not people[sender][r.recipe] and count(people[sender])>=5000 then return end
-    local old=people[sender][r.recipe]
-    if not validRecord(old) or old.seen<=r.seen then people[sender][r.recipe]=r end
+    storeRecipe(sender,r,false)
     local k=sender..'\001'..r.recipe
     if resultSet[k] or count(resultSet)<500 then resultSet[k]={owner=sender,record=people[sender][r.recipe]} end
     changed(); recipeChanged=true
@@ -303,8 +318,9 @@ comm:RegisterHandler('WRLEARN',function(sender,_,payload)
     if type(people[sender])~='table' then if count(people)>=1000 then return end; people[sender]={} end
     if not people[sender][r.recipe] and count(people[sender])>=5000 then return end
     local old=people[sender][r.recipe]
-    if validRecord(old) and old.seen>=r.seen then return end
-    people[sender][r.recipe]=r
+    local sources=scope.recipeSources[sender]
+    if validRecord(old) and old.seen>=r.seen and not (type(sources)=='table' and sources[r.recipe]) then return end
+    storeRecipe(sender,r,false)
     if activeQuery and GetTime()<=activeQuery.untilTime then
         local k=sender..'\001'..r.recipe
         if matches(r,activeQuery.query) and (resultSet[k] or count(resultSet)<500) then resultSet[k]={owner=sender,record=r}
@@ -497,6 +513,34 @@ function Recipes:Show()
     if not frame then frame=createWindow() end
     frame:Show(); render()
 end
+function Recipes:ExportSnapshot()
+    if not active or not scope or type(people[identity])~='table' then return nil end
+    local out={}
+    for _,r in pairs(people[identity]) do
+        if validRecord(r) then out[#out+1]={recipe=r.recipe,item=r.item,profession=r.profession,seen=r.seen,name=r.name,product=r.product} end
+    end
+    table.sort(out,function(a,b) return a.recipe<b.recipe end)
+    return scope.recipeVersions[identity],out
+end
+function Recipes:ImportSnapshot(owner,records,relayed)
+    if not active or not safeText(owner,1,128) or owner==identity or type(records)~='table' or #records>5000 then return false end
+    for _,r in ipairs(records) do if not validRecord(r) then return false end end
+    if type(people[owner])~='table' then if count(people)>=1000 then return false end; people[owner]={} end
+    local current=people[owner]; local total=count(current)
+    for _,r in ipairs(records) do
+        local old=current[r.recipe]
+        if old or total<5000 then
+            if not old then total=total+1 end
+            storeRecipe(owner,r,relayed)
+            if activeQuery and matches(current[r.recipe],activeQuery.query) then
+                local k=owner..'\001'..r.recipe
+                if resultSet[k] or count(resultSet)<5000 then resultSet[k]={owner=owner,record=current[r.recipe]} end
+            end
+        end
+    end
+    recipeChanged=true; changed(); return true
+end
+function Recipes:ValidateSnapshotRecord(r) return validRecord(r) and true or false end
 function Recipes:GetProfessionSummaries()
     local result,seen={},{}
     for name,items in pairs(people) do

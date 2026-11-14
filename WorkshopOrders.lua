@@ -45,7 +45,7 @@ local function encode(o)
     fields[#fields+1]=#candidates; for _,name in ipairs(candidates) do fields[#fields+1]=name end
     local ackNames={}; for name in pairs(o.acks or {}) do ackNames[#ackNames+1]=name end; table.sort(ackNames)
     fields[#fields+1]=#ackNames; for _,name in ipairs(ackNames) do fields[#fields+1]=name; fields[#fields+1]=string.format('%.0f',o.acks[name]) end
-    fields[#fields+1]=o.itemID or 0; fields[#fields+1]=o.recipeID or 0
+    fields[#fields+1]=o.itemID or 0; fields[#fields+1]=o.recipeID or 0; fields[#fields+1]=o.paidByWorker or 0; fields[#fields+1]=o.assignment or 0
     return codec._pack(fields)
 end
 local function decode(payload,sender,isRelay)
@@ -63,7 +63,7 @@ local function decode(payload,sender,isRelay)
     for i=1,n do local name=f[14+i]; if not nameOK(name) or name==owner or candidates[name] then return nil end; candidates[name]=true end
     local countIndex=15+n; local ackCount=tonumber(f[countIndex]); if not int(ackCount,0,20) then return nil end
     local endIndex=countIndex+ackCount*2
-    if #f~=endIndex and #f~=endIndex+2 then return nil end
+    if #f~=endIndex and #f~=endIndex+2 and #f~=endIndex+3 and #f~=endIndex+4 then return nil end
     local acks={}
     for i=1,ackCount do
         local name,version=f[countIndex+i*2-1],tonumber(f[countIndex+i*2])
@@ -71,8 +71,10 @@ local function decode(payload,sender,isRelay)
         acks[name]=version
     end
     local itemID,recipeID=tonumber(f[endIndex+1] or 0),tonumber(f[endIndex+2] or 0)
-    if not int(itemID,0,100000000) or not int(recipeID,0,100000000) then return nil end
-    return {owner=owner,id=id,rev=rev,created=created,deadline=due,profession=prof,item=item,itemID=itemID,recipeID=recipeID,quantity=qty,reward=reward,materials=mats,note=note,status=status,worker=worker~='' and worker or nil,candidates=candidates,acks=acks}
+    local paidByWorker=tonumber(f[endIndex+3] or 0)
+    local assignment=tonumber(f[endIndex+4] or 0)
+    if not int(itemID,0,100000000) or not int(recipeID,0,100000000) or not int(paidByWorker,0,reward*10000) or not int(assignment,0,rev) then return nil end
+    return {owner=owner,id=id,rev=rev,created=created,deadline=due,profession=prof,item=item,itemID=itemID,recipeID=recipeID,quantity=qty,reward=reward,materials=mats,note=note,status=status,worker=worker~='' and worker or nil,candidates=candidates,acks=acks,paidByWorker=paidByWorker,assignment=assignment}
 end
 local function persist()
     if not scope then return end
@@ -103,7 +105,8 @@ local function connect()
     if type(db.workshop.guilds)~='table' then db.workshop.guilds={} end
     if type(db.workshop.guilds[guildKey])~='table' then db.workshop.guilds[guildKey]={} end
     scope=db.workshop.guilds[guildKey]
-    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays'}) do if type(scope[field])~='table' then scope[field]={} end end
+    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays','orderDeliveryTallies'}) do if type(scope[field])~='table' then scope[field]={} end end
+    if type(scope.orderDeliveryTallies[name])~='table' then scope.orderDeliveryTallies[name]={} end
     active,identity,profile=true,name,guildKey
     own,observed,intents,dirty,relayDirty={}, {}, {}, {}, {}
     local function loadOrders(source,target,requireOwner)
@@ -129,7 +132,7 @@ local function connect()
     end
     local stored=scope.orderIntents[name]
     if type(stored)=='table' then for k,v in pairs(stored) do
-        if type(k)=='string' and #k<194 and type(v)=='table' and (v.action=='offer' or v.action=='withdraw' or v.action=='delivered') and int(v.version,1,9000000000000000) then intents[k]={action=v.action,version=v.version} end
+        if type(k)=='string' and #k<194 and type(v)=='table' and (v.action=='offer' or v.action=='withdraw' or v.action=='delivered') and int(v.version,1,9000000000000000) then intents[k]={action=v.action,version=v.version,assignment=int(v.assignment,0,2147483647) and v.assignment or 0} end
     end end
     sequence=int(scope.orderSequences[name],0,9000000000000000) and scope.orderSequences[name] or 0
     for k in pairs(own) do dirty[k]=true end
@@ -153,25 +156,115 @@ local function intent(k,action)
     if action=='offer' and (o.status~='open' or o.deadline<GetServerTime() or o.candidates[identity]) then return false end
     if action=='withdraw' and not ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity)) then return false end
     if action=='delivered' and not (o.status=='assigned' and o.worker==identity) then return false end
-    sequence=math.max(sequence+1,GetServerTime()*1000); intents[k]={action=action,version=sequence}; nextSync=0; persist(); changed(); return true
+    sequence=math.max(sequence+1,GetServerTime()*1000); intents[k]={action=action,version=sequence,assignment=o.assignment or 0}; nextSync=0; persist(); changed(); return true
 end
 local function ownerAction(k,action,actor)
     local o=own[k]; if not active or not o then return false end
-    local oldStatus,oldWorker,oldDeadline,oldCandidates=o.status,o.worker,o.deadline,o.candidates
+    local oldStatus,oldWorker,oldDeadline,oldCandidates,oldPaid,oldAssignment=o.status,o.worker,o.deadline,o.candidates,o.paidByWorker,o.assignment
     if action=='choose' then
         if o.status~='open' or not o.candidates[actor] or o.deadline<GetServerTime() then return false end
-        o.status,o.worker='assigned',actor
+        o.status,o.worker,o.assignment='assigned',actor,o.rev+1
     elseif action=='finish' then if o.status~='delivered' then return false end; o.status='done'
+    elseif action=='received' then if o.status~='assigned' and o.status~='delivered' then return false end; o.status='done'
     elseif action=='cancel' then if o.status=='done' or o.status=='cancelled' or o.status=='deleted' then return false end; o.status='cancelled'
     elseif action=='delete' then if o.status=='deleted' then return false end; o.status='deleted'
     elseif action=='reopen' then
         local now=GetServerTime()
         if o.status~='assigned' or o.deadline>=now or now+86400>o.created+2592000 then return false end
-        o.status,o.worker,o.deadline,o.candidates='open',nil,now+86400,{}
+        o.status,o.worker,o.deadline,o.candidates,o.paidByWorker,o.assignment='open',nil,now+86400,{},0,0
     else return false end
     o.rev=o.rev+1
-    if not fits(o) then o.status,o.worker,o.deadline,o.candidates,o.rev=oldStatus,oldWorker,oldDeadline,oldCandidates,o.rev-1; return false end
+    if not fits(o) then o.status,o.worker,o.deadline,o.candidates,o.paidByWorker,o.assignment,o.rev=oldStatus,oldWorker,oldDeadline,oldCandidates,oldPaid,oldAssignment,o.rev-1; return false end
     dirty[k]=true; persist(); changed(); return true
+end
+
+local function materialRequirements(o)
+    if o.recipeID==0 or type(C_TradeSkillUI)~='table' or type(C_TradeSkillUI.GetRecipeSchematic)~='function' then return nil end
+    local ok,result=pcall(function()
+        local s=C_TradeSkillUI.GetRecipeSchematic(o.recipeID,false)
+        if type(s)~='table' or type(s.reagentSlotSchematics)~='table' then return nil end
+        local yield=int(s.quantityMin,1,10000) and s.quantityMin or 1
+        local crafts=math.ceil(o.quantity/yield); local need={}
+        local basic=type(Enum)=='table' and type(Enum.CraftingReagentType)=='table' and Enum.CraftingReagentType.Basic or 1
+        for _,slot in ipairs(s.reagentSlotSchematics) do
+            if type(slot)=='table' and (slot.reagentType==nil or slot.reagentType==basic) and type(slot.reagents)=='table' then
+                local reagent=slot.reagents[1]; local id=type(reagent)=='table' and reagent.itemID
+                if int(id,1,100000000) and int(slot.quantityRequired,1,10000) then need[id]=(need[id] or 0)+slot.quantityRequired*crafts end
+            end
+        end
+        return next(need) and need or nil
+    end)
+    return ok and result or nil
+end
+local function take(pool,id,wanted)
+    local available=pool[id] or 0; local used=math.max(0,math.min(available,wanted))
+    if used>0 then pool[id]=available-used end
+    return used
+end
+local function tallyFor(k,o)
+    local all=scope.orderDeliveryTallies[identity]; local tally=all[k]
+    if type(tally)~='table' or tally.worker~=o.worker or (tally.assignment or 0)~=(o.assignment or 0) then
+        tally={worker=o.worker,assignment=o.assignment or 0,materials={},items=0,money=0}; all[k]=tally
+    end
+    if type(tally.materials)~='table' then tally.materials={} end
+    return tally
+end
+local function partnerName(value)
+    if not nameOK(value) then return nil end
+    local base=value:match('^([^%-]+)') or value; local found={}
+    for _,source in ipairs({own,observed}) do for _,o in pairs(source) do
+        for _,name in ipairs({o.owner,o.worker or ''}) do
+            if name~=identity and name~='' and (name==value or name==base) then found[name]=true end
+        end
+    end end
+    local result; for name in pairs(found) do if result and result~=name then return nil end; result=name end
+    return result
+end
+function Orders:RecordExchange(partner,given,received,givenMoney,receivedMoney)
+    if not active or not scope then return false end
+    partner=partnerName(partner); if not partner then return false end
+    local function pool(source)
+        local out={}; if type(source)=='table' then for id,n in pairs(source) do if int(id,1,100000000) and int(n,1,1000000) then out[id]=n end end end; return out
+    end
+    given,received=pool(given),pool(received)
+    givenMoney=int(givenMoney,0,1000000000) and givenMoney or 0; receivedMoney=int(receivedMoney,0,1000000000) and receivedMoney or 0
+    local list={}
+    for _,source in ipairs({own,observed}) do for k,o in pairs(source) do
+        if (o.status=='assigned' or o.status=='delivered') and o.worker and ((o.owner==identity and o.worker==partner) or (o.worker==identity and o.owner==partner)) then list[#list+1]={key=k,order=o} end
+    end end
+    table.sort(list,function(a,b) if a.order.created~=b.order.created then return a.order.created<b.order.created end return a.key<b.key end)
+    local updated=false
+    for _,entry in ipairs(list) do
+        local o=entry.order; local isOwner=o.owner==identity; local tally=tallyFor(entry.key,o); local moved=0
+        tally.items=int(tally.items,0,o.quantity) and tally.items or 0
+        tally.money=int(tally.money,0,1000000000) and tally.money or 0
+        if o.itemID>0 then
+            local amount=take(isOwner and received or given,o.itemID,o.quantity-tally.items)
+            tally.items=tally.items+amount; moved=moved+amount
+        end
+        local needs=(o.materials=='customer' or o.materials=='mixed') and materialRequirements(o)
+        if needs then for id,need in pairs(needs) do
+            local prior=int(tally.materials[id],0,10000000) and tally.materials[id] or 0
+            local amount=take(isOwner and given or received,id,math.max(0,need-prior))
+            tally.materials[id]=prior+amount; moved=moved+amount
+        end end
+        local remaining=math.max(0,o.reward*10000-tally.money)
+        local money=math.min(isOwner and givenMoney or receivedMoney,remaining)
+        if money>0 then tally.money=tally.money+money; if isOwner then givenMoney=givenMoney-money else receivedMoney=receivedMoney-money end; moved=moved+money end
+        if moved>0 then updated=true end
+    end
+    if updated then nextSync=0; persist(); changed() end
+    return updated
+end
+local function finalizeExchanges()
+    local all=scope.orderDeliveryTallies[identity]
+    for k,tally in pairs(all) do
+        local o=get(k)
+        if type(tally)=='table' and o and o.worker==tally.worker and (tally.assignment or 0)==(o.assignment or 0) and o.itemID>0 and int(tally.items,0,o.quantity) and tally.items>=o.quantity then
+            if o.owner==identity and (o.status=='assigned' or o.status=='delivered') and (o.paidByWorker or 0)>=o.reward*10000 then ownerAction(k,'received')
+            elseif o.worker==identity and o.status=='assigned' and not intents[k] then intent(k,'delivered') end
+        end
+    end
 end
 
 local function sameOrder(a,b)
@@ -225,28 +318,40 @@ comm:RegisterHandler('WORDER',function(sender,_,payload) receiveOrder(sender,pay
 comm:RegisterHandler('WORELAY',function(sender,_,payload) receiveOrder(sender,payload,true) end)
 comm:RegisterHandler('WOREQ',function(sender,_,payload)
     if not active or not nameOK(sender) or sender==identity then return end
-    local f=codec._unpackFields(payload,4); if not f or #f~=4 or f[1]~=identity or not idOK(f[2]) then return end
+    local f=codec._unpackFields(payload,5); if not f or (#f~=4 and #f~=5) or f[1]~=identity or not idOK(f[2]) then return end
     local action,version=f[3],tonumber(f[4]); if (action~='offer' and action~='withdraw' and action~='delivered') or not int(version,1,9000000000000000) then return end
+    local assignment=tonumber(f[5] or 0); if not int(assignment,0,2147483647) then return end
     local function reject(reason) comm:SendProtocol('WOERROR',codec._pack({identity,f[2],sender,string.format('%.0f',version),reason})) end
     local k=key(identity,f[2]); local o=own[k]; if not o then reject('missing'); return end
     if (o.acks[sender] or 0)>=version then dirty[k]=true; return end
+    if (action=='delivered' or (action=='withdraw' and o.status=='assigned' and o.worker==sender)) and assignment~=(o.assignment or 0) then reject('stale'); return end
     if not o.acks[sender] and size(o.acks)>=20 then reject('capacity'); return end
-    local prevStatus,prevWorker,wasCandidate,prevAck=o.status,o.worker,o.candidates[sender],o.acks[sender]
+    local prevStatus,prevWorker,wasCandidate,prevAck,prevPaid,prevAssignment=o.status,o.worker,o.candidates[sender],o.acks[sender],o.paidByWorker,o.assignment
     if action=='offer' and o.status=='open' and o.deadline>=GetServerTime() and size(o.candidates)<20 then o.candidates[sender]=true
     elseif action=='withdraw' and o.status=='open' then o.candidates[sender]=nil
-    elseif action=='withdraw' and o.status=='assigned' and o.worker==sender then o.status,o.worker='open',nil; o.candidates[sender]=nil
+    elseif action=='withdraw' and o.status=='assigned' and o.worker==sender then o.status,o.worker,o.paidByWorker,o.assignment='open',nil,0,0; o.candidates[sender]=nil
     elseif action=='delivered' and o.status=='assigned' and o.worker==sender then o.status='delivered' end
     o.acks[sender]=version; o.rev=o.rev+1
-    if not fits(o) then o.status,o.worker,o.candidates[sender],o.acks[sender],o.rev=prevStatus,prevWorker,wasCandidate,prevAck,o.rev-1; reject('capacity'); return end
+    if not fits(o) then o.status,o.worker,o.candidates[sender],o.acks[sender],o.paidByWorker,o.assignment,o.rev=prevStatus,prevWorker,wasCandidate,prevAck,prevPaid,prevAssignment,o.rev-1; reject('capacity'); return end
     dirty[k]=true; persist(); changed()
     if action=='offer' and not wasCandidate and o.candidates[sender] then notify('Майстер пропонує допомогу',sender..' · '..o.item,k)
     elseif action=='delivered' and prevStatus=='assigned' and o.status=='delivered' then notify('Майстер позначив передачу',sender..' · '..o.item,k)
     elseif action=='withdraw' and prevWorker==sender and o.status=='open' then notify('Майстер відмовився',sender..' · '..o.item,k) end
 end)
+comm:RegisterHandler('WOPAY',function(sender,_,payload)
+    if not active or not nameOK(sender) or sender==identity then return end
+    local f=codec._unpackFields(payload,4)
+    if not f or #f~=4 or f[1]~=identity or not idOK(f[2]) then return end
+    local o=own[key(identity,f[2])]; local assignment,amount=tonumber(f[3]),tonumber(f[4])
+    if not o or o.worker~=sender or assignment~=(o.assignment or 0) or (o.status~='assigned' and o.status~='delivered') or not int(amount,0,o.reward*10000) or amount<=(o.paidByWorker or 0) then return end
+    local old=o.paidByWorker; o.paidByWorker=amount; o.rev=o.rev+1
+    if not fits(o) then o.paidByWorker=old; o.rev=o.rev-1; return end
+    dirty[key(identity,o.id)]=true; persist(); changed()
+end)
 comm:RegisterHandler('WOERROR',function(sender,_,payload)
     if not active then return end
     local f=codec._unpackFields(payload,5)
-    if not f or #f~=5 or sender~=f[1] or f[3]~=identity or (f[5]~='capacity' and f[5]~='missing') or not idOK(f[2]) then return end
+    if not f or #f~=5 or sender~=f[1] or f[3]~=identity or (f[5]~='capacity' and f[5]~='missing' and f[5]~='stale') or not idOK(f[2]) then return end
     local k=key(sender,f[2]); local pending=intents[k]
     if not pending or tonumber(f[4])~=pending.version then return end
     intents[k]=nil; persist(); changed()
@@ -266,10 +371,18 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     connect(); if not active then return end
     local now=GetTime(); if now>=nextSync then
         if comm:SendProtocol('WOQUERY','') then nextSync=now+180 end
-        for k,pending in pairs(intents) do local o=observed[k]; if o then comm:SendProtocol('WOREQ',codec._pack({o.owner,o.id,pending.action,string.format('%.0f',pending.version)})) end end
+        for k,pending in pairs(intents) do local o=observed[k]; if o then comm:SendProtocol('WOREQ',codec._pack({o.owner,o.id,pending.action,string.format('%.0f',pending.version),pending.assignment or 0})) end end
+        for k,tally in pairs(scope.orderDeliveryTallies[identity]) do
+            local o=observed[k]
+            if o and o.worker==identity and type(tally)=='table' and tally.worker==identity and (tally.assignment or 0)==(o.assignment or 0) and int(tally.money,1,o.reward*10000) and tally.money>(o.paidByWorker or 0) and (o.status=='assigned' or o.status=='delivered') then
+                comm:SendProtocol('WOPAY',codec._pack({o.owner,o.id,o.assignment or 0,tally.money}))
+            end
+        end
     end
     local expired=false; for k,o in pairs(own) do if o.created<GetServerTime()-2592000 then own[k],dirty[k]=nil,nil; expired=true end end
     for k,o in pairs(observed) do if o.created<GetServerTime()-2592000 then observed[k],intents[k],relayDirty[k],scope.orderRelays[k]=nil,nil,nil,nil; expired=true end end
+    for k in pairs(scope.orderDeliveryTallies[identity]) do if not get(k) then scope.orderDeliveryTallies[identity][k]=nil end end
+    finalizeExchanges()
     if expired then persist(); changed() end
     if now>=nextDisplay then nextDisplay=now+30; changed() end
     local k=next(dirty); if k then local o=own[k]; if not o or comm:SendProtocol('WORDER',encode(o)) then dirty[k]=nil end end
@@ -443,7 +556,20 @@ refresh=function()
         local masters=hasRecipe and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:FindMasters(o.itemID or 0,o.recipeID or 0) or {}
         local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..')' end
         local known=hasRecipe and ('\nВідомі майстри: '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\nПошук за професією; знання рецепта не підтверджено.'
-        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..(o.relayed and '\nСтан отримано через гільдію; може бути застарілим.' or '')..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
+        local tally=scope and scope.orderDeliveryTallies[identity] and scope.orderDeliveryTallies[identity][selected]
+        local progress=''
+        if type(tally)=='table' and tally.worker==o.worker and (tally.assignment or 0)==(o.assignment or 0) then
+            local mats={}; for id,n in pairs(type(tally.materials)=='table' and tally.materials or {}) do
+                if int(id,1,100000000) and int(n,1,10000000) then
+                    local name; if type(GetItemInfo)=='function' then local ok,value=pcall(GetItemInfo,id); if ok and textOK(value,1,160) then name=value end end
+                    mats[#mats+1]=(name or ('#'..id))..' ×'..n
+                end
+            end; table.sort(mats)
+            local money=tonumber(tally.money) or 0
+            progress='\nОбмін: речі '..tostring(tally.items or 0)..'/'..o.quantity..' · оплата '..math.floor(money/10000)..'з '..math.floor(money%10000/100)..'с '..(money%100)..'м / '..o.reward..'з'
+            if #mats>0 then progress=progress..'\nМатеріали: '..table.concat(mats,', ') end
+        end
+        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..(o.relayed and '\nСтан отримано через гільдію; може бути застарілим.' or '')..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..progress..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
         window.detailsContent:SetHeight(math.max(132,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
         window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending)
