@@ -471,11 +471,21 @@ local function refresh()
         window.detailsContent:SetHeight(250)
     end
 end
-local function createWindow()
-    local f=CreateFrame('Frame','OldKrakenEventsFrame',UIParent,'BasicFrameTemplateWithInset')
-    table.insert(UISpecialFrames,'OldKrakenEventsFrame'); f:SetSize(840,560); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true)
-    f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); f:SetClampedToScreen(true)
-    OldKraken.UIStyle.Window(f); if f.TitleText then f.TitleText:SetText('Old Kraken — Події гільдії') end
+local function createWindow(parent)
+    local f
+    if parent then
+        f=CreateFrame('Frame','OldKrakenEventsFrame',parent)
+    else
+        f=CreateFrame('Frame','OldKrakenEventsFrame',UIParent,'BasicFrameTemplateWithInset')
+    end
+    if not parent then table.insert(UISpecialFrames,'OldKrakenEventsFrame') end
+    f:SetSize(840,560); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetMovable(not parent); f:EnableMouse(true)
+    if not parent then
+        f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
+    end
+    f:SetClampedToScreen(true)
+    if not parent then OldKraken.UIStyle.Window(f) end
+    if f.TitleText then f.TitleText:SetText('Old Kraken — Події гільдії') end
     f.alertButton=action(f,'Сповіщення',630,-35,185,function() Events:SetAlertsEnabled(not Events:AlertsEnabled()); refresh() end)
     local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-38); note:SetText('Час подій показано за місцевим часом комп’ютера.')
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-72); f.empty:SetText('Найближчих подій немає.')
@@ -534,13 +544,24 @@ end
 function Events:Show()
     if not active then connect() end
     if not active then print('Old Kraken: календар доступний після входу до гільдії.'); return end
-    if not window then window=createWindow() end
-    window:Show(); refresh()
+    if OldKraken.UIHub then
+        OldKraken.UIHub:ShowPage('events')
+    else
+        if not window then window=createWindow() end
+        window:Show()
+    end
+    refresh()
 end
 
 function Events:ShowEvent(key)
     if events[key] and not events[key].cancelled then selected=key end
     self:Show()
+end
+if OldKraken.UIHub then
+    OldKraken.UIHub:RegisterPage('events', 'Івенти', '03', function(parent)
+        if not window then window=createWindow(parent) end
+        return window
+    end)
 end
 function Events:AlertsEnabled()
     local settings=OldKraken.DB and OldKraken.DB.settings

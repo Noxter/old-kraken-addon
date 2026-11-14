@@ -155,22 +155,29 @@ local function CreateColumnHeader(parent, label, key, x, width)
     return button
 end
 
-local function CreateRosterWindow()
+local function CreateRosterWindow(parent)
     if rosterFrame then
         return rosterFrame
     end
 
-    local frame = CreateFrame("Frame", "OldKrakenRosterFrame", UIParent, "BasicFrameTemplateWithInset")
-    table.insert(UISpecialFrames, "OldKrakenRosterFrame")
+    local frame
+    if parent then
+        frame = CreateFrame("Frame", "OldKrakenRosterFrame", parent)
+    else
+        frame = CreateFrame("Frame", "OldKrakenRosterFrame", UIParent, "BasicFrameTemplateWithInset")
+    end
+    if not parent then table.insert(UISpecialFrames, "OldKrakenRosterFrame") end
     frame:SetSize(900, 590)
-    frame:SetPoint("CENTER")
-    frame:SetMovable(true)
+    frame:SetPoint("CENTER", parent or UIParent, "CENTER")
+    frame:SetMovable(not parent)
     frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    if not parent then
+        frame:RegisterForDrag("LeftButton")
+        frame:SetScript("OnDragStart", frame.StartMoving)
+        frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    end
     frame:SetClampedToScreen(true)
-    OldKraken.UIStyle.Window(frame)
+    if not parent then OldKraken.UIStyle.Window(frame) end
     OldKraken.UIStyle.Panel(frame, 12, -132, 852, 440)
     frame:Hide()
 
@@ -454,14 +461,31 @@ function Roster:Show()
         return
     end
 
-    local frame = CreateRosterWindow()
-    frame:Show()
+    if OldKraken.UIHub then
+        OldKraken.UIHub:ShowPage("roster")
+    else
+        local frame = CreateRosterWindow()
+        frame:Show()
+    end
     self:Load()
     self:RequestUpdate()
 end
 
 function Roster:Toggle()
-    if rosterFrame and rosterFrame:IsShown() then rosterFrame:Hide() else self:Show() end
+    if OldKraken.UIHub and OldKraken.UIHub.frame and OldKraken.UIHub.frame:IsShown()
+        and OldKraken.UIHub.currentPage == "roster" then
+        OldKraken.UIHub.frame:Hide()
+    elseif rosterFrame and rosterFrame:IsShown() and not OldKraken.UIHub then
+        rosterFrame:Hide()
+    else
+        self:Show()
+    end
+end
+
+if OldKraken.UIHub then
+    OldKraken.UIHub:RegisterPage("roster", "Ростер", "01", function(parent)
+        return CreateRosterWindow(parent)
+    end)
 end
 
 local eventFrame = CreateFrame("Frame")

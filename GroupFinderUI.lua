@@ -241,9 +241,12 @@ local function showRequests()
     if not window or not window:IsShown() then return end
     refreshPeople()
     if not requestsWindow then
-        local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', window, 'BasicFrameTemplateWithInset')
+        local popupParent = window.embedded and OldKraken.UIHub.content or window
+        local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', popupParent, 'BasicFrameTemplateWithInset')
         f:Hide()
-        f:SetSize(370, 335); f:SetPoint('TOPLEFT', window, 'TOPRIGHT', 8, 0)
+        f:SetSize(370, 335)
+        if window.embedded then f:SetPoint('TOPRIGHT', popupParent, 'TOPRIGHT', -10, -50)
+        else f:SetPoint('TOPLEFT', window, 'TOPRIGHT', 8, 0) end
         f:EnableMouse(true)
         OldKraken.UIStyle.Window(f)
         f:SetFrameStrata('FULLSCREEN_DIALOG')
@@ -303,7 +306,7 @@ local function showRequests()
         f.page:SetPoint('TOPLEFT', f, 'TOPLEFT', 70, -304)
         requestsWindow = f
     end
-    if not requestsWindow:IsShown() then
+    if not window.embedded and not requestsWindow:IsShown() then
         local point, relative, relativePoint, x, y = window:GetPoint(1)
         requestsWindow.mainPosition = {point=point, relative=relative, relativePoint=relativePoint, x=x, y=y, scale=window:GetScale()}
         requestsWindow.mainMoved = false
@@ -534,17 +537,27 @@ local function refresh()
     else window.createButton:Hide(); window.categoryButton:Hide(); window.categoryLabel:Hide() end
 end
 
-local function createWindow()
-    local f = CreateFrame('Frame', 'OldKrakenGroupFinderFrame', UIParent, 'BasicFrameTemplateWithInset')
-    table.insert(UISpecialFrames, 'OldKrakenGroupFinderFrame')
-    f:SetSize(900, 590); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true)
-    f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving)
-    f:SetScript('OnDragStop', function(self)
-        self:StopMovingOrSizing()
-        if requestsWindow and requestsWindow:IsShown() then requestsWindow.mainMoved = true end
-    end)
+local function createWindow(parent)
+    local f
+    if parent then
+        f = CreateFrame('Frame', 'OldKrakenGroupFinderFrame', parent)
+    else
+        f = CreateFrame('Frame', 'OldKrakenGroupFinderFrame', UIParent, 'BasicFrameTemplateWithInset')
+    end
+    if not parent then table.insert(UISpecialFrames, 'OldKrakenGroupFinderFrame') end
+    f.embedded = parent ~= nil
+    f:SetSize(900, 590); f:SetPoint('CENTER', parent or UIParent, 'CENTER'); f:SetMovable(not parent); f:EnableMouse(true)
+    if not parent then
+        f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving)
+    end
+    if not parent then
+        f:SetScript('OnDragStop', function(self)
+            self:StopMovingOrSizing()
+            if requestsWindow and requestsWindow:IsShown() then requestsWindow.mainMoved = true end
+        end)
+    end
     f:SetClampedToScreen(true); f:Hide()
-    OldKraken.UIStyle.Window(f)
+    if not parent then OldKraken.UIStyle.Window(f) end
     f:HookScript('OnHide', function() if requestsWindow then requestsWindow:Hide() end end)
     OldKraken.UIStyle.Panel(f, 12, -60, 526, 255)
     OldKraken.UIStyle.Panel(f, 542, -60, 335, 255)
@@ -824,12 +837,30 @@ end
 function Finder:Show()
     if not self.active then print('Old Kraken: пошук груп не ініціалізовано.') return end
     refreshPeople()
-    if not window then window=createWindow() end
-    window:Show(); refresh()
+    if OldKraken.UIHub then
+        OldKraken.UIHub:ShowPage('groups')
+    else
+        if not window then window=createWindow() end
+        window:Show()
+    end
+    refresh()
 end
 
 function Finder:Toggle()
-    if window and window:IsShown() then window:Hide() else self:Show() end
+    if OldKraken.UIHub and OldKraken.UIHub.frame and OldKraken.UIHub.frame:IsShown()
+        and OldKraken.UIHub.currentPage == 'groups' then
+        OldKraken.UIHub.frame:Hide()
+    elseif window and window:IsShown() and not OldKraken.UIHub then
+        window:Hide()
+    else
+        self:Show()
+    end
+end
+if OldKraken.UIHub then
+    OldKraken.UIHub:RegisterPage('groups', 'Групи', '02', function(parent)
+        if not window then window=createWindow(parent) end
+        return window
+    end)
 end
 OldKraken:On('GROUP_FINDER_CHANGED', refresh)
 OldKraken:On('GROUP_FINDER_CHANGED', refreshRequests)

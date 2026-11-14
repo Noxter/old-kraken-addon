@@ -55,16 +55,19 @@ function methods:GetFontString()
     if not fontString then fontString = CreateFrame(); rawset(self, 'fontString', fontString) end
     return fontString
 end
-local meta = {__index=function(_, k) if k == 'TitleText' then return nil end; return methods[k] or function() end end}
+local meta = {__index=function(_, k)
+    if k == 'TitleText' or k == 'CloseButton' or k == 'template' then return nil end
+    return methods[k] or function() end
+end}
 createdFrames = {}
-function CreateFrame(_, name)
-    local frame = setmetatable({scripts={}}, meta)
+function CreateFrame(_, name, parent, template)
+    local frame = setmetatable({scripts={}, parent=parent, template=template}, meta)
     if name then _G[name] = frame end
     createdFrames[#createdFrames + 1] = frame
     return frame
 end
 ''')
-for name in ['ActivityCatalog.lua', 'GroupFinder.lua', 'GroupFinderUI.lua']:
+for name in ['UIHub.lua', 'ActivityCatalog.lua', 'GroupFinder.lua', 'GroupFinderUI.lua']:
     lua.execute((root / name).read_text(encoding='utf-8'))
 lua.execute('''
 local f = OldKraken.GroupFinder
@@ -94,6 +97,8 @@ assert(OldKraken.listeners.GROUP_FINDER_CHANGED)
 OldKraken.listeners.GROUP_FINDER_CHANGED()
 
 local ui = OldKrakenGroupFinderFrame
+assert(ui.parent == OldKraken.UIHub.content and ui.embedded and ui.template == nil)
+assert(OldKraken.UIHub.currentPage == 'groups')
 local function hasTitle(title)
     for _, entry in ipairs(ui.visible) do if entry.group.title == title then return true end end
     return false
