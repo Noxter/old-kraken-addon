@@ -10,6 +10,7 @@ local deadlineNames={[3600]='1 година',[21600]='6 годин',[86400]='Д�
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
 local dirty,sequence,nextSync,lastQuery={},0,0,-60
 local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',171,'customer',86400,{}
+local chosenRecipe
 local refresh
 
 local function textOK(s,min,max) return type(s)=='string' and #s>=min and #s<=max and not s:find('[%z\1-\31\127]') end
@@ -32,6 +33,7 @@ local function encode(o)
     fields[#fields+1]=#candidates; for _,name in ipairs(candidates) do fields[#fields+1]=name end
     local ackNames={}; for name in pairs(o.acks or {}) do ackNames[#ackNames+1]=name end; table.sort(ackNames)
     fields[#fields+1]=#ackNames; for _,name in ipairs(ackNames) do fields[#fields+1]=name; fields[#fields+1]=string.format('%.0f',o.acks[name]) end
+    fields[#fields+1]=o.itemID or 0; fields[#fields+1]=o.recipeID or 0
     return codec._pack(fields)
 end
 local function decode(payload,sender)
@@ -47,14 +49,18 @@ local function decode(payload,sender)
     if status=='open' and worker~='' then return nil end
     local candidates={}
     for i=1,n do local name=f[14+i]; if not nameOK(name) or name==owner or candidates[name] then return nil end; candidates[name]=true end
-    local countIndex=15+n; local ackCount=tonumber(f[countIndex]); if not int(ackCount,0,20) or #f~=countIndex+ackCount*2 then return nil end
+    local countIndex=15+n; local ackCount=tonumber(f[countIndex]); if not int(ackCount,0,20) then return nil end
+    local endIndex=countIndex+ackCount*2
+    if #f~=endIndex and #f~=endIndex+2 then return nil end
     local acks={}
     for i=1,ackCount do
         local name,version=f[countIndex+i*2-1],tonumber(f[countIndex+i*2])
         if not nameOK(name) or name==owner or acks[name] or not int(version,1,9000000000000000) then return nil end
         acks[name]=version
     end
-    return {owner=owner,id=id,rev=rev,created=created,deadline=due,profession=prof,item=item,quantity=qty,reward=reward,materials=mats,note=note,status=status,worker=worker~='' and worker or nil,candidates=candidates,acks=acks}
+    local itemID,recipeID=tonumber(f[endIndex+1] or 0),tonumber(f[endIndex+2] or 0)
+    if not int(itemID,0,100000000) or not int(recipeID,0,100000000) then return nil end
+    return {owner=owner,id=id,rev=rev,created=created,deadline=due,profession=prof,item=item,itemID=itemID,recipeID=recipeID,quantity=qty,reward=reward,materials=mats,note=note,status=status,worker=worker~='' and worker or nil,candidates=candidates,acks=acks}
 end
 local function persist()
     if not scope then return end
@@ -97,13 +103,16 @@ local function connect()
     for k in pairs(own) do dirty[k]=true end
     nextSync,lastQuery=0,-60; persist(); changed()
 end
-local function create(item,qty,reward,note)
+local function create(item,qty,reward,note,recipe)
     qty,reward=tonumber(qty),tonumber(reward)
     if not active or not textOK(item,1,160) or not int(qty,1,200) or not int(reward,0,100000) or not textOK(note,0,180) or not professionNames[profession] then return false end
     if size(own)>=100 then return false end
     local now=GetServerTime(); sequence=math.max(sequence+1,now*1000)
     local id=tostring(now)..'-'..tostring(math.random(100000,999999))..'-'..tostring(sequence%1000000)
-    local o={owner=identity,id=id,rev=1,created=now,deadline=now+deadline,profession=profession,item=item,quantity=qty,reward=reward,materials=materials,note=note,status='open',candidates={},acks={}}
+    local itemID=recipe and recipe.item or tonumber(item:match('item:(%d+)')) or 0
+    local recipeID=recipe and recipe.recipe or 0
+    if not int(itemID,0,100000000) or not int(recipeID,0,100000000) then return false end
+    local o={owner=identity,id=id,rev=1,created=now,deadline=now+deadline,profession=profession,item=item,itemID=itemID,recipeID=recipeID,quantity=qty,reward=reward,materials=materials,note=note,status='open',candidates={},acks={}}
     if not fits(o) then return false end
     local k=key(identity,id); own[k]=o; dirty[k]=true; selected=k; persist(); changed(); return true
 end
@@ -133,7 +142,7 @@ comm:RegisterHandler('WORDER',function(sender,_,payload)
     local o=decode(payload,sender); if not o then return end
     local k=key(o.owner,o.id); local previous=observed[k]
     if previous and previous.rev>o.rev then return end
-    if previous and previous.rev==o.rev and encode(previous)~=payload then return end
+    if previous and previous.rev==o.rev and encode(previous)~=encode(o) then return end
     if not previous and size(observed)>=100 then return end
     observed[k]=o
     local pending=intents[k]
@@ -249,7 +258,11 @@ refresh=function()
     local pending=selected and intents[selected]
     if o then
         local state=o.status=='open' and o.deadline<GetServerTime() and 'Термін минув' or statusNames[o.status]
-        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
+        local hasRecipe=(o.itemID or 0)>0 or (o.recipeID or 0)>0
+        local masters=hasRecipe and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:FindMasters(o.itemID or 0,o.recipeID or 0) or {}
+        local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..')' end
+        local known=hasRecipe and ('\nВідомі майстри: '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\nМайстри: оберіть рецепт або посилання на предмет'
+        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
         window.detailsContent:SetHeight(math.max(132,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
         window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending)
@@ -257,6 +270,7 @@ refresh=function()
         window.delivered:SetShown(not isOwner and not pending and o.status=='assigned' and o.worker==identity)
         window.finish:SetShown(isOwner and o.status=='delivered')
         window.cancel:SetShown(isOwner and o.status~='done' and o.status~='cancelled')
+        window.masters:SetShown(hasRecipe)
         if isOwner and o.status=='open' then
             local names={}; for name in pairs(o.candidates) do names[#names+1]=name end; table.sort(names)
             window.candidateTitle:SetText(#names>0 and 'Оберіть майстра:' or 'Пропозицій майстрів поки немає')
@@ -273,7 +287,7 @@ refresh=function()
             window.candidateContent:SetHeight(math.max(90,#names*30)); window.candidateTitle:Show(); window.candidateScroll:Show()
         else window.candidateTitle:Hide(); window.candidateScroll:Hide() end
     else
-        window.details:SetText('Оберіть замовлення зі списку.'); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
+        window.details:SetText('Оберіть замовлення зі списку.'); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
     end
 end
 local function createWindow()
@@ -300,17 +314,30 @@ local function createWindow()
     f.delivered=button(f,'Передав',630,-345,100,function() if not selected or not intent(selected,'delivered') then showError() end end)
     f.finish=button(f,'Отримано',495,-345,110,function() if not selected or not ownerAction(selected,'finish') then showError() end end)
     f.cancel=button(f,'Скасувати',610,-345,110,function() if not selected or not ownerAction(selected,'cancel') then showError() end end)
+    f.masters=button(f,'Майстри',735,-345,110,function()
+        local o=selected and get(selected)
+        if o and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:ShowMasters(o.itemID or 0,o.recipeID or 0) end
+    end)
     local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-395); heading:SetText('Нове замовлення')
     f.item=input(f,'Предмет або посилання',18,-420,300,''); f.quantity=input(f,'Кількість',335,-420,65,'1'); f.reward=input(f,'Винагорода (зол.)',420,-420,120,'0')
+    f.item:SetScript('OnTextChanged',function() chosenRecipe=nil end)
     f.note=input(f,'Коментар',18,-475,360,'')
-    dropdown(f,'OldKrakenOrderProfession',400,-492,170,professionIDs,professionNames,function() return profession end,function(v) profession=v end)
+    local professionMenu=dropdown(f,'OldKrakenOrderProfession',400,-492,170,professionIDs,professionNames,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v end)
+    button(f,'Обрати рецепт',560,-438,160,function()
+        if not OldKraken.WorkshopRecipes then showError(); return end
+        OldKraken.WorkshopRecipes:Choose(function(r)
+            if not f:IsShown() or not professionNames[r.profession] then return end
+            profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
+            f.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe}
+        end)
+    end)
     local profLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); profLabel:SetPoint('TOPLEFT',f,'TOPLEFT',400,-475); profLabel:SetText('Професія')
     dropdown(f,'OldKrakenOrderMaterials',580,-492,140,{'customer','crafter','mixed'},materialNames,function() return materials end,function(v) materials=v end)
     local matLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); matLabel:SetPoint('TOPLEFT',f,'TOPLEFT',580,-475); matLabel:SetText('Ресурси')
     dropdown(f,'OldKrakenOrderDeadline',18,-550,150,{3600,21600,86400,604800},deadlineNames,function() return deadline end,function(v) deadline=v end)
     local dueLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); dueLabel:SetPoint('TOPLEFT',f,'TOPLEFT',18,-533); dueLabel:SetText('Термін')
     button(f,'Опублікувати',650,-548,160,function()
-        if create(f.item:GetText(),f.quantity:GetText(),f.reward:GetText(),f.note:GetText()) then f.item:SetText(''); f.note:SetText(''); print('Old Kraken: замовлення збережено та поставлено в чергу.') else showError() end
+        if create(f.item:GetText(),f.quantity:GetText(),f.reward:GetText(),f.note:GetText(),chosenRecipe) then f.item:SetText(''); f.note:SetText(''); print('Old Kraken: замовлення збережено та поставлено в чергу.') else showError() end
     end)
     local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-603); note:SetText('Передачу речі й оплату гравці виконують у грі самостійно.')
     f:Hide(); return f
@@ -321,3 +348,4 @@ function Orders:Show(k)
     if not window then window=createWindow() end
     window:Show(); refresh()
 end
+OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() changed() end)

@@ -8,6 +8,8 @@ local pendingLearned,learnAttempts={},{}
 local scanPending,tradeOpen,sendQueue=false,false,{}
 local activeQuery,sequence,lastQuery,lastIncoming=nil,0,-60,{}
 local frame,rows,offset,resultSet=nil,{},0,{}
+local selectRecipe
+local recipeChanged=false
 local scanStatus='Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
 local render, matches
 local function usable(v,t) return not (type(issecretvalue)=='function' and issecretvalue(v)) and type(v)==t end
@@ -104,6 +106,7 @@ local function recordLearned(r)
     if not previous and count(own)>=5000 then return false end
     if r.product=='' and type(previous)=='table' and previous.item==r.item and safeText(previous.product,0,120) then r.product=previous.product end
     own[r.recipe]=r
+    recipeChanged=true
     if pendingLearned[r.recipe] then
         if #sendQueue<100 then
             pendingLearned[r.recipe]=nil; learnAttempts[r.recipe]=nil
@@ -179,6 +182,8 @@ matches=function(r,query)
     if not validRecord(r) then return false end
     local item=query:match('^item:(%d+)$')
     if item then return r.item==tonumber(item) end
+    local recipe=query:match('^recipe:(%d+)$')
+    if recipe then return r.recipe==tonumber(recipe) end
     return lower(r.name):find(query,1,true)~=nil or lower(r.product):find(query,1,true)~=nil
 end
 local function resolveProduct(r)
@@ -204,10 +209,14 @@ local function search(value)
     local item=value:match('item:(%d+)')
     local q=item and ('item:'..item) or lower(value:match('^%s*(.-)%s*$'))
     if not safeText(q,3,80) then print('Old Kraken: введіть назву або посилання на предмет.'); return false end
-    local now=GetTime(); if now-lastQuery<10 then print('Old Kraken: повторіть пошук через кілька секунд.'); return false end
+    local now=GetTime()
+    offset=0; addCached(q)
+    if now-lastQuery<10 then
+        if activeQuery and activeQuery.query~=q then activeQuery=nil end
+        changed(); print('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.'); return false
+    end
     sequence=sequence+1
     local token=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
-    offset=0; addCached(q)
     if not comm:SendProtocol('WRQUERY',codec._pack({token,q})) then activeQuery=nil; changed(); print('Old Kraken: показано збережені результати; запит гільдії надіслати не вдалося.'); return false end
     lastQuery=now; activeQuery={token=token,query=q,untilTime=now+120}; changed(); return true
 end
@@ -239,7 +248,7 @@ comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if not validRecord(old) or old.seen<=r.seen then people[sender][r.recipe]=r end
     local k=sender..'\001'..r.recipe
     if resultSet[k] or count(resultSet)<500 then resultSet[k]={owner=sender,record=people[sender][r.recipe]} end
-    changed()
+    changed(); recipeChanged=true
 end)
 comm:RegisterHandler('WRLEARN',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
@@ -256,7 +265,7 @@ comm:RegisterHandler('WRLEARN',function(sender,_,payload)
         if matches(r,activeQuery.query) and (resultSet[k] or count(resultSet)<500) then resultSet[k]={owner=sender,record=r}
         elseif resultSet[k] then resultSet[k]=nil end
     end
-    changed()
+    changed(); recipeChanged=true
 end)
 
 local events=CreateFrame('Frame')
@@ -296,6 +305,7 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     end
     while #sendQueue>0 and sendQueue[1].expires<GetTime() do table.remove(sendQueue,1) end
     if #sendQueue>0 and #comm.queue<=8 and comm:SendProtocol(sendQueue[1].kind or 'WRRESULT',sendQueue[1].payload) then table.remove(sendQueue,1) end
+    if recipeChanged then recipeChanged=false; OldKraken:Fire('WORKSHOP_RECIPES_CHANGED') end
 end) end
 
 local function button(parent,label,x,y,width,callback)
@@ -338,7 +348,9 @@ local function createWindow()
     f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-78)
     for i=1,12 do
         rows[i]=button(f,'',20,-102-(i-1)*26,770,function(self)
-            if self.entry and self.entry.owner~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(self.entry.owner) end
+            if self.entry and selectRecipe then
+                local callback=selectRecipe; selectRecipe=nil; f:Hide(); callback(self.entry.record)
+            elseif self.entry and self.entry.owner~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(self.entry.owner) end
         end)
         local text=rows[i]:GetFontString(); if text then text:ClearAllPoints(); text:SetPoint('LEFT',rows[i],'LEFT',8,0); text:SetPoint('RIGHT',rows[i],'RIGHT',-8,0); text:SetJustifyH('LEFT') end
     end
@@ -347,10 +359,49 @@ local function createWindow()
     button(f,'›',130,-425,44,function() offset=offset+1; render() end)
     f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-465); f.status:SetWidth(760); f.status:SetJustifyH('LEFT')
     f.status:SetText(scanStatus)
+    f:SetScript('OnHide',function() selectRecipe=nil end)
     f:Hide(); return f
 end
 function Recipes:Show()
     connect(); if not active then print('Old Kraken: пошук рецептів доступний членам гільдії.'); return end
     if not frame then frame=createWindow() end
     frame:Show(); render()
+end
+function Recipes:Choose(callback)
+    if type(callback)~='function' then return end
+    self:Show(); if not active or not frame then return end
+    selectRecipe=callback; resultSet={}; offset=0
+    for name,items in pairs(people) do
+        if safeText(name,1,128) and type(items)=='table' then
+            for _,r in pairs(items) do
+                if count(resultSet)>=500 then break end
+                if validRecord(r) then resolveProduct(r); resultSet[name..'\001'..r.recipe]={owner=name,record=r} end
+            end
+        end
+        if count(resultSet)>=500 then break end
+    end
+    frame.status:SetText('Оберіть предмет або рецепт кліком. За потреби знайдіть інший за назвою.')
+    frame:Raise(); render()
+end
+function Recipes:FindMasters(itemID,recipeID)
+    local found={}
+    if not integer(itemID,0,100000000) or not integer(recipeID,0,100000000) or (itemID==0 and recipeID==0) then return {} end
+    for name,items in pairs(people) do
+        if safeText(name,1,128) and type(items)=='table' then
+            for _,r in pairs(items) do
+                if validRecord(r) and ((itemID>0 and r.item==itemID) or (itemID==0 and r.recipe==recipeID)) then
+                    if not found[name] or r.seen>found[name] then found[name]=r.seen end
+                end
+            end
+        end
+    end
+    local out={}; for name,seen in pairs(found) do out[#out+1]={name=name,seen=seen} end
+    table.sort(out,function(a,b) return a.name<b.name end); return out
+end
+function Recipes:ShowMasters(itemID,recipeID)
+    self:Show(); if not active or not frame then return end
+    selectRecipe=nil
+    local query=itemID>0 and ('item:'..itemID) or ('recipe:'..recipeID)
+    frame.query:SetText(query); frame.status:SetText('Відомі майстри; дата показує останнє зчитування рецепта.')
+    search(query); frame:Raise()
 end
