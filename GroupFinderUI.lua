@@ -783,9 +783,10 @@ local function showAlert(message, kind, key)
         groupAlert:SetFrameLevel(10)
         groupAlert:SetScript('OnClick', function(self)
             local target = self.groupKey
+            local alertKind = self.kind
             self:Hide()
             if target and Finder.groups[target] then
-                tab, selected, editing, offset, requestOffset = 'mine', target, nil, 0, 0
+                tab, selected, editing, offset, requestOffset = alertKind == 'decision' and 'applications' or 'mine', target, nil, 0, 0
             end
             Finder:Show()
         end)
@@ -834,4 +835,11 @@ OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
     local message = 'Нова заявка: ' .. playerLabel(name) .. ' (' .. roleLabel(role) .. ') — ' .. group.title
     showAlert(message, 'request', group.owner .. '\001' .. group.id)
     showRequests()
+end)
+
+OldKraken:On('GROUP_FINDER_APPLICATION_STATUS', function(group, status)
+    if not group or status ~= 'reject' then return end
+    refreshPeople()
+    local message = playerLabel(group.owner) .. ' відхилив вашу заявку: ' .. group.title
+    showAlert(message, 'decision', group.owner .. '\001' .. group.id)
 end)

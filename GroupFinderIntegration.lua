@@ -165,8 +165,12 @@ end)
 comm:RegisterHandler('RESPONSE', function(sender, _, payload)
     local name = active and normalizeSender(sender)
     if name and finder:ReceiveResponse(name, payload) then
+        local fields = finder._unpackFields(payload, 5)
+        local key = fields and fields[1] and fields[2] and (fields[1] .. '\001' .. fields[2])
         saveOwned()
         OldKraken:Fire('GROUP_FINDER_CHANGED')
+        local group = key and finder.groups[key]
+        if group then OldKraken:Fire('GROUP_FINDER_APPLICATION_STATUS', group, 'reject') end
     end
 end)
 comm:RegisterHandler('QUERY', function(_, _, payload)
