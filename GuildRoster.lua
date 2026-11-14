@@ -494,7 +494,10 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
-    if command == 'orders' then
+    if command == 'recipes' then
+        if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end
+        return
+    elseif command == 'orders' then
         if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
         return
     elseif command == 'workshop' or command == 'craft' then

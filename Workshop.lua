@@ -229,7 +229,8 @@ local function createWindow()
     f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',76,-435)
     button(f,'›',130,-430,44,function() offset=offset+1; render() end)
     button(f,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
-    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',180,-478); note:SetText('Клік по майстру онлайн — шепіт. Знання рецепта не підтверджується.')
+    button(f,'Пошук рецептів',175,-472,155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
+    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',345,-478); note:SetText('Відкрийте професії, щоб зчитати рецепти.')
     f:Hide(); return f
 end
 function Workshop:Show()
