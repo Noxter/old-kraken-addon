@@ -300,6 +300,13 @@ refresh=function()
                     row.choose:Show()
                 else row.choose:Hide() end
             else row.applicants:Hide(); row.choose:Hide() end
+            if o.worker==identity and o.owner~=identity and o.status=='assigned' then
+                row.progress:SetText(intents[entry.key] and 'Очікується відповідь' or 'Передав')
+                if intents[entry.key] then row.progress:Disable() else row.progress:Enable() end
+                row.progress:Show()
+            elseif o.owner==identity and o.status=='delivered' then
+                row.progress:SetText('Отримано'); row.progress:Enable(); row.progress:Show()
+            else row.progress:Hide() end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row.entryKey=nil; row.order=nil; row:UnlockHighlight(); row:Hide() end
@@ -369,6 +376,15 @@ local function createWindow()
         card.offer=button(card,'Запропонувати допомогу',8,-84,203,function(self)
             local k=self:GetParent().entryKey
             if not k or not intent(k,'offer') then showError() end
+        end)
+        card.progress=button(card,'Передав',8,-84,203,function(self)
+            local k=self:GetParent().entryKey; local o=k and get(k)
+            if not o then showError(); return end
+            if o.owner==identity and o.status=='delivered' then
+                if not ownerAction(k,'finish') then showError() end
+            elseif o.worker==identity and o.status=='assigned' then
+                if not intent(k,'delivered') then showError() end
+            else showError() end
         end)
         card.applicants=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
         card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,-76); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
