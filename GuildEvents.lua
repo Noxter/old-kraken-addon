@@ -9,6 +9,17 @@ local events, dirty, intents = {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
 local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
 local page = 1
+local catalog = OldKraken.ActivityCatalog
+local activityLabels = {['']='Не вибрано'}
+for _,options in ipairs({catalog.dungeon,catalog.raid}) do
+    for _,entry in ipairs(options) do if entry.value~='' then activityLabels[entry.value]=entry.label end end
+end
+local function validActivity(kind, id)
+    if id=='' then return true end
+    if type(id)~='string' then return false end
+    for _,entry in ipairs(catalog[kind] or {}) do if entry.value==id then return true end end
+    return false
+end
 
 local function validText(s, low, high)
     return type(s) == 'string' and #s >= low and #s <= high and not s:find('[%z\1-\31\127]')
@@ -34,10 +45,11 @@ local function encode(e)
     table.sort(names)
     local f = {e.id,e.owner,e.rev,e.when,e.kind,e.size,e.cancelled and '1' or '0',e.title,e.description,#names}
     for _, name in ipairs(names) do f[#f+1]=name; f[#f+1]=e.people[name] end
+    f[#f+1]=e.activity or ''
     return codec._pack(f)
 end
 local function decode(sender, payload)
-    local f = codec._unpackFields(payload, 90)
+    local f = codec._unpackFields(payload, 91)
     if not f or #f < 10 then return nil end
     local id, owner, rev, when, kind, size, cancelled, title, description, n = unpack(f,1,10)
     rev, when, size, n = tonumber(rev), tonumber(when), tonumber(size), tonumber(n)
@@ -46,14 +58,16 @@ local function decode(sender, payload)
         or not when or when % 1 ~= 0 or when < GetServerTime()-172800 or when > GetServerTime()+31622400
         or not kinds[kind] or not size or size % 1 ~= 0 or size < 2 or size > 40
         or (cancelled ~= '0' and cancelled ~= '1') or not validText(title,1,100)
-        or not validText(description,0,400) or not n or n % 1 ~= 0 or n < 0 or n > size or #f ~= 10 + n*2 then return nil end
+        or not validText(description,0,400) or not n or n % 1 ~= 0 or n < 0 or n > size or (#f ~= 10 + n*2 and #f ~= 11 + n*2) then return nil end
+    local activity=f[11+n*2] or ''
+    if not validActivity(kind,activity) then return nil end
     local people = {}
     for i=1,n do
         local name, role = f[9+i*2], f[10+i*2]
         if not validText(name,1,128) or not roles[role] or people[name] then return nil end
         people[name] = role
     end
-    return {id=id,owner=owner,rev=rev,when=when,kind=kind,size=size,cancelled=cancelled=='1',title=title,description=description,people=people}
+    return {id=id,owner=owner,rev=rev,when=when,kind=kind,size=size,cancelled=cancelled=='1',title=title,description=description,people=people,activity=activity}
 end
 local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
 
@@ -108,14 +122,16 @@ comm:RegisterHandler('CEVQUERY', function(_, _, payload)
     for key,e in pairs(events) do if e.owner == identity then dirty[key]=true end end
 end)
 
-function Events:Create(title, description, when, kind, size)
+function Events:Create(title, description, when, kind, size, activity)
     size=tonumber(size)
+    activity=activity or ''
     if not active or not validText(title,1,100) or not validText(description,0,400) or not kinds[kind]
+        or not validActivity(kind,activity)
         or not size or size % 1 ~= 0 or size < 2 or size > 40
         or not when or when <= GetServerTime() or when > GetServerTime()+31622400 or count(events)>=100 then return false end
     sequence=sequence+1
     local id=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
-    local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},versions={}}
+    local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},versions={},activity=activity}
     local key=eventKey(identity,id); events[key]=e; dirty[key]=true; save(); fire(); return true
 end
 function Events:Cancel(key)
@@ -314,16 +330,16 @@ local function refresh()
         local entry=list[(page-1)*8+i]
         if entry then
             local e=entry.event
-            row:SetText(date('%d.%m.%Y %H:%M',e.when)..'  ·  '..e.title..'  ·  '..count(e.people)..'/'..e.size)
+            row:SetText(date('%d.%m.%Y %H:%M',e.when)..'  ·  '..e.title..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..'  ·  '..count(e.people)..'/'..e.size)
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row:UnlockHighlight(); row:Hide() end
     end
     local e=selected and events[selected]
     if e and not e.cancelled then
-        local names={}; for name,role in pairs(e.people) do names[#names+1]=name..' — '..(roles[role] or role) end; table.sort(names)
+        local names={}; for name,role in pairs(e.people) do names[#names+1]=(catalog.roleIcons[role] or '')..' '..name..' — '..(roles[role] or role) end; table.sort(names)
         local pending=intents[selected]
-        window.details:SetText(e.title..'\n'..kinds[e.kind]..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · '..count(e.people)..'/'..e.size..'\n'..e.description..'\n\nУчасники:\n'..(#names>0 and table.concat(names,'\n') or 'Поки немає')..(pending and '\n\nОчікується підтвердження автора' or ''))
+        window.details:SetText(e.title..'\n'..kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · '..count(e.people)..'/'..e.size..'\n'..e.description..'\n\nУчасники:\n'..(#names>0 and table.concat(names,'\n') or 'Поки немає')..(pending and '\n\nОчікується підтвердження автора' or ''))
         window.cancel:SetShown(e.owner==identity)
         window.join:SetShown(not e.people[identity])
         window.leave:SetShown(e.people[identity] ~= nil)
@@ -364,12 +380,29 @@ local function createWindow()
     selectMinutes(f,490,-400,function() return minute end,function(v) minute=v end)
     f.size=field(f,'Місць (2–40)',600,-382,80,'10')
     f.description=field(f,'Опис',18,-435,430,'')
-    selectMenu(f,'OldKrakenEventsKind',465,-453,160,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v end)
+    local activity=''
+    local activityLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); activityLabel:SetPoint('TOPLEFT',f,'TOPLEFT',18,-485)
+    local activityMenu=CreateFrame('Frame','OldKrakenEventsActivity',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(activityMenu)
+    activityMenu:SetPoint('TOPLEFT',f,'TOPLEFT',2,-500); UIDropDownMenu_SetWidth(activityMenu,310); UIDropDownMenu_JustifyText(activityMenu,'LEFT')
+    UIDropDownMenu_Initialize(activityMenu,function(_,level)
+        for _,entry in ipairs(catalog[currentKind] or {}) do
+            local value=entry.value; local item=UIDropDownMenu_CreateInfo(); item.text=entry.label; item.value=value; item.checked=activity==value
+            item.func=function() activity=value; UIDropDownMenu_SetText(activityMenu,value~='' and activityLabels[value] or 'Не вибрано') end
+            UIDropDownMenu_AddButton(item,level)
+        end
+    end)
+    local function showActivity()
+        local enabled=catalog[currentKind]~=nil
+        activityLabel:SetText(currentKind=='raid' and 'Рейд' or 'Підземелля'); activityLabel:SetShown(enabled); activityMenu:SetShown(enabled)
+        UIDropDownMenu_SetText(activityMenu,activity~='' and activityLabels[activity] or 'Не вибрано')
+    end
+    selectMenu(f,'OldKrakenEventsKind',465,-453,160,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end)
+    showActivity()
     action(f,'Створити',650,-453,150,function()
         local day=getDate()
         local when=day and parseDate(day.day,day.month,day.year,hour,minute)
         if not when then print('Old Kraken: оберіть коректні дату та місцевий час.'); return end
-        if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText()) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
+        if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText(),activity) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
     end)
     f:Hide(); return f

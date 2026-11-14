@@ -9,41 +9,18 @@ local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 5, 3
 local category, role = 'dungeon', 'dps'
 local filterCategory, filterRole, filterFree = 'all', '', false
 local dungeon, filterDungeon = '', ''
-local dungeonOptions = {
-    {value='', label='Усі / не вибрано'},
-    {value='rfc', label='Вогненна прірва (RFC)', min=13, max=18},
-    {value='thanes', label='Зала танів (HoT)', min=13, max=18},
-    {value='lordaeron', label='Руїни Лордерона (RoL)', min=15, max=20},
-    {value='wc', label='Печери Стогонів (WC)', min=17, max=24},
-    {value='deadmines', label='Мертві копальні (VC)', min=17, max=26},
-    {value='sfk', label='Фортеця Темного Ікла (SFK)', min=22, max=30},
-    {value='excavation', label='Розкопки: Болотини (ESW)', min=24, max=29},
-    {value='bfd', label='Чорні Глибини (BFD)', min=24, max=32},
-    {value='stockade', label='В’язниця Штормграда (Stocks)', min=24, max=32},
-    {value='dalaran', label='Місто Даларан (CoD)', min=28, max=33},
-    {value='gnomeregan', label='Гномреган (Gnome)', min=29, max=38},
-    {value='rfk', label='Лабіринти Голкошерстих (RFK)', min=29, max=38},
-    {value='sm', label='Червоний монастир (SM)', min=30, max=46},
-    {value='drowned', label='Затоплене місто (TDC)', min=35, max=40},
-    {value='rfd', label='Кургани Голкошерстих (RFD)', min=37, max=46},
-    {value='kroldok', label='Фортеця Крол’док (KS)', min=40, max=45},
-    {value='uldaman', label='Ульдаман (Ulda)', min=41, max=51},
-    {value='zf', label='Зул’Фаррак (ZF)', min=44, max=54},
-    {value='maraudon', label='Мародон (Mara)', min=46, max=55},
-    {value='alcaz', label='В’язниця острова Алказ (AIP)', min=48, max=53},
-    {value='st', label='Храм Атал’Гаккара (ST)', min=50, max=56},
-    {value='brd', label='Глибини Чорної гори (BRD)', min=52, max=60},
-    {value='dm', label='Забуте Місто (DM)', min=55, max=60},
-    {value='blackmaw', label='Фортеця Чорнощелепих (BMH)', min=55, max=60},
-    {value='lbrs', label='Пік Чорної гори (BRS)', min=57, max=60},
-    {value='scholo', label='Шоломанса (Scholo)', min=58, max=60},
-    {value='strat', label='Стратхольм (Strat)', min=58, max=60},
-    {value='shapers', label='Тераса Творця (STr)', min=58, max=60},
-}
+local catalog = OldKraken.ActivityCatalog
+local dungeonOptions = catalog.dungeon
 local dungeonLabels, dungeonLevels = {}, {}
-for _, entry in ipairs(dungeonOptions) do
-    dungeonLabels[entry.value] = entry.label
-    if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+for _, options in ipairs({catalog.dungeon, catalog.raid}) do
+    for _, entry in ipairs(options) do
+        dungeonLabels[entry.value] = entry.label
+        if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+    end
+end
+local activityOptions = {}
+for _, options in ipairs({catalog.dungeon, catalog.raid}) do
+    for i, entry in ipairs(options) do if #activityOptions == 0 or i > 1 then activityOptions[#activityOptions+1] = entry end end
 end
 -- Game client loading-screen artwork, indexed by the dungeon IDs used above.
 local dungeonArt = {
@@ -510,7 +487,8 @@ local function refresh()
             local state = i == 1 and 'автор' or
                 (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у групі' or 'резерв'))
             row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 24)
-            row.name:SetText(playerLabel(name) .. ' (' .. state .. ')'); row.name:Show()
+            local memberRole=i==1 and g.role or (g.memberRoles and g.memberRoles[name])
+            row.name:SetText((catalog.roleIcons[memberRole] or '') .. ' ' .. playerLabel(name) .. ' (' .. state .. ')'); row.name:Show()
             row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. ' (' .. state .. ')'; row.hover:Show()
             row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (i - 1) * 24)
             row.invite.memberName = name
@@ -541,8 +519,9 @@ local function refresh()
     end
     window.requestsButton:SetText('Заявки: ' .. requestCount)
     for _, control in ipairs(window.filterControls) do control:SetShown(tab == 'all') end
-    window.dungeonButton:SetShown(tab == 'create' and category == 'dungeon')
-    window.dungeonLabel:SetShown(tab == 'create' and category == 'dungeon')
+    window.dungeonButton:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
+    window.dungeonLabel:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
+    window.dungeonLabel:SetText(category == 'raid' and 'Рейд' or 'Підземелля')
     for _, box in ipairs(window.createFields) do
         if tab == 'create' then box:Show(); box.label:Show() else box:Hide(); box.label:Hide() end
     end
@@ -743,10 +722,10 @@ local function createWindow()
     f.requestsButton = button(f, 'Заявки', 550, -288, 150, showRequests)
     f.searchFilter = input(f, 'Пошук за назвою або автором', 20, -350, 260, '')
     f.searchFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
-    f.dungeonFilter = dropdown(f, 285, -368, 250, dungeonOptions,
+    f.dungeonFilter = dropdown(f, 285, -368, 250, activityOptions,
         function() return filterDungeon end, function(value) filterDungeon=value; offset=0; refresh() end)
     f.dungeonFilterLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    f.dungeonFilterLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 285, -350); f.dungeonFilterLabel:SetText('Підземелля')
+    f.dungeonFilterLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 285, -350); f.dungeonFilterLabel:SetText('Підземелля / рейд')
     f.levelFilter = input(f, 'Фільтр рівня', 20, -465, 80, '')
     f.levelFilter:SetScript('OnTextChanged', refresh)
     f.categoryFilter = dropdown(f, 110, -485, 155, choices(categories, categoryLabels, {value='all', label='Усі категорії'}),
@@ -768,8 +747,9 @@ local function createWindow()
     local autoDungeonTitle
     f.categoryButton = dropdown(f, 305, -408, 140, choices(categories, categoryLabels),
         function() return category end, function(value)
+            local previousCategory=category
             category=value
-            if category ~= 'dungeon' then
+            if category ~= previousCategory then
                 if autoDungeonTitle and f.titleBox:GetText() == autoDungeonTitle then f.titleBox:SetText('') end
                 autoDungeonTitle=nil
                 dungeon=''; UIDropDownMenu_SetText(f.dungeonButton, dungeonLabels[''])
@@ -788,7 +768,7 @@ local function createWindow()
         function() return role end, function(value) role=value end)
     f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -313); f.roleLabel:SetText('Роль')
-    f.dungeonButton = dropdown(f, 460, -408, 260, dungeonOptions,
+    f.dungeonButton = dropdown(f, 460, -408, 260, function() return catalog[category] or catalog.dungeon end,
         function() return dungeon end, function(value)
             local title = f.titleBox:GetText()
             local replaceTitle = title == '' or (autoDungeonTitle and title == autoDungeonTitle)

@@ -9,6 +9,7 @@ Database.lua
 Core.lua
 Communication.lua
 GuildRoster.lua
+ActivityCatalog.lua
 GroupFinder.lua
 GroupFinderIntegration.lua
 GroupFinderUI.lua

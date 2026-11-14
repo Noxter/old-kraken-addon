@@ -100,7 +100,7 @@ function Finder:Create(title, category, description, maxSize, minLevel, maxLevel
     dungeon = dungeon or ''
     if role == '' then return false, 'role' end
     if category == 'dungeon' and (maxSize ~= 5 or (role ~= 'tank' and role ~= 'healer' and role ~= 'dps')) then return false, 'roles' end
-    if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and dungeon ~= '') then return false, 'invalid' end
+    if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and category ~= 'raid' and dungeon ~= '') then return false, 'invalid' end
     if not validText(title, 1, 100) or not categories[category]
         or not validText(description, 0, 500) or not maxSize or maxSize % 1 ~= 0
         or maxSize < 1 or maxSize > 200 or not minLevel or not maxLevel
@@ -224,7 +224,7 @@ function Finder:ReceiveGroup(sender, payload)
     if members[1] ~= owner then return false end
     local states = f[13 + count]
     local dungeon = f[14 + count] or ''
-    if #dungeon > 32 or (dungeon ~= '' and (not validID(dungeon) or category ~= 'dungeon')) then return false end
+    if #dungeon > 32 or (dungeon ~= '' and (not validID(dungeon) or (category ~= 'dungeon' and category ~= 'raid'))) then return false end
     local encodedRoles, memberRoles = f[15 + count], {}
     if encodedRoles then
         if #encodedRoles ~= count or encodedRoles:find('[^UTHDF]') then return false end
