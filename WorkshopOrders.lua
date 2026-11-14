@@ -9,7 +9,7 @@ local statusNames={open='Шукає майстра',assigned='У роботі',d
 local deadlineNames={[3600]='1 година',[21600]='6 годин',[86400]='Доба',[604800]='Тиждень'}
 local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]=136243,[333]=136244,[185]=133971,[129]=135966,[186]=136248}
 local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.70,0.75,0.80},cancelled={1,0.42,0.38},expired={0.72,0.72,0.72}}
-local CARDS_PER_PAGE=6
+local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
 local dirty,sequence,nextSync,lastQuery={},0,0,-60
 local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',171,'customer',86400,{}
@@ -284,6 +284,12 @@ refresh=function()
             row.reward:SetText(o.quantity..' шт. · '..o.reward..' зол. · до '..date('%d.%m %H:%M',o.deadline))
             row.state:SetText(stateKey=='expired' and 'Термін минув' or statusNames[stateKey])
             row.state:SetTextColor(unpack(statusColors[stateKey] or statusColors.expired))
+            if o.owner~=identity and stateKey=='open' then
+                row.offer:Show()
+                if intents[entry.key] then row.offer:SetText('Очікується відповідь'); row.offer:Disable()
+                elseif o.candidates[identity] then row.offer:SetText('Ви відгукнулися'); row.offer:Disable()
+                else row.offer:SetText('Запропонувати допомогу'); row.offer:Enable() end
+            else row.offer:Hide() end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row.entryKey=nil; row.order=nil; row:UnlockHighlight(); row:Hide() end
@@ -342,14 +348,18 @@ local function createWindow()
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-88); f.empty:SetWidth(430); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Замовлень не знайдено. Змініть фільтри або створіть замовлення.')
     for i=1,CARDS_PER_PAGE do
         local col=(i-1)%2; local line=math.floor((i-1)/2)
-        local card=button(f,'',18+col*229,-80-line*82,219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
-        card:SetHeight(78)
+        local card=button(f,'',18+col*229,-80-line*124,219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
+        card:SetHeight(116)
         card.icon=card:CreateTexture(nil,'ARTWORK'); card.icon:SetPoint('TOPLEFT',card,'TOPLEFT',7,-8); card.icon:SetSize(34,34)
         local function label(template,y)
             local text=card:CreateFontString(nil,'OVERLAY',template); text:SetPoint('TOPLEFT',card,'TOPLEFT',48,y); text:SetPoint('RIGHT',card,'RIGHT',-6,0); text:SetJustifyH('LEFT'); text:SetWordWrap(false); return text
         end
         card.title=label('GameFontNormal',-6); card.meta=label('GameFontHighlightSmall',-25)
         card.reward=label('GameFontHighlightSmall',-42); card.state=label('GameFontNormalSmall',-59)
+        card.offer=button(card,'Запропонувати допомогу',8,-84,203,function(self)
+            local k=self:GetParent().entryKey
+            if not k or not intent(k,'offer') then showError() end
+        end)
         card:SetScript('OnEnter',function(self)
             local o=self.order; if not o or not GameTooltip then return end
             GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(o.item)
