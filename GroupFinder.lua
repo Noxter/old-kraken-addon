@@ -38,6 +38,7 @@ end
 
 local categories = { dungeon=true, quest=true, world=true, raid=true, pvp=true, other=true }
 local roles = { ['']=true, tank=true, healer=true, dps=true, flex=true }
+local dungeonRoles = {'tank', 'healer', 'dps', 'dps', 'dps'}
 local roleCode = { ['']='U', tank='T', healer='H', dps='D', flex='F' }
 local codeRole = { U='', T='tank', H='healer', D='dps', F='flex' }
 local MAX_GROUPS = 100
@@ -47,6 +48,40 @@ local function countGroups(groups)
     local count = 0
     for _ in pairs(groups) do count = count + 1 end
     return count
+end
+
+-- Preserve unknown or externally joined players without guessing their role.
+function Finder:DungeonSlots(group, exclude)
+    local slots, unassigned = {}, {}
+    for i, role in ipairs(dungeonRoles) do slots[i] = {role=role} end
+    for i, member in ipairs(group.members) do
+        if member ~= exclude then
+            local memberRole = i == 1 and group.role or (group.memberRoles and group.memberRoles[member]) or ''
+            local placed = false
+            for _, slot in ipairs(slots) do
+                if not slot.member and slot.role == memberRole then
+                    slot.member, slot.memberRole, placed = member, memberRole, true; break
+                end
+            end
+            if not placed then unassigned[#unassigned + 1] = {name=member, role=memberRole} end
+        end
+    end
+    for _, entry in ipairs(unassigned) do
+        for i = #slots, 1, -1 do
+            if not slots[i].member then slots[i].member, slots[i].memberRole = entry.name, entry.role; break end
+        end
+    end
+    return slots
+end
+
+function Finder:RoleAvailable(group, role, exclude)
+    if role ~= 'tank' and role ~= 'healer' and role ~= 'dps' and role ~= 'flex' then return false end
+    if group.category ~= 'dungeon' or group.maxSize ~= 5 then return true end
+    if role ~= 'tank' and role ~= 'healer' and role ~= 'dps' then return false end
+    for _, slot in ipairs(self:DungeonSlots(group, exclude)) do
+        if slot.role == role and not slot.member then return true end
+    end
+    return false
 end
 
 function Finder:Initialize(identity, send)
@@ -63,6 +98,8 @@ function Finder:Create(title, category, description, maxSize, minLevel, maxLevel
     maxSize = tonumber(maxSize)
     minLevel, maxLevel, role = tonumber(minLevel or 1), tonumber(maxLevel or 60), role or ''
     dungeon = dungeon or ''
+    if role == '' then return false, 'role' end
+    if category == 'dungeon' and (maxSize ~= 5 or (role ~= 'tank' and role ~= 'healer' and role ~= 'dps')) then return false, 'roles' end
     if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and dungeon ~= '') then return false, 'invalid' end
     if not validText(title, 1, 100) or not categories[category]
         or not validText(description, 0, 500) or not maxSize or maxSize % 1 ~= 0
@@ -229,11 +266,20 @@ end
 function Finder:Apply(owner, id, role)
     local key = owner .. '\001' .. id
     local group = self.groups[key]
-    if not roles[role] or not group or group.closed or owner == self.identity then return false end
+    if not roles[role] or role == '' or not group or group.closed or owner == self.identity or #group.members >= group.maxSize
+        or not self:RoleAvailable(group, role) then return false end
     self.requestSequence = math.max(self.requestSequence + 1, GetServerTime() * 1000)
     if not self.send('JOIN', pack({owner, id, role, 'apply', string.format('%.0f', self.requestSequence)})) then return false end
     self.pending[key] = 'pending'
     self.pendingVersions[key], self.pendingRoles[key] = self.requestSequence, role
+    return true
+end
+
+function Finder:DismissApplication(owner, id)
+    local key = owner .. '\001' .. id
+    if self.pending[key] == 'pending' then return self:Withdraw(owner, id) end
+    if not self.pending[key] then return false end
+    self.pending[key], self.pendingVersions[key], self.pendingRoles[key] = nil, nil, nil
     return true
 end
 
@@ -256,6 +302,7 @@ function Finder:ReceiveJoin(sender, payload)
     if owner ~= self.identity or not group or group.closed or sender == owner
         or not validText(sender, 1, 128) or not roles[role]
         or (action ~= 'apply' and action ~= 'withdraw')
+        or (action == 'apply' and role == '')
         or not version or version % 1 ~= 0 or version < 1 or version > 9000000000000000 then return false end
     local versionKey = id .. '\001' .. sender
     if self.requestVersions[versionKey] and self.requestVersions[versionKey] >= version then return false end
@@ -276,6 +323,7 @@ function Finder:Decide(id, applicant, accept)
     if not group or not requests or requests[applicant] == nil then return false end
     if accept then
         if #group.members >= group.maxSize then return false end
+        if not self:RoleAvailable(group, requests[applicant]) then return false end
         for _, member in ipairs(group.members) do if member == applicant then return false end end
         group.memberRoles = group.memberRoles or {}
         local oldRole = group.memberRoles[applicant]
@@ -339,8 +387,10 @@ function Finder:Edit(id, title, description, maxSize, minLevel, maxLevel, role, 
     local group = self.groups[self.identity .. '\001' .. id]
     maxSize, minLevel, maxLevel = tonumber(maxSize), tonumber(minLevel), tonumber(maxLevel)
     dungeon = dungeon or (group and group.dungeon) or ''
+    if category == 'dungeon' and (maxSize ~= 5 or not group or
+        not self:RoleAvailable({category='dungeon', maxSize=5, members=group.members, role=group.role, memberRoles=group.memberRoles}, role, self.identity)) then return false end
     if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and dungeon ~= '') then return false end
-    if not group or group.closed or not validText(title, 1, 100) or not validText(description, 0, 500)
+    if role == '' or not group or group.closed or not validText(title, 1, 100) or not validText(description, 0, 500)
         or not maxSize or maxSize % 1 ~= 0 or maxSize < #group.members or maxSize > 200
         or not minLevel or not maxLevel or minLevel % 1 ~= 0 or maxLevel % 1 ~= 0
         or minLevel < 1 or maxLevel > 255 or minLevel > maxLevel or not roles[role] or not categories[category] then return false end

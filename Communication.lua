@@ -46,7 +46,7 @@ local function Decode(payload)
 end
 
 local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = true,
-    UPDATE = true, QUERY = true, SYNC = true }
+    UPDATE = true, QUERY = true, SYNC = true, BUMP = true }
 
 function Communication:RegisterHandler(kind, callback)
     if not VALID_TYPES[kind] or type(callback) ~= "function" or self.handlers[kind] then

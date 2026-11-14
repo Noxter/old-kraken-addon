@@ -5,6 +5,7 @@ local active, storage, nextQuery, nextBroadcast, nextRetry, lastQuery = false, n
 local currentKey, tickerStarted = nil, false
 local partyDirty = true
 local diagnostics = { received = 0, accepted = 0, rejected = 0 }
+local lastBump = {}
 
 local function profileKey(name, guild)
     local realm = GetRealmName and GetRealmName() or ''
@@ -118,6 +119,33 @@ end
 for _, kind in ipairs({'ANNOUNCE', 'UPDATE', 'SYNC', 'CANCEL'}) do
     local messageKind = kind
     comm:RegisterHandler(kind, function(sender, id, payload) receiveGroup(messageKind, sender, id, payload) end)
+end
+comm:RegisterHandler('BUMP', function(sender, _, payload)
+    if not active then return end
+    local name = normalizeSender(sender)
+    local fields = finder._unpackFields(payload, 215)
+    if not name or not fields or not fields[1] or fields[2] ~= name or name == finder.identity then return end
+    local key = name .. '\001' .. fields[1]
+    local existing = finder.groups[key]
+    local current = existing and finder:EncodeGroup(existing) == payload
+    if not current then
+        if not finder:ReceiveGroup(name, payload) then return end
+        saveOwned()
+        OldKraken:Fire('GROUP_FINDER_CHANGED')
+    end
+    local group = finder.groups[key]
+    if group and not group.closed and finder:GroupAlertsEnabled() then OldKraken:Fire('GROUP_FINDER_NEW', group) end
+end)
+
+function finder:Reannounce(id)
+    local group = active and self.groups[self.identity .. '\001' .. id]
+    if not group or group.closed or group.hidden then return false, 'group' end
+    local now = GetTime()
+    local left = (lastBump[id] or -300) + 300 - now
+    if left > 0 then return false, 'cooldown', math.ceil(left) end
+    if not comm:SendProtocol('BUMP', self:EncodeGroup(group)) then return false, 'queue' end
+    lastBump[id] = now
+    return true
 end
 comm:RegisterHandler('JOIN', function(sender, _, payload)
     local name = active and normalizeSender(sender)
@@ -296,7 +324,7 @@ frame:SetScript('OnEvent', function(_, event)
         for entry, version in pairs(storage.pendingVersions) do
             local role = storage.pendingRoles[entry]
             if finder.pending[entry] == 'pending' and type(version) == 'number' and version > 0 and version < 9000000000000000
-                and (role == '' or role == 'tank' or role == 'healer' or role == 'dps' or role == 'flex') then
+                and (role == 'tank' or role == 'healer' or role == 'dps' or role == 'flex') then
                 finder.pendingVersions[entry], finder.pendingRoles[entry] = version, role
             end
         end
