@@ -1,0 +1,297 @@
+-- Guild-only event calendar. The event owner is authoritative for signups.
+local Events = {}
+OldKraken.GuildEvents = Events
+local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
+local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
+local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}
+local active, identity, profile, storage = false, nil, nil, nil
+local events, dirty, intents = {}, {}, {}
+local sequence, lastQuery, nextRetry = 0, 0, 0
+local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
+local page = 1
+
+local function validText(s, low, high)
+    return type(s) == 'string' and #s >= low and #s <= high and not s:find('[%z\1-\31\127]')
+end
+local function eventKey(owner, id) return owner .. '\001' .. id end
+local function validID(s) return validText(s, 1, 64) and s:match('^[%w%-]+$') ~= nil end
+local function count(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
+local function character()
+    if type(UnitName) ~= 'function' then return nil end
+    local a,b = UnitName('player')
+    if not validText(a,1,128) then return nil end
+    if type(b) == 'string' and b ~= '' then return a .. ' ' .. b end
+    return a
+end
+local function save()
+    if not storage then return end
+    storage.owned, storage.intents, storage.sequence = {}, {}, sequence
+    for key, e in pairs(events) do if e.owner == identity then storage.owned[key] = e end end
+    for key, intent in pairs(intents) do storage.intents[key] = intent end
+end
+local function encode(e)
+    local names = {}; for name in pairs(e.people) do names[#names+1] = name end
+    table.sort(names)
+    local f = {e.id,e.owner,e.rev,e.when,e.kind,e.size,e.cancelled and '1' or '0',e.title,e.description,#names}
+    for _, name in ipairs(names) do f[#f+1]=name; f[#f+1]=e.people[name] end
+    return codec._pack(f)
+end
+local function decode(sender, payload)
+    local f = codec._unpackFields(payload, 90)
+    if not f or #f < 10 then return nil end
+    local id, owner, rev, when, kind, size, cancelled, title, description, n = unpack(f,1,10)
+    rev, when, size, n = tonumber(rev), tonumber(when), tonumber(size), tonumber(n)
+    if not validID(id) or not validText(owner,1,128) or sender ~= owner
+        or not rev or rev % 1 ~= 0 or rev < 1 or rev > 2147483647
+        or not when or when % 1 ~= 0 or when < GetServerTime()-172800 or when > GetServerTime()+31622400
+        or not kinds[kind] or not size or size % 1 ~= 0 or size < 2 or size > 40
+        or (cancelled ~= '0' and cancelled ~= '1') or not validText(title,1,100)
+        or not validText(description,0,400) or not n or n % 1 ~= 0 or n < 0 or n > size or #f ~= 10 + n*2 then return nil end
+    local people = {}
+    for i=1,n do
+        local name, role = f[9+i*2], f[10+i*2]
+        if not validText(name,1,128) or not roles[role] or people[name] then return nil end
+        people[name] = role
+    end
+    return {id=id,owner=owner,rev=rev,when=when,kind=kind,size=size,cancelled=cancelled=='1',title=title,description=description,people=people}
+end
+local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
+
+comm:RegisterHandler('CEVENT', function(sender, _, payload)
+    if not active then return end
+    local e = decode(sender, payload); if not e then return end
+    local key = eventKey(e.owner,e.id)
+    local old = events[key]
+    if old and old.rev > e.rev then return end
+    if old and old.rev == e.rev then
+        local intent = intents[key]
+        if intent and ((intent.role == 'leave' and not old.people[identity]) or old.people[identity] == intent.role or old.cancelled) then
+            intents[key] = nil; save(); fire()
+        end
+        return
+    end
+    if not old and count(events) >= 100 then return end
+    if e.owner == identity and old then e.versions = old.versions end
+    events[key] = e
+    local intent = intents[key]
+    if intent and ((intent.role == 'leave' and not e.people[identity]) or e.people[identity] == intent.role or e.cancelled) then intents[key] = nil end
+    save(); fire()
+end)
+
+local function updateSignup(sender, owner, id, role, version)
+    local key = eventKey(owner,id)
+    local e = events[key]
+    if not e or e.owner ~= identity or e.cancelled or not validText(sender,1,128)
+        or (role ~= 'leave' and not roles[role]) or not version or version % 1 ~= 0 or version < 1 or version > 9000000000000000 then return end
+    e.versions = e.versions or {}
+    if e.versions[sender] and e.versions[sender] >= version then dirty[key]=true; return end
+    if not e.versions[sender] and count(e.versions) >= 200 then return end
+    if role ~= 'leave' and not e.people[sender] and count(e.people) >= e.size then return end
+    local previous = e.people[sender]
+    e.people[sender] = role ~= 'leave' and role or nil
+    e.rev = e.rev + 1
+    if #encode(e) > 2560 then e.people[sender] = previous; e.rev = e.rev - 1; return end
+    e.versions[sender] = version
+    dirty[key] = true
+    if sender == identity then intents[key] = nil end
+    save(); fire()
+end
+comm:RegisterHandler('CEVRSVP', function(sender, _, payload)
+    if not active then return end
+    local f = codec._unpackFields(payload,4)
+    if not f or #f ~= 4 or f[1] ~= identity or not validID(f[2]) then return end
+    updateSignup(sender,f[1],f[2],f[3],tonumber(f[4]))
+end)
+comm:RegisterHandler('CEVQUERY', function(_, _, payload)
+    if not active or payload ~= '' then return end
+    local now = GetTime(); if now - lastQuery < 20 then return end; lastQuery = now
+    for key,e in pairs(events) do if e.owner == identity then dirty[key]=true end end
+end)
+
+function Events:Create(title, description, when, kind, size)
+    size=tonumber(size)
+    if not active or not validText(title,1,100) or not validText(description,0,400) or not kinds[kind]
+        or not size or size % 1 ~= 0 or size < 2 or size > 40
+        or not when or when <= GetServerTime() or when > GetServerTime()+31622400 or count(events)>=100 then return false end
+    sequence=sequence+1
+    local id=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
+    local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},versions={}}
+    local key=eventKey(identity,id); events[key]=e; dirty[key]=true; save(); fire(); return true
+end
+function Events:Cancel(key)
+    local e=events[key]; if not active or not e or e.owner~=identity or e.cancelled then return false end
+    e.cancelled=true; e.rev=e.rev+1; dirty[key]=true; save(); fire(); return true
+end
+function Events:Signup(key, role)
+    local e=events[key]
+    if not active or not e or e.cancelled or (role~='leave' and not roles[role]) or (role~='leave' and not e.people[identity] and count(e.people)>=e.size) then return false end
+    sequence=math.max(sequence+1,GetServerTime()*1000)
+    local intent={role=role,version=sequence}; intents[key]=intent
+    if e.owner==identity then updateSignup(identity,e.owner,e.id,role,intent.version) end
+    save(); nextRetry=0; fire(); return true
+end
+
+local function connect()
+    local name, guild = character(), type(GetGuildInfo)=='function' and GetGuildInfo('player')
+    local realm = type(GetRealmName)=='function' and GetRealmName() or ''
+    if not name or not validText(guild,1,128) or type(realm)~='string' or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
+        active=false; events,dirty,intents={}, {}, {}; selected=nil
+        if window then window:Hide() end
+        return
+    end
+    local key=realm..'\001'..guild..'\001'..name
+    if active and profile==key then return end
+    local root=OldKraken.DB.events
+    if root.guildCalendarV1 == nil then root.guildCalendarV1={} end
+    if type(root.guildCalendarV1)~='table' then active=false; return end
+    if root.guildCalendarV1[key] == nil then root.guildCalendarV1[key]={} end
+    if type(root.guildCalendarV1[key])~='table' then active=false; return end
+    active,identity,profile,storage=true,name,key,root.guildCalendarV1[key]
+    events,dirty,intents={}, {}, {}
+    sequence=type(storage.sequence)=='number' and storage.sequence or 0
+    if type(storage.owned)=='table' then
+        for k,e in pairs(storage.owned) do
+            if type(e)=='table' and e.owner==identity and type(e.people)=='table' then
+                local ok,payload=pcall(encode,e)
+                local valid=ok and decode(identity,payload)
+                if valid and k==eventKey(identity,valid.id) then valid.versions=type(e.versions)=='table' and e.versions or {}; events[k]=valid; dirty[k]=true end
+            end
+        end
+    end
+    if type(storage.intents)=='table' then
+        for k,v in pairs(storage.intents) do
+            if type(k)=='string' and #k<=193 and type(v)=='table' and (v.role=='leave' or roles[v.role]) and type(v.version)=='number' and v.version>0 and v.version<9000000000000000 then intents[k]={role=v.role,version=v.version} end
+        end
+    end
+    lastQuery, nextRetry = -60, 0
+    comm:SendProtocol('CEVQUERY',''); fire()
+end
+local frame=CreateFrame('Frame')
+frame:RegisterEvent('PLAYER_LOGIN'); frame:RegisterEvent('GUILD_ROSTER_UPDATE')
+frame:SetScript('OnEvent', connect)
+if C_Timer and C_Timer.NewTicker then
+    C_Timer.NewTicker(3,function()
+        if not active then connect(); return end
+        local name,guild=character(),type(GetGuildInfo)=='function' and GetGuildInfo('player')
+        if name~=identity or not guild or (type(GetRealmName)=='function' and (GetRealmName()..'\001'..guild..'\001'..name)~=profile) then active=false; connect(); return end
+        local removed = false
+        for key,e in pairs(events) do
+            if e.when < GetServerTime()-172800 then events[key],dirty[key],intents[key]=nil,nil,nil; removed=true end
+        end
+        if removed then save(); fire() end
+        local now=GetTime()
+        if now>=nextRetry then
+            if comm:SendProtocol('CEVQUERY','') then nextRetry=now+180 end
+            for key in pairs(intents) do
+                local e=events[key]; local intent=intents[key]
+                if e and e.owner~=identity then comm:SendProtocol('CEVRSVP',codec._pack({e.owner,e.id,intent.role,string.format('%.0f',intent.version)})) end
+            end
+        end
+        local key=next(dirty)
+        if key then local e=events[key]; if not e or comm:SendProtocol('CEVENT',encode(e)) then dirty[key]=nil end end
+    end)
+end
+
+local function parseDate(text)
+    if type(time) ~= 'function' or type(date) ~= 'function' then return nil end
+    local day,month,year,hour,minute = text:match('^%s*(%d%d?)%.(%d%d?)%.(%d%d%d%d)%s+(%d%d?):(%d%d)%s*$')
+    day,month,year,hour,minute=tonumber(day),tonumber(month),tonumber(year),tonumber(hour),tonumber(minute)
+    if not day or month<1 or month>12 or day<1 or day>31 or hour>23 or minute>59 then return nil end
+    local ok,stamp=pcall(time,{year=year,month=month,day=day,hour=hour,min=minute,sec=0})
+    if not ok or type(stamp)~='number' then return nil end
+    local okDate,roundtrip=pcall(date,'*t',stamp)
+    if not okDate or type(roundtrip)~='table' or roundtrip.year~=year or roundtrip.month~=month or roundtrip.day~=day or roundtrip.hour~=hour or roundtrip.min~=minute then return nil end
+    return stamp
+end
+local function action(parent, label, x, y, width, callback)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b)
+    b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(label); b:SetScript('OnClick',callback); return b
+end
+local function field(parent, label, x, y, width, value)
+    local caption=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); caption:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); caption:SetText(label)
+    local box=CreateFrame('EditBox',nil,parent,'InputBoxTemplate'); box:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); box:SetSize(width,22); box:SetAutoFocus(false); box:SetText(value or '')
+    box:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return box
+end
+local function selectMenu(parent,name,x,y,width,values,labels,get,set)
+    local f=CreateFrame('Frame',name,parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
+    f:SetPoint('TOPLEFT',parent,'TOPLEFT',x-16,y+3); UIDropDownMenu_SetWidth(f,width-34); UIDropDownMenu_JustifyText(f,'LEFT')
+    UIDropDownMenu_Initialize(f,function(_,level)
+        for _,v in ipairs(values) do
+            local value=v; local item=UIDropDownMenu_CreateInfo(); item.text=labels[value]; item.value=value; item.checked=get()==value
+            item.func=function() set(value); UIDropDownMenu_SetText(f,labels[value]) end; UIDropDownMenu_AddButton(item,level)
+        end
+    end)
+    UIDropDownMenu_SetText(f,labels[get()]); return f
+end
+local function refresh()
+    if not window or not window:IsShown() then return end
+    local list={}
+    for key,e in pairs(events) do if not e.cancelled and e.when>=GetServerTime()-172800 then list[#list+1]={key=key,event=e} end end
+    table.sort(list,function(a,b) if a.event.when~=b.event.when then return a.event.when<b.event.when end return a.key<b.key end)
+    page=math.max(1,math.min(page,math.max(1,math.ceil(#list/8))))
+    window.visible=list
+    window.pageLabel:SetText(page..' / '..math.max(1,math.ceil(#list/8)))
+    window.empty:SetShown(#list==0)
+    for i,row in ipairs(rows) do
+        local entry=list[(page-1)*8+i]
+        if entry then
+            local e=entry.event
+            row:SetText(date('%d.%m.%Y %H:%M',e.when)..'  ·  '..e.title..'  ·  '..count(e.people)..'/'..e.size)
+            if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
+            row:Show()
+        else row:UnlockHighlight(); row:Hide() end
+    end
+    local e=selected and events[selected]
+    if e and not e.cancelled then
+        local names={}; for name,role in pairs(e.people) do names[#names+1]=name..' — '..(roles[role] or role) end; table.sort(names)
+        local pending=intents[selected]
+        window.details:SetText(e.title..'\n'..kinds[e.kind]..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · '..count(e.people)..'/'..e.size..'\n'..e.description..'\n\nУчасники:\n'..(#names>0 and table.concat(names,'\n') or 'Поки немає')..(pending and '\n\nОчікується підтвердження автора' or ''))
+        window.cancel:SetShown(e.owner==identity)
+        window.join:SetShown(not e.people[identity])
+        window.leave:SetShown(e.people[identity] ~= nil)
+    else
+        window.details:SetText('Оберіть подію зі списку.'); window.cancel:Hide(); window.join:Hide(); window.leave:Hide()
+    end
+    window.detailsContent:SetHeight(math.max(250,window.details:GetStringHeight()+8))
+end
+local function createWindow()
+    local f=CreateFrame('Frame','OldKrakenEventsFrame',UIParent,'BasicFrameTemplateWithInset')
+    table.insert(UISpecialFrames,'OldKrakenEventsFrame'); f:SetSize(840,560); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true)
+    f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); f:SetClampedToScreen(true)
+    OldKraken.UIStyle.Window(f); if f.TitleText then f.TitleText:SetText('Old Kraken — Події гільдії') end
+    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-38); note:SetText('Час подій показано за місцевим часом комп’ютера.')
+    f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-72); f.empty:SetText('Найближчих подій немає.')
+    for i=1,8 do
+        local index=i
+        rows[i]=action(f,'',18,-65-(i-1)*30,410,function() local entry=f.visible and f.visible[(page-1)*8+index]; if entry then selected=entry.key; refresh() end end)
+    end
+    action(f,'‹',18,-310,45,function() page=page-1; refresh() end)
+    f.pageLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.pageLabel:SetPoint('TOPLEFT',f,'TOPLEFT',75,-315)
+    action(f,'›',125,-310,45,function() page=page+1; refresh() end)
+    local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450,-66); scroll:SetSize(350,250)
+    f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(350,250); scroll:SetScrollChild(f.detailsContent)
+    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(350); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    selectMenu(f,'OldKrakenEventsRole',450,-325,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
+    f.join=action(f,'Записатися',605,-325,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end)
+    f.leave=action(f,'Виписатися',605,-325,100,function() if selected then Events:Signup(selected,'leave') end end)
+    f.cancel=action(f,'Скасувати',710,-325,105,function() if selected then Events:Cancel(selected) end end)
+    local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-358); heading:SetText('Створити подію')
+    f.title=field(f,'Назва',18,-382,220,''); f.when=field(f,'Дата і час: дд.мм.рррр гг:хх',255,-382,190,'')
+    f.size=field(f,'Місць (2–40)',465,-382,80,'10')
+    f.description=field(f,'Опис',18,-435,430,'')
+    selectMenu(f,'OldKrakenEventsKind',465,-453,160,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v end)
+    action(f,'Створити',650,-453,150,function()
+        local when=parseDate(f.when:GetText())
+        if not when then print('Old Kraken: вкажіть місцеві дату й час у форматі дд.мм.рррр гг:хх.'); return end
+        if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText()) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
+        else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
+    end)
+    f:Hide(); return f
+end
+function Events:Show()
+    if not active then connect() end
+    if not active then print('Old Kraken: календар доступний після входу до гільдії.'); return end
+    if not window then window=createWindow() end
+    window:Show(); refresh()
+end
+OldKraken:On('GUILD_EVENTS_CHANGED',refresh)
