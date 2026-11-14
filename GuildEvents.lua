@@ -116,6 +116,9 @@ local function updateSignup(sender, owner, id, role, version)
     dirty[key] = true
     if sender == identity then intents[key] = nil end
     save(); fire()
+    if sender ~= identity and role ~= 'leave' and not previous then
+        OldKraken:Fire('GUILD_EVENTS_NEW_SIGNUP',key,e,sender,role)
+    end
 end
 comm:RegisterHandler('CEVRSVP', function(sender, _, payload)
     if not active then return end
