@@ -41,3 +41,19 @@ OldKraken.ActivityCatalog = {dungeon=dungeons, raid=raids, roleIcons={
     healer='|TInterface\\LFGFrame\\UI-LFG-ICON-ROLES:16:16:0:0:256:256:67:134:0:67|t',
     dps='|TInterface\\LFGFrame\\UI-LFG-ICON-ROLES:16:16:0:0:256:256:67:134:67:134|t',
 }}
+
+-- Loading-screen artwork already used by Group Finder; unknown activities use the same fallback.
+local activityArt = {
+    thanes=7963781, lordaeron=7963782, wc=131882, deadmines=131833, sfk=131869,
+    excavation=7963777, bfd=131823, stockade=131870, dalaran=7963775,
+    gnomeregan=131841, rfk=131865, sm=131852, drowned=7963741, rfd=131864,
+    kroldok=7963780, uldaman=131876, zf=131885, maraudon=131850, alcaz=7963734,
+    st=131872, brd=131824, dm=131835, blackmaw=7963784, lbrs=131825,
+    scholo=131868, strat=131871, shapers=7963783,
+}
+function OldKraken.ActivityCatalog.SetArtwork(texture, activity)
+    local art=activityArt[activity] or 7963779
+    texture:SetTexture(art)
+    if art>=7000000 then texture:SetTexCoord(0.22,0.78,0.22,0.78)
+    else texture:SetTexCoord(0.225,0.775,0.25,0.80) end
+end

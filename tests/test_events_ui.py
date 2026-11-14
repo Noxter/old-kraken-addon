@@ -113,11 +113,11 @@ assert(firstFrame.pageLabel.point[4] == 191 and firstFrame.pageLabel.width == 64
 for i=1,9 do
     assert(OldKraken.GuildEvents:Create('Подія '..i,'',GetServerTime()+3600,'guild',10))
 end
-assert(firstFrame.pageLabel.text == '1 / 2', 'multi-page count was not rendered')
+assert(firstFrame.pageLabel.text == '1 / 3', 'multi-page count was not rendered')
 assert(firstFrame.previousPage:IsShown() and firstFrame.nextPage:IsShown(), 'multi-page arrows should be visible')
 assert(firstFrame.previousPage.point[4] == 138 and firstFrame.nextPage.point[4] == 263, 'multi-page controls are not centered')
 firstFrame.nextPage.scripts.OnClick()
-assert(firstFrame.pageLabel.text == '2 / 2', 'next page button did not advance')
+assert(firstFrame.pageLabel.text == '2 / 3', 'next page button did not advance')
 local before=#firstFrame.visible
 local delete=firstFrame.eventRows[1].delete
 assert(delete:IsShown(), 'owner delete button is hidden')

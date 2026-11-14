@@ -24,21 +24,6 @@ local activityOptions = {}
 for _, options in ipairs({catalog.dungeon, catalog.raid}) do
     for i, entry in ipairs(options) do if #activityOptions == 0 or i > 1 then activityOptions[#activityOptions+1] = entry end end
 end
--- Game client loading-screen artwork, indexed by the dungeon IDs used above.
-local dungeonArt = {
-    thanes=7963781, lordaeron=7963782, wc=131882, deadmines=131833, sfk=131869,
-    excavation=7963777, bfd=131823, stockade=131870, dalaran=7963775,
-    gnomeregan=131841, rfk=131865, sm=131852, drowned=7963741, rfd=131864,
-    kroldok=7963780, uldaman=131876, zf=131885, maraudon=131850, alcaz=7963734,
-    st=131872, brd=131824, dm=131835, blackmaw=7963784, lbrs=131825,
-    scholo=131868, strat=131871, shapers=7963783,
-}
-local function setDungeonArt(texture, dungeonId)
-    local art = dungeonArt[dungeonId] or 7963779
-    texture:SetTexture(art)
-    if art >= 7000000 then texture:SetTexCoord(0.22, 0.78, 0.22, 0.78)
-    else texture:SetTexCoord(0.225, 0.775, 0.25, 0.80) end
-end
 local roleCoords = {
     tank={0,67/256,67/256,134/256}, healer={67/256,134/256,0,67/256},
     dps={67/256,134/256,67/256,134/256},
@@ -352,7 +337,7 @@ local function refresh()
             local g = entry.group
             local status = Finder.pending[entry.key]
             local kind = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category] or g.category
-            setDungeonArt(b.art, g.dungeon)
+            catalog.SetArtwork(b.art, g.dungeon)
             b.title:SetText(g.title == kind and g.title or (g.title .. '  ·  ' .. kind))
             b.meta:SetText(string.format('%s  ·  рівень %d–%d  ·  %d/%d', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize))
             local badge = tab == 'applications' and applicationBadges[status]
@@ -978,7 +963,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId)
     groupAlert.kind, groupAlert.groupKey = kind, key
     local hasGroupArt = kind == 'group'
     groupAlert.alertArt:SetShown(hasGroupArt)
-    if hasGroupArt then setDungeonArt(groupAlert.alertArt, dungeonId) end
+    if hasGroupArt then catalog.SetArtwork(groupAlert.alertArt, dungeonId) end
     groupAlert.positionKind = isWorkshop and 'workshop' or (isEvent and 'event' or (kind == 'group' and 'group' or 'request'))
     local settings = OldKraken.DB and OldKraken.DB.settings
     local positions = type(settings) == 'table' and settings.alertPositions
