@@ -193,7 +193,20 @@ local function refresh()
                         print('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.')
                     end
                     end
-                    StaticPopup_Show('OLDKRAKEN_REMOVE_MEMBER', name, nil, remove)
+                    local popup = StaticPopup_Show('OLDKRAKEN_REMOVE_MEMBER', name, nil, remove)
+                    if popup then
+                        popup.oldKrakenStrata = popup:GetFrameStrata()
+                        if not popup.oldKrakenRestoreHook then
+                            popup:HookScript('OnHide', function(self)
+                                if self.oldKrakenStrata then
+                                    self:SetFrameStrata(self.oldKrakenStrata)
+                                    self.oldKrakenStrata = nil
+                                end
+                            end)
+                            popup.oldKrakenRestoreHook = true
+                        end
+                        popup:SetFrameStrata('FULLSCREEN_DIALOG')
+                    end
                 end)
                 window.memberRows[i] = row
             end
@@ -421,7 +434,8 @@ local function showAlert(message, kind, key)
         OldKraken.UIStyle.Button(groupAlert)
         groupAlert:SetSize(500, 48)
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
-        groupAlert:SetFrameStrata('DIALOG')
+        groupAlert:SetFrameStrata('FULLSCREEN_DIALOG')
+        groupAlert:SetFrameLevel(10)
         groupAlert:SetScript('OnClick', function(self)
             local target = self.groupKey
             self:Hide()

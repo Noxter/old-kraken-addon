@@ -53,6 +53,24 @@ function OldKraken.UIStyle.Dropdown(frame)
         local texture = _G[name .. part]
         if texture and texture.SetVertexColor then texture:SetVertexColor(0.48, 0.53, 0.57) end
     end
+    local toggle = _G[name .. 'Button']
+    if toggle and toggle.HookScript then
+        toggle:HookScript('OnClick', function()
+            local list = _G.DropDownList1
+            if not list or not list:IsShown() then return end
+            if not list.oldKrakenRestoreHook then
+                list:HookScript('OnHide', function(self)
+                    if self.oldKrakenStrata then
+                        self:SetFrameStrata(self.oldKrakenStrata)
+                        self.oldKrakenStrata = nil
+                    end
+                end)
+                list.oldKrakenRestoreHook = true
+            end
+            if not list.oldKrakenStrata then list.oldKrakenStrata = list:GetFrameStrata() end
+            list:SetFrameStrata('FULLSCREEN_DIALOG')
+        end)
+    end
 end
 
 function OldKraken.UIStyle.Panel(frame, x, y, width, height)
