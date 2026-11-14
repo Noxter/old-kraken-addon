@@ -84,6 +84,12 @@ Group Finder використовує протокол `GF2^TYPE^ID^PART^COUNT^H
 
 Команда `/okr group api` виконує лише read-only перевірку наявності методів і, якщо доступно, читає ID категорій та активностей. Це діагностичний крок, а не реалізація нативного пошуку. Поточний Group Finder Old Kraken залишається окремим гільдійним механізмом через addon messages у каналі `GUILD`.
 
+### Малий перевірюваний MVP для нативного пошуку
+
+1. Спочатку зібрати read-only звіт `/okr group api` та фактичні ID категорій/активностей.
+2. Далі окремо перевірити безпечний спосіб запуску `Search`, подію результатів і читання одного result ID — без автоматичного створення оголошень.
+3. Лише після цього додавати створення listing та заявки, коли підтверджені структура payload і метод подання заявки в реальному клієнті.
+
 Джерела: [C_LFGList для Camelot](https://wowlua.dev/api/C_LFGList), [Search](https://wowlua.dev/api/C_LFGList/Search), [GetSearchResults](https://wowlua.dev/api/C_LFGList/GetSearchResults), [GetSearchResultInfo](https://wowlua.dev/api/C_LFGList/GetSearchResultInfo), [GetSearchResultPlayerInfo](https://wowlua.dev/api/C_LFGList/GetSearchResultPlayerInfo), [CreateListing](https://wowlua.dev/api/C_LFGList/CreateListing).
 
 ## Guild Roster v0.4.0-alpha.3
