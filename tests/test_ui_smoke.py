@@ -135,17 +135,17 @@ local application = {
     id='accepted-group', owner='Remote Player', revision=1, closed=false, hidden=false,
     title='Accepted listing', category='quest', description='Accepted request',
     maxSize=5, minLevel=1, maxLevel=60, role='tank',
-    members={'Remote Player', 'Tester'}, memberRoles={['Remote Player']='tank', Tester='healer'},
+    members={'Remote Player'}, memberRoles={['Remote Player']='tank'},
 }
 local applicationKey = application.owner .. '\\001' .. application.id
 f.groups[applicationKey] = application
-f.pending[applicationKey] = 'accept'
+f.pending[applicationKey] = 'reject'
 selectTab('applications')
 assert(#ui.visible == 1 and ui.visible[1].key == applicationKey)
 ui.rows[1].scripts.OnClick()
-assert(ui.rows[1].status.text == 'ПРИЙНЯТО')
+assert(ui.rows[1].status.text == 'ВІДХИЛЕНО')
 assert(ui.applicationActionButton:IsShown() and ui.applicationActionButton.text == 'Прибрати заявку')
-assert(not ui.applyButton:IsShown())
+assert(ui.applyButton:IsShown())
 ui.applicationActionButton.scripts.OnClick()
 assert(f.pending[applicationKey] == nil and #ui.visible == 0)
 

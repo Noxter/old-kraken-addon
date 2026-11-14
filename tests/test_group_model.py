@@ -37,7 +37,12 @@ assert(#group.members == 2 and group.revision == 2)
 assert(not model:RoleAvailable(group, 'healer'))
 assert(model:RoleAvailable(group, 'dps'))
 assert(clone:ReceiveGroup('Alice-Realm', model:EncodeGroup(group)))
-assert(clone.pending[applicationKey] == 'accept')
+assert(clone.pending[applicationKey] == nil)
+assert(clone.pendingVersions[applicationKey] == nil and clone.pendingRoles[applicationKey] == nil)
+clone.pending[applicationKey] = 'pending'
+clone.pendingVersions[applicationKey], clone.pendingRoles[applicationKey] = 1234567890002, 'healer'
+assert(clone:ReceiveResponse('Alice-Realm', model._pack({'Alice-Realm', group.id, 'Bob-Realm', 'reject', '1234567890002'})))
+assert(clone.pending[applicationKey] == 'reject')
 assert(clone.pendingVersions[applicationKey] == nil and clone.pendingRoles[applicationKey] == nil)
 assert(clone:DismissApplication('Alice-Realm', group.id))
 assert(clone.pending[applicationKey] == nil)

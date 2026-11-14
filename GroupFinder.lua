@@ -249,7 +249,7 @@ function Finder:ReceiveGroup(sender, payload)
         maxLevel=maxLevel, role=role, members=members, partyObserved=observed, memberRoles=memberRoles, dungeon=dungeon, seenAt=GetTime() }
     if self.pending[key] == 'pending' then
         if seen[self.identity] then
-            self.pending[key], self.pendingVersions[key], self.pendingRoles[key] = 'accept', nil, nil
+            self.pending[key], self.pendingVersions[key], self.pendingRoles[key] = nil, nil, nil
         elseif closed == '1' then
             self.pending[key], self.pendingVersions[key], self.pendingRoles[key] = 'closed', nil, nil
         end

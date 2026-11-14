@@ -27,7 +27,7 @@ lua.execute('''
 local f=OldKraken.GroupFinder
 -- Owned groups migrate; ambiguous short-name application data is discarded.
 local profile='CAMWOW EU4 Realm 5 PvE'..'\\001'..'Guild'..'\\001'..'Hok'
-local acceptedKey='Alice Moon'..'\\001'..'accepted-group'
+local rejectedKey='Alice Moon'..'\\001'..'rejected-group'
 local old=setmetatable({}, {__index=f}); old:Initialize('Hok', function() return true end)
 assert(old:Create('Old group','dungeon','',5,1,60,'tank'))
 local oldGroup; for _,g in pairs(old.groups) do oldGroup=g end
@@ -61,11 +61,11 @@ local twinGroup; for _,g in pairs(twin.groups) do twinGroup=g end
 handlers.ANNOUNCE('Hok Moon','3',twin:EncodeGroup(twinGroup))
 assert(f.groups['Hok Moon'..'\\001'..twinGroup.id])
 assert(f.groups['Hok Mon'..'\\001'..oldGroup.id])
-f.pending[acceptedKey]='accept'
+f.pending[rejectedKey]='reject'
 f:Changed()
 guild='Other'; login()
 assert(cleared==1 and f.active and next(f.groups)==nil)
 guild='Guild'; login()
-assert(cleared==2 and f.groups['Hok Mon'..'\\001'..oldGroup.id] and f.pending[acceptedKey]=='accept')
+assert(cleared==2 and f.groups['Hok Mon'..'\\001'..oldGroup.id] and f.pending[rejectedKey]=='reject')
 ''')
 print('Integration checks passed')

@@ -77,10 +77,9 @@ local categoryLabels = {dungeon='Підземелля', quest='Квести', wo
 local roles = {'tank', 'healer', 'dps', 'flex'}
 local roleLabels = {['']='Не визначено', tank='Танк', healer='Лікар', dps='DPS', flex='Гнучка'}
 local roleColors = {tank='ff66b3ff', healer='ff69dc8c', dps='ffff7a6e', flex='ffffd06a', ['']='ffb5b5b5'}
-local pendingLabels = {pending='Очікує', accept='Прийнято', reject='Відхилено', closed='Закрито', retry='Подайте заявку знову'}
+local pendingLabels = {pending='Очікує', reject='Відхилено', closed='Закрито', retry='Подайте заявку знову'}
 local applicationBadges = {
     pending={text='ОЧІКУЄ', color={1, 0.80, 0.25}},
-    accept={text='ПРИЙНЯТО', color={0.40, 0.90, 0.55}},
     reject={text='ВІДХИЛЕНО', color={1, 0.35, 0.32}},
     closed={text='НАБІР ЗАКРИТО', color={0.70, 0.72, 0.76}},
     retry={text='ПОДАЙТЕ ЗНОВУ', color={1, 0.65, 0.25}},
