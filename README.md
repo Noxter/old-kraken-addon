@@ -30,7 +30,7 @@ Group Finder використовує протокол `GF2^TYPE^ID^PART^COUNT^H
 
 ## Статус
 
-Гілка `alpha` залишається версією в розробці. Ідентичність включає ім'я і прізвище персонажа з `UnitName`. Повний сценарій Group Finder, рейд, запрошення та виключення ще потребують перевірки в цільовому клієнті; стабільний реліз не підготовлено до публікації.
+Гілка `alpha` залишається версією в розробці. Ідентичність включає ім'я і прізвище персонажа з `UnitName`. Після виправлення нормалізації sender користувач підтвердив, що два клієнти бачать оголошення один одного. Це підтверджує базову видимість оголошень у конкретному тесті, але повний цикл заявок, відновлення після перезапуску, рейд, запрошення та виключення ще потребує перевірки; стабільний реліз не підготовлено до публікації.
 
 ## Цілі MVP
 
@@ -51,7 +51,7 @@ Group Finder використовує протокол `GF2^TYPE^ID^PART^COUNT^H
 
 Наявність функцій не гарантує доступність усіх операцій. Календар і обмін аддон-повідомленнями потребують окремих функціональних тестів.
 
-## Communication diagnostics v0.4.0-alpha.2
+## Communication diagnostics v0.4.0-alpha.3
 
 - `Communication.lua` додає окремий транспортний шар для guild addon messages.
 - Префікс: `OLDKRKN`; канал: `GUILD`.
@@ -62,7 +62,31 @@ Group Finder використовує протокол `GF2^TYPE^ID^PART^COUNT^H
 - Значення `AreOutgoingAddonChatMessagesRestricted()` виводиться як діагностика, але не блокує спробу відправлення: остаточний результат визначається функціональним тестом.
 - Потрібно перевірити на двох персонажах/клієнтах у гільдії. До цього спільна синхронізація не вважається підтвердженою.
 
-## Guild Roster v0.4.0-alpha.2
+## Native Group Finder API discovery v0.4.0-alpha.3
+
+У клієнті WoW Forever 1.60.1 (70938), Interface `16001`, попередні внутрішньоігрові перевірки підтвердили:
+
+- `C_LFGList` і `C_LFGInfo` — таблиці.
+- `C_LFGList.GetAvailableActivities`, `GetSearchResults`, `GetSearchResultInfo`, `Search`, `CreateListing` і `UpdateListing` — функції.
+- `C_LFGList.RequestToJoin` — `nil`.
+- `LFGListFrame` — `nil`. Це означає лише, що саме цей глобальний frame відсутній; це не доводить відсутність усього Group Finder UI.
+
+Ще не підтверджено безпосередньо в цьому клієнті: `GetAvailableCategories`, `GetActivityInfoTable`, `GetSearchResultPlayerInfo`, `ApplyToGroup`, `IsPremadeGroupFinderEnabled`, фактичні результати пошуку та створення оголошення.
+
+Документація API для flavor Camelot / Forever 1.60.1 описує:
+
+- `Search(categoryID, filter, preferredFilters, languageFilter?, searchCrossFactionListings?, advancedFilter?, activityIDsFilter?)`.
+- Подію `LFG_LIST_SEARCH_RESULTS_RECEIVED`; `GetSearchResults()` повертає загальну кількість і масив ID.
+- `GetSearchResultInfo(resultID)` повертає дані оголошення; `GetSearchResultPlayerInfo(resultID, memberIndex)` — дані учасника.
+- `CreateListing` і `UpdateListing` приймають структуру `LfgListingCreateData`.
+
+Важливі обмеження: документація позначає `Search` та `CreateListing` як restricted у певних ситуаціях. `ApplyToGroup` у довіднику позначений як припущений метод, відсутній у Blizzard API docs. Тому цей код не викликає `Search`, `ApplyToGroup`, `CreateListing` чи `UpdateListing` і не робить припущень щодо їхньої доступності/безпечного виклику.
+
+Команда `/okr group api` виконує лише read-only перевірку наявності методів і, якщо доступно, читає ID категорій та активностей. Це діагностичний крок, а не реалізація нативного пошуку. Поточний Group Finder Old Kraken залишається окремим гільдійним механізмом через addon messages у каналі `GUILD`.
+
+Джерела: [C_LFGList для Camelot](https://wowlua.dev/api/C_LFGList), [Search](https://wowlua.dev/api/C_LFGList/Search), [GetSearchResults](https://wowlua.dev/api/C_LFGList/GetSearchResults), [GetSearchResultInfo](https://wowlua.dev/api/C_LFGList/GetSearchResultInfo), [GetSearchResultPlayerInfo](https://wowlua.dev/api/C_LFGList/GetSearchResultPlayerInfo), [CreateListing](https://wowlua.dev/api/C_LFGList/CreateListing).
+
+## Guild Roster v0.4.0-alpha.3
 
 - Пошук за ім'ям персонажа.
 - Перемикання фільтра статусу: усі / онлайн / офлайн.
@@ -85,7 +109,7 @@ Group Finder використовує протокол `GF2^TYPE^ID^PART^COUNT^H
 - Самостійний аддон на Lua/XML.
 - Початковий етап — без власного backend-сервера.
 - Для локальних даних використовується механізм WoW SavedVariables.
-- Можливість обміну подіями та даними між клієнтами через канали WoW Forever потрібно окремо перевірити.
+- Обмін addon messages у каналі GUILD має діагностичний TEST/ACK; користувач також підтвердив базову видимість оголошень на двох клієнтах після виправлення sender identity. Значення AreOutgoingAddonChatMessagesRestricted() залишається діагностичним сигналом, а не самостійним доказом доставки.
 - Зовнішні HTTP-запити з аддону не вважаються доступними без підтвердження API клієнта.
 
 ## Поточна структура
@@ -99,6 +123,7 @@ GuildRoster.lua
 GroupFinder.lua
 GroupFinderIntegration.lua
 GroupFinderUI.lua
+GroupFinderAPI.lua
 README.md
 TESTING.md
 LICENSE
@@ -125,6 +150,7 @@ tests/
 - `/okr refresh` — запросити оновлення без відкриття вікна.
 - `/okr comm status` — перевірити стан транспорту.
 - `/okr comm test` — надіслати тестове повідомлення членам гільдії.
+- `/okr group api` — read-only діагностика нативного Group Finder API.
 
 ## Сумісність
 
