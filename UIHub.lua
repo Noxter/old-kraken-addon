@@ -72,14 +72,14 @@ local function createWindow()
 
     OldKraken.UIStyle.Panel(frame, 12, -42, 180, 600)
     Hub.brandMark = CreateFrame('Frame', nil, frame)
-    Hub.brandMark:SetSize(36, 36)
-    Hub.brandMark:SetPoint('TOPLEFT', frame, 'TOPLEFT', 22, -54)
+    Hub.brandMark:SetSize(52, 52)
+    Hub.brandMark:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -48)
     Hub.brandMark.texture = Hub.brandMark:CreateTexture(nil, 'ARTWORK')
     Hub.brandMark.texture:SetAllPoints(Hub.brandMark)
     Hub.brandMark.texture:SetTexture(OldKraken.UIStyle.EmblemPath())
 
     local brand = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
-    brand:SetPoint('TOPLEFT', frame, 'TOPLEFT', 68, -59)
+    brand:SetPoint('TOPLEFT', frame, 'TOPLEFT', 76, -59)
     brand:SetText('OLD KRAKEN')
     brand:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3])
 

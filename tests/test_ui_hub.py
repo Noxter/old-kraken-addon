@@ -88,6 +88,7 @@ assert(hub.buttons.roster.activeBar.color[1] == OldKraken.UIStyle.Colors.brandGo
 assert(hub.buttons.roster.label.textColor[1] == OldKraken.UIStyle.Colors.brandGold[1])
 assert(hub.buttons.groups.label.textColor[1] == OldKraken.UIStyle.Colors.text[1])
 assert(hub.brandMark.texture.texture == OldKraken.UIStyle.EmblemPath())
+assert(hub.brandMark.width == 52 and hub.brandMark.height == 52)
 assert(hub.buttons.roster.point[5] ~= hub.buttons.groups.point[5])
 assert(hub.buttons.groups.point[5] ~= hub.buttons.events.point[5])
 
