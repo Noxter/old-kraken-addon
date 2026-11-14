@@ -175,8 +175,8 @@ local function onlineIndex()
     end
     return online
 end
-local function button(parent,text,x,y,width,callback)
-    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b)
+local function button(parent,text,x,y,width,callback,variant)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(text); b:SetScript('OnClick',callback); return b
 end
 render=function()
@@ -250,7 +250,7 @@ local function createWindow(parent)
         end
         f.newOrder=button(f,'Нове замовлення',720,-38,150,function()
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:OpenCreateForm() end
-        end)
+        end,'primary')
         f.newOrder:Hide()
     end
     local search=CreateFrame('EditBox',nil,content,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)

@@ -14,7 +14,8 @@ def client(name, embedded=False):
         now=1700000000; clock=100; outgoing={}; timers={}; frames={}; notices={}; handlers={}
         OldKraken={DB={settings={}},UIStyle={
             Colors={brandGold={0.88,0.69,0.32,1}},
-            Button=function() end,Window=function() end,Dropdown=function() end,Input=function() end,
+            Button=function(button,variant) button.variant=variant end,
+            Window=function() end,Dropdown=function() end,Input=function() end,
         }}
         if embedded then
             OldKraken.UIHub={pages={}}
@@ -319,6 +320,7 @@ def test_embedded_orders():
         assert(workshop.ordersTab.activeBar:IsShown() and not workshop.professionTab.activeBar:IsShown())
         assert(not OldKrakenWorkshopOrdersFrame, 'embedded orders created a separate window')
         assert(workshop.newOrder:IsShown())
+        assert(workshop.newOrder.variant=='primary', 'new-order action is not styled as primary')
         workshop.professionTab.scripts.OnClick(workshop.professionTab)
         assert(workshop.professionView:IsShown() and not workshop.ordersView:IsShown())
         assert(workshop.professionTab.activeBar:IsShown() and not workshop.ordersTab.activeBar:IsShown())

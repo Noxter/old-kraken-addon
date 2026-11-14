@@ -606,13 +606,14 @@ local function createWindow(parent)
     end)
     local form=f
     if embedded then
-        form=CreateFrame('Frame','OldKrakenWorkshopOrderCreateFrame',parent,'BasicFrameTemplateWithInset')
+        form=CreateFrame('Frame','OldKrakenWorkshopOrderCreateFrame',UIParent,'BasicFrameTemplateWithInset')
         table.insert(UISpecialFrames,'OldKrakenWorkshopOrderCreateFrame')
-        form:SetSize(720,320); form:SetPoint('CENTER',parent,'CENTER'); form:SetClampedToScreen(true); form:EnableMouse(true)
-        form:SetFrameStrata('DIALOG')
+        form:SetSize(720,320); form:SetPoint('CENTER'); form:SetClampedToScreen(true); form:EnableMouse(true)
+        form:SetFrameStrata('DIALOG'); form:SetToplevel(true)
         OldKraken.UIStyle.Window(form)
         if form.TitleText then form.TitleText:SetText('Нове замовлення') end
         f.createForm=form
+        parent:HookScript('OnHide',function() form:Hide() end)
     end
     local function formY(standalone,compact) return embedded and compact or standalone end
     local heading=form:CreateFontString(nil,'OVERLAY','GameFontNormal')
@@ -668,6 +669,11 @@ function Orders:RefreshEmbedded()
     if window then refresh() end
 end
 function Orders:OpenCreateForm()
-    if window and window.createForm then window.createForm:Show() end
+    if not window or not window.createForm then
+        print('Old Kraken: форма нового замовлення недоступна; відкрийте вкладку замовлень у Hub.')
+        return false
+    end
+    window.createForm:Show()
+    return true
 end
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() changed() end)
