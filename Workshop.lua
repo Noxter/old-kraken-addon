@@ -228,7 +228,8 @@ local function createWindow()
     button(f,'‹',20,-430,44,function() offset=math.max(0,offset-1); render() end)
     f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',76,-435)
     button(f,'›',130,-430,44,function() offset=offset+1; render() end)
-    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',20,-475); note:SetText('Клік по майстру онлайн — шепіт. Рецепти та замовлення ще не реалізовані.')
+    button(f,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
+    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',180,-478); note:SetText('Клік по майстру онлайн — шепіт. Знання рецепта не підтверджується.')
     f:Hide(); return f
 end
 function Workshop:Show()

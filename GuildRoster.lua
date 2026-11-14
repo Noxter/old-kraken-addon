@@ -494,15 +494,18 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
-    if command == 'workshop' or command == 'craft' then
+    if command == 'orders' then
+        if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+        return
+    elseif command == 'workshop' or command == 'craft' then
         if OldKraken.Workshop then OldKraken.Workshop:Show() end
         return
     elseif command == 'events' or command == 'calendar' then
         if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
         return
-    elseif command == 'alerts group' or command == 'alerts request' or command == 'alerts event' then
+    elseif command == 'alerts group' or command == 'alerts request' or command == 'alerts event' or command == 'alerts workshop' then
         if OldKraken.GroupFinder and OldKraken.GroupFinder.PreviewAlert then
-            OldKraken.GroupFinder:PreviewAlert(command == 'alerts group' and 'group' or (command == 'alerts event' and 'event' or 'request'))
+            OldKraken.GroupFinder:PreviewAlert(command == 'alerts group' and 'group' or (command == 'alerts event' and 'event' or (command == 'alerts workshop' and 'workshop' or 'request')))
         end
         return
     elseif command == 'group status' then

@@ -16,4 +16,5 @@ GroupFinderUI.lua
 GroupFinderAPI.lua
 GuildEvents.lua
 Workshop.lua
+WorkshopOrders.lua
 Minimap.lua
