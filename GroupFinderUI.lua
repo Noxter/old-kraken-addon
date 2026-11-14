@@ -199,7 +199,7 @@ local function refresh()
             end
             local name = members[i]
             local state = i == 1 and 'автор' or
-                (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у паті' or 'резерв'))
+                (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у групі' or 'резерв'))
             row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 24)
             row.name:SetText(name .. ' (' .. state .. ')'); row.name:Show()
             row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. ' (' .. state .. ')'; row.hover:Show()

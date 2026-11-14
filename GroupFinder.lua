@@ -94,10 +94,10 @@ function Finder:EncodeGroup(group)
     return pack(fields)
 end
 
--- Combine actual party members with accepted reservations that have not joined
--- yet. A member previously observed in the party frees their place on leaving.
+-- Combine actual party or raid members with accepted reservations that have
+-- not joined yet. An observed member frees their place on leaving.
 function Finder:SyncPartyMembers(party)
-    if type(party) ~= 'table' or #party > 4 then return false, false end
+    if type(party) ~= 'table' or #party > 39 then return false, false end
     local current, partyNames = {}, {}
     for _, name in ipairs(party) do
         if not validText(name, 1, 128) or name == self.identity or current[name] then return false, false end
@@ -136,9 +136,11 @@ function Finder:SyncPartyMembers(party)
                 group.maxSize = math.max(group.maxSize, #members)
                 group.revision = group.revision + 1
                 group.partyObserved = current
-                if not self.send('UPDATE', self:EncodeGroup(group)) then
+                local payload = self:EncodeGroup(group)
+                local sent = #payload <= 2560 and self.send('UPDATE', payload)
+                if not sent then
                     group.members, group.maxSize, group.revision, group.partyObserved = oldMembers, oldMax, oldRevision, oldObserved
-                    return false, changed
+                    return false, changed, #payload > 2560 and 'payload' or 'queue'
                 end
                 changed = true
             end

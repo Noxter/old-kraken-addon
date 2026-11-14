@@ -159,22 +159,31 @@ local function readParty()
         or type(GetNumGroupMembers) ~= 'function' or type(UnitName) ~= 'function' then return nil end
     local ok, result = pcall(function()
         local function plain(value)
-            if type(issecretvalue) == 'function' and issecretvalue(value) then return nil end
+            if type(issecretvalue) == 'function' and issecretvalue(value) then error('unavailable group data') end
             return value
         end
         local raid, grouped = plain(IsInRaid()), plain(IsInGroup())
-        if type(raid) ~= 'boolean' or type(grouped) ~= 'boolean' or raid then return nil end
+        if raid ~= nil and raid ~= true and raid ~= false and raid ~= 1 then return nil end
+        if grouped ~= nil and grouped ~= true and grouped ~= false and grouped ~= 1 then return nil end
+        if raid and not grouped then return nil end
         if not grouped then return {} end
         local count = plain(GetNumGroupMembers())
-        if type(count) ~= 'number' or count % 1 ~= 0 or count < 2 or count > 5 then return nil end
-        local names = {}
-        for i = 1, count - 1 do
-            local name, surname = UnitName('party' .. i)
+        if type(count) ~= 'number' or count % 1 ~= 0 or count < 1 or count > (raid and 40 or 5)
+            or (not raid and count < 2) then return nil end
+        local names, seen, foundPlayer = {}, {}, not raid
+        local limit = raid and count or count - 1
+        for i = 1, limit do
+            local name, surname = UnitName((raid and 'raid' or 'party') .. i)
             name, surname = plain(name), plain(surname)
             if type(name) ~= 'string' or name == '' then return nil end
             if finder.identity:find(' ', 1, true) and (type(surname) ~= 'string' or surname == '') then return nil end
-            names[#names + 1] = type(surname) == 'string' and surname ~= '' and (name .. ' ' .. surname) or name
+            local fullName = type(surname) == 'string' and surname ~= '' and (name .. ' ' .. surname) or name
+            if seen[fullName] then return nil end
+            seen[fullName] = true
+            if raid and fullName == finder.identity then foundPlayer = true
+            else names[#names + 1] = fullName end
         end
+        if not foundPlayer then return nil end
         return names
     end)
     return ok and result or nil
@@ -190,6 +199,9 @@ function finder:PrintSyncStatus()
         '; додано/оновлено: ' .. diagnostics.accepted .. '; не додано (включно з повторами): ' .. diagnostics.rejected)
     print('|cff2ec4b6Old Kraken|r: останній sender: ' .. tostring(diagnostics.lastSender or '-') ..
         '; після перевірки: ' .. tostring(diagnostics.lastNormalized or 'не визначено'))
+    if diagnostics.partySyncError == 'payload' then
+        print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
+    end
 end
 
 function finder:RequestSyncNow()
@@ -355,8 +367,12 @@ frame:SetScript('OnEvent', function(_, event)
             if partyDirty then
                 local party = readParty()
                 if party then
-                    local complete, changed = finder:SyncPartyMembers(party)
+                    local complete, changed, reason = finder:SyncPartyMembers(party)
                     partyDirty = not complete
+                    if reason == 'payload' and diagnostics.partySyncError ~= 'payload' then
+                        print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
+                    end
+                    diagnostics.partySyncError = reason
                     if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
                 end
             end
