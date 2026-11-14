@@ -31,6 +31,7 @@ function methods:IsShown() return self.shown end
 function methods:GetStringHeight() return 0 end
 function methods:SetScript(name, fn) self.scripts[name] = fn end
 function methods:CreateFontString() return CreateFrame() end
+function methods:CreateTexture() return CreateFrame() end
 local meta = {__index=function(_, k) if k == 'TitleText' then return nil end; return methods[k] or function() end end}
 function CreateFrame() return setmetatable({scripts={}}, meta) end
 ''')
