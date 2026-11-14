@@ -336,7 +336,7 @@ local function refresh()
         local query = string.lower(window.searchFilter:GetText() or '')
         local matches = (filterCategory == 'all' or group.category == filterCategory)
             and (filterDungeon == '' or group.dungeon == filterDungeon)
-            and (filterRole == '' or group.role == filterRole)
+            and (filterRole == '' or (#group.members < group.maxSize and Finder:RoleAvailable(group, filterRole)))
             and (not filterFree or #group.members < group.maxSize)
             and (not level or (level >= group.minLevel and level <= group.maxLevel))
             and (query == '' or string.find(string.lower(group.title .. ' ' .. group.owner .. ' ' .. group.description .. ' ' .. (dungeonLabels[group.dungeon] or '')), query, 1, true))
@@ -523,8 +523,7 @@ local function refresh()
         if own and not own.closed and not own.hidden then for _ in pairs(applicants) do requestCount = requestCount + 1 end end
     end
     window.requestsButton:SetText('Заявки: ' .. requestCount)
-    window.searchFilter:SetShown(tab ~= 'create'); window.searchFilter.label:SetShown(tab ~= 'create')
-    window.dungeonFilter:SetShown(tab ~= 'create'); window.dungeonFilterLabel:SetShown(tab ~= 'create')
+    for _, control in ipairs(window.filterControls) do control:SetShown(tab == 'all') end
     window.dungeonButton:SetShown(tab == 'create' and category == 'dungeon')
     window.dungeonLabel:SetShown(tab == 'create' and category == 'dungeon')
     for _, box in ipairs(window.createFields) do
@@ -726,12 +725,16 @@ local function createWindow()
     f.dungeonFilterLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 285, -350); f.dungeonFilterLabel:SetText('Підземелля')
     f.levelFilter = input(f, 'Фільтр рівня', 20, -465, 80, '')
     f.levelFilter:SetScript('OnTextChanged', refresh)
-    dropdown(f, 110, -485, 155, choices(categories, categoryLabels, {value='all', label='Усі категорії'}),
+    f.categoryFilter = dropdown(f, 110, -485, 155, choices(categories, categoryLabels, {value='all', label='Усі категорії'}),
         function() return filterCategory end, function(value) filterCategory=value; offset=0; refresh() end)
-    dropdown(f, 270, -485, 125, choices({'tank','healer','dps','flex'}, coloredRoleLabels, {value='', label='Усі ролі'}),
+    f.roleFilter = dropdown(f, 270, -485, 125, choices({'tank','healer','dps','flex'}, coloredRoleLabels, {value='', label='Усі ролі'}),
         function() return filterRole end, function(value) filterRole=value; offset=0; refresh() end)
-    dropdown(f, 400, -485, 135, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
+    f.freeFilter = dropdown(f, 400, -485, 135, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
         function() return filterFree end, function(value) filterFree=value; offset=0; refresh() end)
+    f.filterControls = {
+        f.searchFilter, f.searchFilter.label, f.dungeonFilter, f.dungeonFilterLabel,
+        f.levelFilter, f.levelFilter.label, f.categoryFilter, f.roleFilter, f.freeFilter,
+    }
     f.titleBox = input(f, 'Назва', 20, -330, 240, '')
     f.descriptionBox = input(f, 'Опис', 275, -330, 250, '')
     f.maxBox = input(f, 'Місць', 20, -385, 65, '5')

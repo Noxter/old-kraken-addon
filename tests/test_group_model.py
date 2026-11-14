@@ -12,6 +12,9 @@ assert(model:Create('Печера', 'dungeon', 'Рівень 20+', 5, 1, 60, 'ta
 local group
 for _, g in pairs(model.groups) do group = g end
 assert(group and group.owner == 'Alice-Realm')
+assert(model:RoleAvailable(group, 'healer'))
+assert(not model:RoleAvailable(group, 'tank'))
+assert(not model:RoleAvailable(group, 'flex'))
 local snapshot = model:EncodeGroup(group)
 local clone = {}
 setmetatable(clone, {__index = model})
@@ -28,6 +31,8 @@ assert(model:ReceiveJoin('Eve-Realm', model._pack({'Alice-Realm', group.id, '', 
 assert(not model:ReceiveJoin('Eve-Realm', model._pack({'Alice-Realm', group.id, '', 'apply', '1234567890001'})))
 assert(model:Decide(group.id, 'Bob-Realm', true))
 assert(#group.members == 2 and group.revision == 2)
+assert(not model:RoleAvailable(group, 'healer'))
+assert(model:RoleAvailable(group, 'dps'))
 assert(clone:ReceiveGroup('Alice-Realm', model:EncodeGroup(group)))
 assert(clone.pending['Alice-Realm' .. '\\001' .. group.id] == nil)
 assert(not clone:ReceiveGroup('Mallory-Realm', model:EncodeGroup(group)))
