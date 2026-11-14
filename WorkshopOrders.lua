@@ -290,6 +290,16 @@ refresh=function()
                 elseif o.candidates[identity] then row.offer:SetText('Ви відгукнулися'); row.offer:Disable()
                 else row.offer:SetText('Запропонувати допомогу'); row.offer:Enable() end
             else row.offer:Hide() end
+            if o.owner==identity and o.status=='open' then
+                local applicants={}; for name in pairs(o.candidates) do applicants[#applicants+1]=name end; table.sort(applicants)
+                row.applicants:SetText(#applicants>0 and ('Відгуки: '..applicants[1]..(#applicants>1 and (' +'..(#applicants-1)) or '')) or 'Відгуків ще немає')
+                row.applicants:Show()
+                if #applicants>0 then
+                    row.choose:SetText(stateKey=='expired' and 'Термін минув' or ('Обрати виконавця ('..#applicants..')'))
+                    if stateKey=='expired' then row.choose:Disable() else row.choose:Enable() end
+                    row.choose:Show()
+                else row.choose:Hide() end
+            else row.applicants:Hide(); row.choose:Hide() end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row.entryKey=nil; row.order=nil; row:UnlockHighlight(); row:Hide() end
@@ -360,6 +370,34 @@ local function createWindow()
             local k=self:GetParent().entryKey
             if not k or not intent(k,'offer') then showError() end
         end)
+        card.applicants=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+        card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,-76); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
+        card.menu=CreateFrame('Frame','OldKrakenOrderCardMenu'..i,card,'UIDropDownMenuTemplate')
+        UIDropDownMenu_Initialize(card.menu,function(menu,level)
+            local target=menu.orderKey; local o=target and own[target]
+            if not o or o.status~='open' or o.deadline<GetServerTime() then return end
+            local names={}; for name in pairs(o.candidates) do names[#names+1]=name end; table.sort(names)
+            for _,name in ipairs(names) do
+                local person=name; local item=UIDropDownMenu_CreateInfo(); item.text=person; item.notCheckable=true
+                item.func=function() if not ownerAction(target,'choose',person) then showError() end end
+                UIDropDownMenu_AddButton(item,level)
+            end
+        end,'MENU')
+        card.choose=button(card,'Обрати виконавця',8,-94,203,function(self)
+            local parent=self:GetParent(); parent.menu.orderKey=parent.entryKey
+            if not parent.menu.orderKey then return end
+            ToggleDropDownMenu(1,nil,parent.menu,self,0,0)
+            local list=_G.DropDownList1
+            if list and list:IsShown() then
+                if not list.oldKrakenRestoreHook then
+                    list:HookScript('OnHide',function(menu) if menu.oldKrakenStrata then menu:SetFrameStrata(menu.oldKrakenStrata); menu.oldKrakenStrata=nil end end)
+                    list.oldKrakenRestoreHook=true
+                end
+                if not list.oldKrakenStrata then list.oldKrakenStrata=list:GetFrameStrata() end
+                list:SetFrameStrata('FULLSCREEN_DIALOG')
+            end
+        end)
+        card.choose:SetHeight(19)
         card:SetScript('OnEnter',function(self)
             local o=self.order; if not o or not GameTooltip then return end
             GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(o.item)
