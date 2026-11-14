@@ -231,7 +231,7 @@ MIT. Див. файл [LICENSE](LICENSE).
 ## Готовий ZIP для встановлення
 
 Після публікації GitHub Release автоматично запускається GitHub Actions workflow
-`.github/workflows/package-release.yml`. Він читає список Lua-файлів безпосередньо з `OldKraken.toc`, перевіряє наявність кожного з них і додає їх разом із TOC до `OldKraken.zip`. Тому нові Lua-модулі, внесені до TOC, не потрібно окремо додавати до команди пакування.
+`.github/workflows/package-release.yml`. Він читає список Lua-файлів безпосередньо з `OldKraken.toc`, перевіряє наявність кожного з них і додає їх разом із TOC та обома іконками з `Media` до `OldKraken.zip`. Тому нові Lua-модулі, внесені до TOC, не потрібно окремо додавати до команди пакування.
 
 Основні файли ZIP:
 

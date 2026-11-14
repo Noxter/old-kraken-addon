@@ -24,7 +24,7 @@ OldKraken.UIStyle.Colors = {
 }
 
 function OldKraken.UIStyle.EmblemPath()
-    return 'Interface\\AddOns\\' .. OldKraken.name .. '\\Media\\OldKrakenEmblem.tga'
+    return 'Interface\\AddOns\\' .. OldKraken.name .. '\\Media\\OldKrakenKraken.tga'
 end
 
 local function addOutline(frame, color)

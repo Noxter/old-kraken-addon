@@ -45,8 +45,8 @@ end
 function OldKraken:On() end
 ''')
 lua.execute((root / "Core.lua").read_text(encoding="utf-8"))
-assert (root / "Media" / "OldKrakenEmblem.tga").is_file()
-lua.execute("OldKraken.name = 'OldKraken'; assert(OldKraken.UIStyle.EmblemPath():find('OldKrakenEmblem.tga', 1, true))")
+assert (root / "Media" / "OldKrakenKraken.tga").is_file()
+lua.execute("OldKraken.name = 'OldKraken'; assert(OldKraken.UIStyle.EmblemPath():find('OldKrakenKraken.tga', 1, true))")
 lua.execute('''
 local style, colors = OldKraken.UIStyle, OldKraken.UIStyle.Colors
 assert(colors.brandGold[1] > colors.brandGold[2])

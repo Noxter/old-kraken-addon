@@ -36,6 +36,10 @@ jobs:
           done
 
           cp OldKraken.toc "${addon_files[@]}" package/OldKraken/
+          test -f Media/OldKrakenKraken.tga || { echo "Missing addon emblem"; exit 1; }
+          test -f Media/OldKrakenEmblem.tga || { echo "Missing saved alternate emblem"; exit 1; }
+          mkdir -p package/OldKraken/Media
+          cp Media/OldKrakenKraken.tga Media/OldKrakenEmblem.tga package/OldKraken/Media/
           cd package
           zip -r ../OldKraken-alpha.zip OldKraken
           unzip -l ../OldKraken-alpha.zip
