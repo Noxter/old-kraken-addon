@@ -192,11 +192,9 @@ if C_Timer and C_Timer.NewTicker then
     end)
 end
 
-local function parseDate(day, month, year, text)
+local function parseDate(day, month, year, hour, minute)
     if type(time) ~= 'function' or type(date) ~= 'function' then return nil end
-    local hour,minute = text:match('^%s*(%d%d?):(%d%d)%s*$')
-    hour,minute=tonumber(hour),tonumber(minute)
-    if not day or not month or not year or not hour or not minute or hour>23 or minute>59 then return nil end
+    if not day or not month or not year or type(hour)~='number' or type(minute)~='number' or hour<0 or hour>23 or minute<0 or minute>59 then return nil end
     local ok,stamp=pcall(time,{year=year,month=month,day=day,hour=hour,min=minute,sec=0})
     if not ok or type(stamp)~='number' then return nil end
     local okDate,roundtrip=pcall(date,'*t',stamp)
@@ -222,6 +220,39 @@ local function selectMenu(parent,name,x,y,width,values,labels,get,set)
         end
     end)
     UIDropDownMenu_SetText(f,labels[get()]); return f
+end
+local function selectMinutes(parent,x,y,get,set)
+    local f=CreateFrame('Frame','OldKrakenEventsMinute',parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
+    f:SetPoint('TOPLEFT',parent,'TOPLEFT',x-16,y+3); UIDropDownMenu_SetWidth(f,56); UIDropDownMenu_JustifyText(f,'LEFT')
+    UIDropDownMenu_Initialize(f,function(_,level,menuValue)
+        level=level or 1
+        if level==1 then
+            for start=0,45,15 do
+                local item=UIDropDownMenu_CreateInfo(); item.text=string.format('%02d–%02d',start,start+14); item.hasArrow=true; item.notCheckable=true; item.value=start
+                UIDropDownMenu_AddButton(item,level)
+            end
+        elseif level==2 then
+            local list=_G.DropDownList2
+            if list then
+                if not list.oldKrakenMinuteHook then
+                    list:HookScript('OnHide',function(self)
+                        if self.oldKrakenMinuteStrata then self:SetFrameStrata(self.oldKrakenMinuteStrata); self.oldKrakenMinuteStrata=nil end
+                    end)
+                    list.oldKrakenMinuteHook=true
+                end
+                if not list.oldKrakenMinuteStrata then list.oldKrakenMinuteStrata=list:GetFrameStrata() end
+                list:SetFrameStrata('FULLSCREEN_DIALOG')
+            end
+            local start=tonumber(menuValue or UIDROPDOWNMENU_MENU_VALUE)
+            if not start then return end
+            for minute=start,start+14 do
+                local value=minute; local item=UIDropDownMenu_CreateInfo(); item.text=string.format('%02d',value); item.value=value; item.checked=get()==value
+                item.func=function() set(value); UIDropDownMenu_SetText(f,string.format('%02d',value)) end
+                UIDropDownMenu_AddButton(item,level)
+            end
+        end
+    end)
+    UIDropDownMenu_SetText(f,string.format('%02d',get())); return f
 end
 local function datePicker(parent)
     local chosen, month, year
@@ -324,14 +355,20 @@ local function createWindow()
     f.cancel=action(f,'Скасувати',710,-325,105,function() if selected then Events:Cancel(selected) end end)
     local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-358); heading:SetText('Створити подію')
     f.title=field(f,'Назва',18,-382,220,''); local getDate=datePicker(f)
-    f.when=field(f,'Час: гг:хх',390,-382,62,'')
-    f.size=field(f,'Місць (2–40)',465,-382,80,'10')
+    local hour,minute=0,0
+    local hourValues,hourLabels={},{}
+    for value=0,23 do hourValues[#hourValues+1]=value; hourLabels[value]=string.format('%02d',value) end
+    local timeLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); timeLabel:SetPoint('TOPLEFT',f,'TOPLEFT',390,-382); timeLabel:SetText('Година')
+    local minuteLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); minuteLabel:SetPoint('TOPLEFT',f,'TOPLEFT',490,-382); minuteLabel:SetText('Хвилина')
+    selectMenu(f,'OldKrakenEventsHour',390,-400,90,hourValues,hourLabels,function() return hour end,function(v) hour=v end)
+    selectMinutes(f,490,-400,function() return minute end,function(v) minute=v end)
+    f.size=field(f,'Місць (2–40)',600,-382,80,'10')
     f.description=field(f,'Опис',18,-435,430,'')
     selectMenu(f,'OldKrakenEventsKind',465,-453,160,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v end)
     action(f,'Створити',650,-453,150,function()
         local day=getDate()
-        local when=day and parseDate(day.day,day.month,day.year,f.when:GetText())
-        if not when then print('Old Kraken: оберіть дату та вкажіть місцевий час у форматі гг:хх.'); return end
+        local when=day and parseDate(day.day,day.month,day.year,hour,minute)
+        if not when then print('Old Kraken: оберіть коректні дату та місцевий час.'); return end
         if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText()) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
     end)
