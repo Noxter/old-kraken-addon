@@ -246,6 +246,38 @@ local function dropdown(parent,name,x,y,width,values,labels,get,set)
     UIDropDownMenu_SetText(f,labels[get()]); return f
 end
 local function showError() print('Old Kraken: дію не виконано. Оновіть дані або перевірте стан замовлення.') end
+StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_CANCEL={
+    text='Скасувати замовлення «%s»?', button1='Скасувати', button2='Назад',
+    timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
+}
+StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_WITHDRAW={
+    text='Відмовитися від замовлення «%s»?', button1='Відмовитися', button2='Назад',
+    timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
+}
+local function confirmCardAction(k,action)
+    local o=k and get(k)
+    if not active or not o or (action~='cancel' and action~='withdraw') then showError(); return end
+    local expectedProfile,expectedIdentity,expectedStatus=profile,identity,o.status
+    local function accept()
+        local current=get(k)
+        if not active or profile~=expectedProfile or identity~=expectedIdentity or not current or current.status~=expectedStatus then showError(); return end
+        local ok
+        if action=='cancel' then ok=ownerAction(k,'cancel') else ok=intent(k,'withdraw') end
+        if not ok then showError() end
+    end
+    local popup=StaticPopup_Show(action=='cancel' and 'OLDKRAKEN_ORDER_CARD_CANCEL' or 'OLDKRAKEN_ORDER_CARD_WITHDRAW',o.item,nil,accept)
+    if not popup then showError(); return end
+    if not popup.oldKrakenRestoreHook then
+        popup:HookScript('OnHide',function(self)
+            if self.oldKrakenStrata then self:SetFrameStrata(self.oldKrakenStrata); self.oldKrakenStrata=nil end
+        end)
+        popup.oldKrakenRestoreHook=true
+    end
+    if not popup.oldKrakenStrata then popup.oldKrakenStrata=popup:GetFrameStrata() end
+    popup:SetFrameStrata('FULLSCREEN_DIALOG')
+end
 local function orderIcon(o)
     local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
     if (o.itemID or 0)>0 and type(getIcon)=='function' then
@@ -398,11 +430,11 @@ local function createWindow()
         end)
         card.withdraw=button(card,'Відмовитися',112,-84,99,function(self)
             local k=self:GetParent().entryKey
-            if not k or not intent(k,'withdraw') then showError() end
+            confirmCardAction(k,'withdraw')
         end)
         card.cancel=button(card,'Скасувати',112,-84,99,function(self)
             local k=self:GetParent().entryKey
-            if not k or not ownerAction(k,'cancel') then showError() end
+            confirmCardAction(k,'cancel')
         end)
         card.applicants=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
         card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,-76); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
