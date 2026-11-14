@@ -203,6 +203,15 @@ local function CreateRosterWindow(parent)
         if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
     end)
 
+    local workshopButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(workshopButton)
+    workshopButton:SetSize(100, 24)
+    workshopButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -38, -65)
+    workshopButton:SetText("Майстерня")
+    workshopButton:SetScript("OnClick", function()
+        if OldKraken.Workshop then OldKraken.Workshop:Show() end
+    end)
+
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
     searchBox:SetSize(190, 24)
     searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -38)
@@ -509,12 +518,21 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
-    if command == 'events' or command == 'calendar' then
+    if command == 'recipes' then
+        if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end
+        return
+    elseif command == 'orders' then
+        if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+        return
+    elseif command == 'workshop' or command == 'craft' then
+        if OldKraken.Workshop then OldKraken.Workshop:Show() end
+        return
+    elseif command == 'events' or command == 'calendar' then
         if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
         return
-    elseif command == 'alerts group' or command == 'alerts request' or command == 'alerts event' then
+    elseif command == 'alerts group' or command == 'alerts request' or command == 'alerts event' or command == 'alerts workshop' then
         if OldKraken.GroupFinder and OldKraken.GroupFinder.PreviewAlert then
-            OldKraken.GroupFinder:PreviewAlert(command == 'alerts group' and 'group' or (command == 'alerts event' and 'event' or 'request'))
+            OldKraken.GroupFinder:PreviewAlert(command == 'alerts group' and 'group' or (command == 'alerts event' and 'event' or (command == 'alerts workshop' and 'workshop' or 'request')))
         end
         return
     elseif command == 'group status' then

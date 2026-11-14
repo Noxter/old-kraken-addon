@@ -879,17 +879,18 @@ end)
 
 local alertCaptions = {
     group='НОВЕ ОГОЛОШЕННЯ', request='НОВА ЗАЯВКА', decision='СТАН ЗАЯВКИ',
-    event='ПОДІЯ ГІЛЬДІЇ', event_signup='ЗАПИС НА ПОДІЮ',
+    event='ПОДІЯ ГІЛЬДІЇ', event_signup='ЗАПИС НА ПОДІЮ', workshop='МАЙСТЕРНЯ',
 }
 local alertActions = {
     group='Клік — відкрити групу', request='Клік — мої оголошення',
     decision='Клік — переглянути заявку', event='Клік — відкрити подію',
-    event_signup='Клік — відкрити подію',
+    event_signup='Клік — відкрити подію', workshop='Клік — відкрити замовлення',
 }
 
 local function showAlert(title, subtitle, kind, key, dungeonId)
     local isEvent = kind == 'event' or kind == 'event_signup'
-    print('|cff2ec4b6Old Kraken|r: ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or '') .. (isEvent and '. /okr events' or '. /okr group'))
+    local isWorkshop = kind == 'workshop'
+    print('|cff2ec4b6Old Kraken|r: ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or '') .. (isEvent and '. /okr events' or (isWorkshop and '. /okr orders' or '. /okr group')))
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         OldKraken.UIStyle.Button(groupAlert)
@@ -950,6 +951,10 @@ local function showAlert(title, subtitle, kind, key, dungeonId)
             local alertKind = self.kind
             self:Hide()
             if button == 'RightButton' then return end
+            if alertKind == 'workshop' then
+                if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show(target) end
+                return
+            end
             if alertKind == 'event' or alertKind == 'event_signup' then
                 if OldKraken.GuildEvents then OldKraken.GuildEvents:ShowEvent(target) end
                 return
@@ -976,7 +981,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId)
     local hasGroupArt = kind == 'group'
     groupAlert.alertArt:SetShown(hasGroupArt)
     if hasGroupArt then setDungeonArt(groupAlert.alertArt, dungeonId) end
-    groupAlert.positionKind = isEvent and 'event' or (kind == 'group' and 'group' or 'request')
+    groupAlert.positionKind = isWorkshop and 'workshop' or (isEvent and 'event' or (kind == 'group' and 'group' or 'request'))
     local settings = OldKraken.DB and OldKraken.DB.settings
     local positions = type(settings) == 'table' and settings.alertPositions
     local pos = type(positions) == 'table' and positions[groupAlert.positionKind]
@@ -1018,8 +1023,14 @@ function Finder:PreviewAlert(kind)
         showAlert('Нова заявка від гравця', 'Танк · Назва групи', 'request')
     elseif kind == 'event' then
         showAlert('Назва події', 'Організатор · сьогодні о 20:00', 'event')
+    elseif kind == 'workshop' then
+        showAlert('Замовлення', 'Приклад сповіщення Майстерні', 'workshop')
     end
 end
+
+OldKraken:On('WORKSHOP_ORDER_NOTICE', function(title,subtitle,k)
+    showAlert(title,subtitle,'workshop',k)
+end)
 
 OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
     if not OldKraken.GuildEvents or not OldKraken.GuildEvents:AlertsEnabled() then return end
