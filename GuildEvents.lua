@@ -192,11 +192,11 @@ if C_Timer and C_Timer.NewTicker then
     end)
 end
 
-local function parseDate(text)
+local function parseDate(day, month, year, text)
     if type(time) ~= 'function' or type(date) ~= 'function' then return nil end
-    local day,month,year,hour,minute = text:match('^%s*(%d%d?)%.(%d%d?)%.(%d%d%d%d)%s+(%d%d?):(%d%d)%s*$')
-    day,month,year,hour,minute=tonumber(day),tonumber(month),tonumber(year),tonumber(hour),tonumber(minute)
-    if not day or month<1 or month>12 or day<1 or day>31 or hour>23 or minute>59 then return nil end
+    local hour,minute = text:match('^%s*(%d%d?):(%d%d)%s*$')
+    hour,minute=tonumber(hour),tonumber(minute)
+    if not day or not month or not year or not hour or not minute or hour>23 or minute>59 then return nil end
     local ok,stamp=pcall(time,{year=year,month=month,day=day,hour=hour,min=minute,sec=0})
     if not ok or type(stamp)~='number' then return nil end
     local okDate,roundtrip=pcall(date,'*t',stamp)
@@ -222,6 +222,53 @@ local function selectMenu(parent,name,x,y,width,values,labels,get,set)
         end
     end)
     UIDropDownMenu_SetText(f,labels[get()]); return f
+end
+local function datePicker(parent)
+    local chosen, month, year
+    local caption=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall')
+    caption:SetPoint('TOPLEFT',parent,'TOPLEFT',255,-382); caption:SetText('Дата')
+    local button=action(parent,'Обрати дату',255,-400,125,function() end)
+    local popup=CreateFrame('Frame',nil,parent,'BackdropTemplate')
+    popup:SetSize(242,250); popup:SetPoint('BOTTOMLEFT',button,'TOPLEFT',0,4)
+    popup:SetFrameLevel(parent:GetFrameLevel()+20); popup:EnableMouse(true)
+    popup:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
+    popup:SetBackdropColor(0.07,0.08,0.09,1); popup:SetBackdropBorderColor(0.3,0.35,0.4,1)
+    local months={'Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'}
+    local title=popup:CreateFontString(nil,'OVERLAY','GameFontNormal'); title:SetPoint('TOP',popup,'TOP',0,-12)
+    local cells={}
+    local function render()
+        title:SetText(months[month]..' '..year)
+        local first=date('*t',time({year=year,month=month,day=1,hour=12}))
+        local following=month==12 and 1 or month+1
+        local followingYear=month==12 and year+1 or year
+        local last=date('*t',time({year=followingYear,month=following,day=1,hour=12})-86400).day
+        local offset=(first.wday+5)%7
+        for i,cell in ipairs(cells) do
+            local day=i-offset
+            if day>0 and day<=last then
+                cell.day=day; cell:SetText(day); cell:Show()
+                if chosen and chosen.day==day and chosen.month==month and chosen.year==year then cell:LockHighlight() else cell:UnlockHighlight() end
+            else cell.day=nil; cell:UnlockHighlight(); cell:Hide() end
+        end
+    end
+    action(popup,'‹',8,-7,30,function() month=month-1; if month==0 then month=12; year=year-1 end; render() end)
+    action(popup,'›',204,-7,30,function() month=month+1; if month==13 then month=1; year=year+1 end; render() end)
+    for i,label in ipairs({'Пн','Вт','Ср','Чт','Пт','Сб','Нд'}) do
+        local text=popup:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); text:SetPoint('TOPLEFT',popup,'TOPLEFT',11+(i-1)*32,-40); text:SetWidth(30); text:SetText(label)
+    end
+    for i=1,42 do
+        local cell=action(popup,'',8+((i-1)%7)*32,-60-math.floor((i-1)/7)*30,30,function(self)
+            chosen={day=self.day,month=month,year=year}; button:SetText(string.format('%02d.%02d.%04d',chosen.day,chosen.month,chosen.year)); popup:Hide()
+        end)
+        cells[i]=cell
+    end
+    button:SetScript('OnClick',function()
+        if popup:IsShown() then popup:Hide(); return end
+        local current=chosen or date('*t'); month,year=current.month,current.year; render(); popup:Show()
+    end)
+    popup:Hide()
+    parent:HookScript('OnHide',function() popup:Hide() end)
+    return function() return chosen end
 end
 local function refresh()
     if not window or not window:IsShown() then return end
@@ -276,13 +323,15 @@ local function createWindow()
     f.leave=action(f,'Виписатися',605,-325,100,function() if selected then Events:Signup(selected,'leave') end end)
     f.cancel=action(f,'Скасувати',710,-325,105,function() if selected then Events:Cancel(selected) end end)
     local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-358); heading:SetText('Створити подію')
-    f.title=field(f,'Назва',18,-382,220,''); f.when=field(f,'Дата і час: дд.мм.рррр гг:хх',255,-382,190,'')
+    f.title=field(f,'Назва',18,-382,220,''); local getDate=datePicker(f)
+    f.when=field(f,'Час: гг:хх',390,-382,62,'')
     f.size=field(f,'Місць (2–40)',465,-382,80,'10')
     f.description=field(f,'Опис',18,-435,430,'')
     selectMenu(f,'OldKrakenEventsKind',465,-453,160,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v end)
     action(f,'Створити',650,-453,150,function()
-        local when=parseDate(f.when:GetText())
-        if not when then print('Old Kraken: вкажіть місцеві дату й час у форматі дд.мм.рррр гг:хх.'); return end
+        local day=getDate()
+        local when=day and parseDate(day.day,day.month,day.year,f.when:GetText())
+        if not when then print('Old Kraken: оберіть дату та вкажіть місцевий час у форматі гг:хх.'); return end
         if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText()) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
     end)
@@ -295,22 +344,4 @@ function Events:Show()
     window:Show(); refresh()
 end
 
--- Read-only diagnostics; never opens or changes a calendar event.
-function Events:PrintCalendarDiagnostics()
-    local version, build, _, interface = GetBuildInfo()
-    print('Old Kraken: календар API; клієнт '..tostring(version)..', збірка '..tostring(build)..', interface '..tostring(interface))
-    for _, name in ipairs({'CreateGuildSignUpEvent','EventSetDate','EventSetTime','EventSetTitle','EventSetDescription','AddEvent','CanAddEvent','OpenCalendar'}) do
-        print('Old Kraken: C_Calendar.'..name..': '..(C_Calendar and type(C_Calendar[name]) == 'function' and 'доступний' or 'недоступний'))
-    end
-    for _, name in ipairs({'GetCurrentCalendarTime','GetCalendarTimeFromEpoch','GetServerTimeLocal'}) do
-        print('Old Kraken: C_DateAndTime.'..name..': '..(C_DateAndTime and type(C_DateAndTime[name]) == 'function' and 'доступний' or 'недоступний'))
-    end
-    if C_DateAndTime and type(C_DateAndTime.GetCurrentCalendarTime) == 'function' then
-        local ok, value = pcall(C_DateAndTime.GetCurrentCalendarTime)
-        if ok and type(value) == 'table' then
-            print('Old Kraken: час календаря сервера: '..tostring(value.monthDay)..'.'..tostring(value.month)..'.'..tostring(value.year)..' '..tostring(value.hour)..':'..tostring(value.minute))
-        end
-    end
-    if type(date) == 'function' then print('Old Kraken: місцевий час: '..date('%d.%m.%Y %H:%M')) end
-end
 OldKraken:On('GUILD_EVENTS_CHANGED',refresh)

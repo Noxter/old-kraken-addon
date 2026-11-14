@@ -485,10 +485,7 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
-    if command == 'calendarapi' then
-        if OldKraken.GuildEvents then OldKraken.GuildEvents:PrintCalendarDiagnostics() end
-        return
-    elseif command == 'events' or command == 'calendar' then
+    if command == 'events' or command == 'calendar' then
         if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
         return
     elseif command == 'alerts group' or command == 'alerts request' then
