@@ -226,7 +226,8 @@ local function createWindow(parent)
     end
     f:SetSize(780,520); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Майстерня') end
-    local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); search:SetSize(200,22); search:SetPoint('TOPLEFT',f,'TOPLEFT',20,-45); search:SetAutoFocus(false)
+    local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
+    search:SetSize(200,22); search:SetPoint('TOPLEFT',f,'TOPLEFT',20,-45); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) query=lower(self:GetText() or ''); offset=0; render() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local drop=CreateFrame('Frame','OldKrakenWorkshopProfession',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(drop)

@@ -312,13 +312,14 @@ local function parseDate(day, month, year, hour, minute)
     if not okDate or type(roundtrip)~='table' or roundtrip.year~=year or roundtrip.month~=month or roundtrip.day~=day or roundtrip.hour~=hour or roundtrip.min~=minute then return nil end
     return stamp
 end
-local function action(parent, label, x, y, width, callback)
-    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b)
+local function action(parent, label, x, y, width, callback, variant)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(label); b:SetScript('OnClick',callback); return b
 end
 local function field(parent, label, x, y, width, value)
     local caption=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); caption:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); caption:SetText(label)
-    local box=CreateFrame('EditBox',nil,parent,'InputBoxTemplate'); box:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); box:SetSize(width,22); box:SetAutoFocus(false); box:SetText(value or '')
+    local box=CreateFrame('EditBox',nil,parent,'InputBoxTemplate'); OldKraken.UIStyle.Input(box)
+    box:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); box:SetSize(width,22); box:SetAutoFocus(false); box:SetText(value or '')
     box:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return box
 end
 local function selectMenu(parent,name,x,y,width,values,labels,get,set)
@@ -453,7 +454,7 @@ local function refresh()
                 if not row then
                     row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(340,58)
                     row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetWidth(335); row.label:SetJustifyH('LEFT')
-                    row.accept=action(row,'Прийняти',0,-22,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end)
+                    row.accept=action(row,'Прийняти',0,-22,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,'primary')
                     row.reserve=action(row,'Резерв',100,-22,94,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end)
                     row.reject=action(row,'Відхилити',200,-22,104,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end)
                     window.signupRows[i]=row
@@ -504,7 +505,7 @@ local function createWindow(parent)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(350,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(350); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     selectMenu(f,'OldKrakenEventsRole',450,-325,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
-    f.join=action(f,'Записатися',605,-325,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end)
+    f.join=action(f,'Записатися',605,-325,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
     f.leave=action(f,'Виписатися',605,-325,100,function() if selected then Events:Signup(selected,'leave') end end)
     f.cancel=action(f,'Скасувати',710,-325,105,function() if selected then Events:Cancel(selected) end end)
     local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-358); heading:SetText('Створити подію')
@@ -542,7 +543,7 @@ local function createWindow(parent)
         if not when then print('Old Kraken: оберіть коректні дату та місцевий час.'); return end
         if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText(),activity) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
-    end)
+    end,'primary')
     f:HookScript('OnShow',refresh)
     f:Hide(); return f
 end

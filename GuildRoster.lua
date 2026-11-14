@@ -195,6 +195,7 @@ local function CreateRosterWindow(parent)
     end)
 
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
+    OldKraken.UIStyle.Input(searchBox)
     searchBox:SetSize(190, 24)
     searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -38)
     searchBox:SetAutoFocus(false)
@@ -322,7 +323,7 @@ local function CreateRow(index, parent)
     end
 
     local inviteButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    OldKraken.UIStyle.Button(inviteButton)
+    OldKraken.UIStyle.Button(inviteButton, "primary")
     inviteButton:SetSize(76, 18)
     inviteButton:SetPoint("LEFT", row, "LEFT", 746, 0)
     inviteButton:SetText("Інвайт")

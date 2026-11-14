@@ -279,13 +279,14 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     end
 end) end
 
-local function button(parent,label,x,y,width,callback)
-    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b)
+local function button(parent,label,x,y,width,callback,variant)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(label); b:SetScript('OnClick',callback); return b
 end
 local function input(parent,label,x,y,width,initial)
     local t=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); t:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); t:SetText(label)
-    local e=CreateFrame('EditBox',nil,parent,'InputBoxTemplate'); e:SetSize(width,22); e:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); e:SetAutoFocus(false); e:SetText(initial or '')
+    local e=CreateFrame('EditBox',nil,parent,'InputBoxTemplate'); OldKraken.UIStyle.Input(e)
+    e:SetSize(width,22); e:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); e:SetAutoFocus(false); e:SetText(initial or '')
     e:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return e
 end
 local function dropdown(parent,name,x,y,width,values,labels,get,set)
@@ -554,7 +555,8 @@ local function createWindow()
     f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-348)
     button(f,'›',130,-342,44,function() offset=offset+1; refresh() end)
     local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,-349); searchLabel:SetText('Пошук')
-    local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); search:SetPoint('TOPLEFT',f,'TOPLEFT',265,-344); search:SetSize(195,22); search:SetAutoFocus(false)
+    local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
+    search:SetPoint('TOPLEFT',f,'TOPLEFT',265,-344); search:SetSize(195,22); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) searchQuery=lower(self:GetText() or ''); offset=0; refresh() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,-80); detailsScroll:SetSize(340,132)
@@ -595,7 +597,7 @@ local function createWindow()
     button(f,'Опублікувати',650,-548,160,function()
         if not professionNames[profession] then print('Old Kraken: оберіть професію або рецепт.'); return end
         if create(f.item:GetText(),f.quantity:GetText(),f.reward:GetText(),f.note:GetText(),chosenRecipe) then f.item:SetText(''); f.note:SetText(''); profession=0; UIDropDownMenu_SetText(professionMenu,professionChoices[0]); print('Old Kraken: замовлення збережено та поставлено в чергу.') else showError() end
-    end)
+    end,'primary')
     local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-603); note:SetText('Передачу речі й оплату гравці виконують у грі самостійно.')
     f:Hide(); return f
 end

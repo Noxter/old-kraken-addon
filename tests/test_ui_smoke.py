@@ -4,10 +4,17 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {listeners = {}}; UIParent = {GetWidth=function() return 0 end}; StaticPopupDialogs = {}; UISpecialFrames = {}
+OldKraken = {name = 'OldKraken', listeners = {}}; UIParent = {GetWidth=function() return 0 end}; StaticPopupDialogs = {}; UISpecialFrames = {}
 OldKraken.UIStyle = {
+    Colors = {
+        brandGold = {0.88, 0.69, 0.32, 1},
+        text = {0.93, 0.94, 0.96},
+        mutedText = {0.63, 0.67, 0.73},
+    },
+    EmblemPath = function() return 'OldKrakenEmblem.tga' end,
     Window = function() end,
     Button = function() end,
+    Input = function() end,
     Dropdown = function() end,
     Panel = function() end,
 }
@@ -116,12 +123,15 @@ end
 
 filtersShown(true)
 assert(ui.previousPageButton:IsShown() and ui.nextPageButton:IsShown() and ui.listPage:IsShown())
+assert(ui.tabs[1].button.activeMark:IsShown())
+assert(not ui.tabs[2].button.activeMark:IsShown())
 assert(ui.previousPageButton.width == 68 and ui.previousPageButton.height == 32)
 assert(ui.nextPageButton.width == 68 and ui.nextPageButton.height == 32)
 assert(ui.rows[1].art.width == 70 and ui.rows[1].art.height == 70)
 assert(ui.rows[1].art.texCoord[2] - ui.rows[1].art.texCoord[1]
     == ui.rows[1].art.texCoord[4] - ui.rows[1].art.texCoord[3])
 selectTab('mine'); filtersShown(false)
+assert(ui.tabs[4].button.activeMark:IsShown() and not ui.tabs[1].button.activeMark:IsShown())
 selectTab('applications'); filtersShown(false)
 selectTab('create'); filtersShown(false)
 assert(not ui.previousPageButton:IsShown() and not ui.nextPageButton:IsShown() and not ui.listPage:IsShown())

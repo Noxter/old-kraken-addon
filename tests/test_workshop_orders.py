@@ -11,7 +11,7 @@ def client(name):
     lua.globals().player = name
     lua.execute('''
         now=1700000000; clock=100; outgoing={}; timers={}; frames={}; notices={}; handlers={}
-        OldKraken={DB={settings={}},UIStyle={Button=function() end,Window=function() end,Dropdown=function() end}}
+        OldKraken={DB={settings={}},UIStyle={Button=function() end,Window=function() end,Dropdown=function() end,Input=function() end}}
         function OldKraken:On() end
         function OldKraken:Fire(...) notices[#notices+1]={...} end
         function print(...) end

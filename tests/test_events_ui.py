@@ -9,7 +9,7 @@ lua.execute('''
 OldKraken = {
     DB = {events = {}, settings = {}},
     _listeners = {},
-    UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end},
+    UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end, Input=function() end},
     Communication = {},
     GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end},
 }

@@ -132,9 +132,9 @@ StaticPopupDialogs.OLDKRAKEN_REMOVE_MEMBER = {
     OnAccept = function(_, callback) if type(callback) == 'function' then callback() end end,
 }
 
-local function button(parent, label, x, y, width, callback, height)
+local function button(parent, label, x, y, width, callback, height, variant)
     local b = CreateFrame('Button', nil, parent, 'UIPanelButtonTemplate')
-    OldKraken.UIStyle.Button(b)
+    OldKraken.UIStyle.Button(b, variant)
     b:SetSize(width, height or 23); b:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y); b:SetText(label)
     b:SetScript('OnClick', callback)
     return b
@@ -177,6 +177,7 @@ local function input(parent, label, x, y, width, initial)
     local text = parent:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     text:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y); text:SetText(label)
     local box = CreateFrame('EditBox', nil, parent, 'InputBoxTemplate')
+    OldKraken.UIStyle.Input(box)
     box:SetSize(width, 22); box:SetPoint('TOPLEFT', parent, 'TOPLEFT', x + 4, y - 18)
     box:SetAutoFocus(false); box:SetText(initial or '')
     box.label = text
@@ -287,7 +288,7 @@ local function showRequests()
                     refreshRequests()
                 else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
             end
-            row.accept = button(f, 'Прийняти', 175, y - 3, 85, function() decide(true) end)
+            row.accept = button(f, 'Прийняти', 175, y - 3, 85, function() decide(true) end, nil, 'primary')
             row.reject = button(f, 'Відхилити', 265, y - 3, 95, function() decide(false) end)
             f.rows[i] = row
         end
@@ -336,6 +337,7 @@ local function refresh()
     window.visible = lines
     window.emptyList:SetShown(#lines == 0 and tab ~= 'create')
     for _, item in ipairs(window.tabs) do
+        item.button.activeMark:SetShown(item.key == tab)
         if item.key == tab then item.button:LockHighlight() else item.button:UnlockHighlight() end
     end
     local pageCount = math.ceil(#lines / CARDS_PER_PAGE)
@@ -415,7 +417,7 @@ local function refresh()
                 end)
                 row.hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
                 row.invite = CreateFrame('Button', nil, window.detailsContent, 'UIPanelButtonTemplate')
-                OldKraken.UIStyle.Button(row.invite)
+                OldKraken.UIStyle.Button(row.invite, 'primary')
                 row.invite:SetSize(100, 22); row.invite:SetText('Запросити')
                 row.invite:SetScript('OnClick', function(self)
                     local current = selected and Finder.groups[selected]
@@ -556,6 +558,11 @@ local function createWindow(parent)
     f.tabs = {}
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
         local b = button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; offset=0; requestOffset=0; refresh() end)
+        b.activeMark = b:CreateTexture(nil, 'OVERLAY')
+        b.activeMark:SetPoint('BOTTOMLEFT', b, 'BOTTOMLEFT', 8, 2)
+        b.activeMark:SetSize(134, 2)
+        b.activeMark:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
+        b.activeMark:Hide()
         f.tabs[#f.tabs + 1] = {key=item[2], button=b}
     end
     f.alertButton = button(f, 'Сповіщення', 700, -32, 175, function()
@@ -797,12 +804,12 @@ local function createWindow(parent)
         local ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then Finder:Changed(); tab='mine'; refresh()
         else print('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.') end
-    end)
+    end, nil, 'primary')
     f.applyButton = button(f, 'Подати заявку', 550, -385, 140, function()
         local g=selected and Finder.groups[selected]
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
         elseif g then print('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.') end
-    end)
+    end, nil, 'primary')
     f.applicationActionButton = button(f, 'Відкликати', 700, -385, 140, function()
         local g=selected and Finder.groups[selected]
         if not g or g.owner == Finder.identity or not Finder.pending[selected] then return end

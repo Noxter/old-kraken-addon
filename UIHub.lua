@@ -1,12 +1,15 @@
 local Hub = {pages = {}, pageOrder = {}, buttons = {}, currentPage = nil}
 OldKraken.UIHub = Hub
+local colors = OldKraken.UIStyle.Colors
 
 local function updateButtons()
     for key, button in pairs(Hub.buttons) do
         local selected = key == Hub.currentPage
         button.activeBar:SetShown(selected)
-        button.label:SetTextColor(selected and 0.30 or 0.88, selected and 0.72 or 0.89, selected and 1 or 0.92)
-        button.shortcut:SetTextColor(selected and 0.30 or 0.55, selected and 0.72 or 0.58, selected and 1 or 0.62)
+        local labelColor = selected and colors.brandGold or colors.text
+        local shortcutColor = selected and colors.brandGold or colors.mutedText
+        button.label:SetTextColor(labelColor[1], labelColor[2], labelColor[3])
+        button.shortcut:SetTextColor(shortcutColor[1], shortcutColor[2], shortcutColor[3])
     end
 end
 
@@ -20,7 +23,7 @@ local function createPageButton(page)
     button.activeBar = button:CreateTexture(nil, 'ARTWORK')
     button.activeBar:SetPoint('TOPLEFT', button, 'TOPLEFT', 1, -8)
     button.activeBar:SetSize(3, 32)
-    button.activeBar:SetColorTexture(0.0, 0.57, 0.93, 1)
+    button.activeBar:SetColorTexture(unpack(colors.brandGold))
 
     button.shortcut = button:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
     button.shortcut:SetPoint('LEFT', button, 'LEFT', 14, 0)
@@ -68,15 +71,22 @@ local function createWindow()
     end)
 
     OldKraken.UIStyle.Panel(frame, 12, -42, 180, 600)
+    Hub.brandMark = CreateFrame('Frame', nil, frame)
+    Hub.brandMark:SetSize(36, 36)
+    Hub.brandMark:SetPoint('TOPLEFT', frame, 'TOPLEFT', 22, -54)
+    Hub.brandMark.texture = Hub.brandMark:CreateTexture(nil, 'ARTWORK')
+    Hub.brandMark.texture:SetAllPoints(Hub.brandMark)
+    Hub.brandMark.texture:SetTexture(OldKraken.UIStyle.EmblemPath())
+
     local brand = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
-    brand:SetPoint('TOPLEFT', frame, 'TOPLEFT', 24, -58)
+    brand:SetPoint('TOPLEFT', frame, 'TOPLEFT', 68, -59)
     brand:SetText('OLD KRAKEN')
-    brand:SetTextColor(0.30, 0.72, 1)
+    brand:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3])
 
     local subtitle = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    subtitle:SetPoint('TOPLEFT', brand, 'BOTTOMLEFT', 0, -6)
+    subtitle:SetPoint('TOPLEFT', brand, 'BOTTOMLEFT', 0, -4)
     subtitle:SetText('ГІЛЬДІЙНИЙ ЦЕНТР')
-    subtitle:SetTextColor(0.60, 0.64, 0.68)
+    subtitle:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3])
 
     Hub.content = CreateFrame('Frame', nil, frame)
     Hub.content:SetSize(920, 600)

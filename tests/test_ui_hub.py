@@ -6,7 +6,15 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {UIStyle = {Window=function() end, Panel=function() end, Button=function() end, Dropdown=function() end}}
+OldKraken = {name = 'OldKraken', UIStyle = {
+    Colors = {
+        brandGold = {0.88, 0.69, 0.32, 1},
+        text = {0.93, 0.94, 0.96},
+        mutedText = {0.63, 0.67, 0.73},
+    },
+    EmblemPath=function() return 'OldKrakenEmblem.tga' end,
+    Window=function() end, Panel=function() end, Button=function() end, Dropdown=function() end, Input=function() end,
+}}
 UIParent = {}
 UISpecialFrames = {}
 function UIDropDownMenu_SetWidth() end
@@ -20,7 +28,8 @@ function methods:SetJustifyH(value) self.justifyH = value end
 function methods:ClearAllPoints() self.point = nil end
 function methods:SetText(value) self.text = value end
 function methods:SetTextColor(...) self.textColor = {...} end
-function methods:SetColorTexture(...) end
+function methods:SetColorTexture(...) self.color = {...} end
+function methods:SetTexture(value) self.texture = value end
 function methods:SetShown(value) if value then self:Show() else self:Hide() end end
 function methods:Show()
     if self.shown then return end
@@ -75,6 +84,10 @@ assert(built.roster:IsShown() and hub.frame:IsShown())
 assert(not built.groups and not built.events)
 assert(hub.buttons.roster.activeBar:IsShown())
 assert(not hub.buttons.groups.activeBar:IsShown())
+assert(hub.buttons.roster.activeBar.color[1] == OldKraken.UIStyle.Colors.brandGold[1])
+assert(hub.buttons.roster.label.textColor[1] == OldKraken.UIStyle.Colors.brandGold[1])
+assert(hub.buttons.groups.label.textColor[1] == OldKraken.UIStyle.Colors.text[1])
+assert(hub.brandMark.texture.texture == OldKraken.UIStyle.EmblemPath())
 assert(hub.buttons.roster.point[5] ~= hub.buttons.groups.point[5])
 assert(hub.buttons.groups.point[5] ~= hub.buttons.events.point[5])
 

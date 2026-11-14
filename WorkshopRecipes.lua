@@ -306,8 +306,8 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     if recipeChanged then recipeChanged=false; OldKraken:Fire('WORKSHOP_RECIPES_CHANGED') end
 end) end
 
-local function button(parent,label,x,y,width,callback)
-    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b)
+local function button(parent,label,x,y,width,callback,variant)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(label); b:SetScript('OnClick',callback); return b
 end
 local function onlineIndex()
@@ -339,10 +339,11 @@ local function createWindow()
     table.insert(UISpecialFrames,'OldKrakenWorkshopRecipesFrame'); f:SetSize(820,520); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); OldKraken.UIStyle.Window(f)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук рецептів') end
-    f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); f.query:SetSize(460,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-48); f.query:SetAutoFocus(false)
+    f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(f.query)
+    f.query:SetSize(460,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-48); f.query:SetAutoFocus(false)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     f.query:SetScript('OnEnterPressed',function(self) if search(self:GetText() or '') then self:ClearFocus() end end)
-    button(f,'Знайти',500,-48,120,function() search(f.query:GetText() or '') end)
+    button(f,'Знайти',500,-48,120,function() search(f.query:GetText() or '') end,'primary')
     f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-78)
     for i=1,12 do
         rows[i]=button(f,'',20,-102-(i-1)*26,770,function(self)

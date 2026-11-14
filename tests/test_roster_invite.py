@@ -8,7 +8,7 @@ lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
 OldKraken = {
     DB = {settings = {roster = {search='', status='all', class='ALL', sort='name', ascending=true}}},
-    UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end, Panel=function() end},
+    UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end, Panel=function() end, Input=function() end},
 }
 UISpecialFrames = {}
 SlashCmdList = {}
@@ -53,7 +53,7 @@ end
 ''')
 lua.execute((root / 'Core.lua').read_text(encoding='utf-8'))
 lua.execute('''
-OldKraken.UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end, Panel=function() end}
+OldKraken.UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end, Panel=function() end, Input=function() end}
 ''')
 lua.execute((root / 'GuildRoster.lua').read_text(encoding='utf-8'))
 lua.execute('''
