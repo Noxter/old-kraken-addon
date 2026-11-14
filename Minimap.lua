@@ -46,33 +46,49 @@ OldKraken:On('INITIALIZED', function(db)
     border:SetTexture('Interface\\Minimap\\MiniMap-TrackingBorder')
     border:SetSize(54, 54); border:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
     button:SetHighlightTexture('Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight')
-    local menu = CreateFrame('Frame', 'OldKrakenMinimapMenu', button, 'UIDropDownMenuTemplate')
-    UIDropDownMenu_Initialize(menu, function(_, level)
-        local function entry(text, callback, checked)
-            local info = UIDropDownMenu_CreateInfo()
-            info.text, info.func, info.checked = text, callback, checked
-            info.notCheckable = checked == nil
-            UIDropDownMenu_AddButton(info, level)
-        end
-        entry('Відкрити /okr', function() if OldKraken.GuildRoster then OldKraken.GuildRoster:Show() end end)
-        entry('Пошук груп', function() if OldKraken.GroupFinder then OldKraken.GroupFinder:Show() end end)
-        entry('Лівий клік: /okr', function() db.settings.minimapAction = 'roster' end, db.settings.minimapAction ~= 'groups')
-        entry('Лівий клік: пошук груп', function() db.settings.minimapAction = 'groups' end, db.settings.minimapAction == 'groups')
-    end, 'MENU')
+    local menu = CreateFrame('Frame', 'OldKrakenMinimapMenu', UIParent)
+    menu:SetSize(205, 64); menu:SetFrameStrata('FULLSCREEN_DIALOG'); menu:EnableMouse(true); menu:Hide()
+    local menuBackground = menu:CreateTexture(nil, 'BACKGROUND')
+    menuBackground:SetAllPoints(); menuBackground:SetColorTexture(0.055, 0.06, 0.07, 0.98)
+    local function menuButton(label, y, command)
+        local item = CreateFrame('Button', nil, menu, 'UIPanelButtonTemplate')
+        item:SetPoint('TOPLEFT', menu, 'TOPLEFT', 6, y); item:SetSize(193, 24)
+        item:SetText(label); OldKraken.UIStyle.Button(item)
+        item:SetScript('OnClick', function()
+            menu:Hide()
+            if SlashCmdList and type(SlashCmdList.OLDKRAKEN) == 'function' then
+                SlashCmdList.OLDKRAKEN(command)
+            end
+        end)
+    end
+    menuButton('Відкрити (/okr)', -6, '')
+    menuButton('Пошук групи (/okr group)', -34, 'group')
+    menu:SetScript('OnUpdate', function(self)
+        if (IsMouseButtonDown('LeftButton') or IsMouseButtonDown('RightButton'))
+            and not MouseIsOver(self) and not MouseIsOver(button) then self:Hide() end
+    end)
     button:SetScript('OnClick', function(_, mouseButton)
         if mouseButton == 'RightButton' then
-            ToggleDropDownMenu(1, nil, menu, 'cursor', 0, 0)
-        elseif db.settings.minimapAction == 'groups' then
-            if OldKraken.GroupFinder then OldKraken.GroupFinder:Show() end
-        elseif OldKraken.GuildRoster then
-            OldKraken.GuildRoster:Show()
+            if menu:IsShown() then menu:Hide(); return end
+            GameTooltip:Hide()
+            menu:ClearAllPoints()
+            local x = button:GetCenter()
+            if x and x < UIParent:GetWidth() / 2 then
+                menu:SetPoint('TOPLEFT', button, 'TOPRIGHT', 6, 0)
+            else
+                menu:SetPoint('TOPRIGHT', button, 'TOPLEFT', -6, 0)
+            end
+            menu:Show()
+        else
+            menu:Hide()
+            if SlashCmdList and type(SlashCmdList.OLDKRAKEN) == 'function' then SlashCmdList.OLDKRAKEN('') end
         end
     end)
     button:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_LEFT')
         GameTooltip:SetText('Old Kraken', 0.3, 0.72, 1)
-        GameTooltip:AddLine(db.settings.minimapAction == 'groups' and 'Ліва кнопка: пошук груп' or 'Ліва кнопка: /okr', 1, 1, 1)
-        GameTooltip:AddLine('Права кнопка: меню та налаштування', 1, 1, 1)
+        GameTooltip:AddLine('Ліва кнопка: /okr', 1, 1, 1)
+        GameTooltip:AddLine('Права кнопка: меню', 1, 1, 1)
         GameTooltip:AddLine('Перетягніть, щоб перемістити', 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
