@@ -161,6 +161,7 @@ local function CreateRosterWindow()
     end
 
     local frame = CreateFrame("Frame", "OldKrakenRosterFrame", UIParent, "BasicFrameTemplateWithInset")
+    table.insert(UISpecialFrames, "OldKrakenRosterFrame")
     frame:SetSize(900, 590)
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
@@ -448,6 +449,10 @@ function Roster:Show()
     frame:Show()
     self:Load()
     self:RequestUpdate()
+end
+
+function Roster:Toggle()
+    if rosterFrame and rosterFrame:IsShown() then rosterFrame:Hide() else self:Show() end
 end
 
 local eventFrame = CreateFrame("Frame")

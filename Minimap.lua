@@ -47,15 +47,14 @@ OldKraken:On('INITIALIZED', function(db)
     border:SetSize(54, 54); border:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
     button:SetHighlightTexture('Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight')
     button:SetScript('OnClick', function(_, mouseButton)
-        if SlashCmdList and type(SlashCmdList.OLDKRAKEN) == 'function' then
-            SlashCmdList.OLDKRAKEN(mouseButton == 'RightButton' and 'group' or '')
-        end
+        local target = mouseButton == 'RightButton' and OldKraken.GroupFinder or OldKraken.GuildRoster
+        if target and type(target.Toggle) == 'function' then target:Toggle() end
     end)
     button:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_LEFT')
         GameTooltip:SetText('Old Kraken', 0.3, 0.72, 1)
-        GameTooltip:AddLine('Ліва кнопка: ростер', 1, 1, 1)
-        GameTooltip:AddLine('Права кнопка: пошук груп', 1, 1, 1)
+        GameTooltip:AddLine('Ліва кнопка: відкрити / закрити ростер', 1, 1, 1)
+        GameTooltip:AddLine('Права кнопка: відкрити / закрити пошук груп', 1, 1, 1)
         GameTooltip:AddLine('Перетягніть, щоб перемістити', 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)

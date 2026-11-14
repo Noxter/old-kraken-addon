@@ -528,6 +528,7 @@ end
 
 local function createWindow()
     local f = CreateFrame('Frame', 'OldKrakenGroupFinderFrame', UIParent, 'BasicFrameTemplateWithInset')
+    table.insert(UISpecialFrames, 'OldKrakenGroupFinderFrame')
     f:SetSize(900, 590); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true)
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving)
     f:SetScript('OnDragStop', function(self)
@@ -797,6 +798,10 @@ function Finder:Show()
     refreshPeople()
     if not window then window=createWindow() end
     window:Show(); refresh()
+end
+
+function Finder:Toggle()
+    if window and window:IsShown() then window:Hide() else self:Show() end
 end
 OldKraken:On('GROUP_FINDER_CHANGED', refresh)
 OldKraken:On('GROUP_FINDER_CHANGED', refreshRequests)
