@@ -8,6 +8,7 @@ OldKraken = {name = 'OldKraken', listeners = {}}; UIParent = {GetWidth=function(
 OldKraken.UIStyle = {
     Colors = {
         brandGold = {0.88, 0.69, 0.32, 1},
+        panelEdge = {0.33, 0.26, 0.14, 0.68},
         text = {0.93, 0.94, 0.96},
         mutedText = {0.63, 0.67, 0.73},
     },

@@ -472,25 +472,35 @@ refresh=function()
         window.details:SetText('Оберіть замовлення зі списку.'); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.reopen:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
     end
 end
-local function createWindow()
-    local f=CreateFrame('Frame','OldKrakenWorkshopOrdersFrame',UIParent,'BasicFrameTemplateWithInset')
-    table.insert(UISpecialFrames,'OldKrakenWorkshopOrdersFrame'); f:SetSize(900,650); f:SetPoint('CENTER'); f:SetClampedToScreen(true); f:SetMovable(true); f:EnableMouse(true)
-    f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
-    OldKraken.UIStyle.Window(f); if f.TitleText then f.TitleText:SetText('Old Kraken — Замовлення') end
+local function createWindow(parent)
+    local embedded=parent~=nil
+    local shift=embedded and 32 or 0
+    local function y(value) return value-shift end
+    local f
+    if embedded then
+        f=CreateFrame('Frame',nil,parent)
+    else
+        f=CreateFrame('Frame','OldKrakenWorkshopOrdersFrame',UIParent,'BasicFrameTemplateWithInset')
+        table.insert(UISpecialFrames,'OldKrakenWorkshopOrdersFrame')
+        f:SetMovable(true); f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
+        OldKraken.UIStyle.Window(f)
+    end
+    f:SetSize(900,embedded and 590 or 650); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
+    if f.TitleText then f.TitleText:SetText('Old Kraken — Замовлення') end
     local views={all='Усі замовлення',available='Доступні мені',mine='Мої замовлення',work='Моя робота'}
-    dropdown(f,'OldKrakenOrdersView',18,-42,190,{'all','available','mine','work'},views,function() return view end,function(v) view=v; offset=0; refresh() end)
-    f.alerts=button(f,'Нові: увімк.',235,-42,145,function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; refresh() end)
-    button(f,'Оновити',390,-42,100,function() nextSync=0; print('Old Kraken: запит замовлень поставлено в чергу.') end)
+    dropdown(f,'OldKrakenOrdersView',18,y(-42),190,{'all','available','mine','work'},views,function() return view end,function(v) view=v; offset=0; refresh() end)
+    f.alerts=button(f,'Нові: увімк.',235,y(-42),145,function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; refresh() end)
+    button(f,'Оновити',390,y(-42),100,function() nextSync=0; print('Old Kraken: запит замовлень поставлено в чергу.') end)
     local statusLabels={all='Усі стани',open='Шукає майстра',assigned='У роботі',delivered='Передано',done='Виконано',cancelled='Скасовано',expired='Термін минув'}
-    dropdown(f,'OldKrakenOrdersStatus',500,-42,165,{'all','open','assigned','delivered','done','cancelled','expired'},statusLabels,function() return statusFilter end,function(v) statusFilter=v; offset=0; refresh() end)
+    dropdown(f,'OldKrakenOrdersStatus',500,y(-42),165,{'all','open','assigned','delivered','done','cancelled','expired'},statusLabels,function() return statusFilter end,function(v) statusFilter=v; offset=0; refresh() end)
     local professionLabels={[0]='Усі професії'}; local filterIDs={0}
     for _,id in ipairs(professionIDs) do professionLabels[id]=professionNames[id]; filterIDs[#filterIDs+1]=id end
-    dropdown(f,'OldKrakenOrdersFilterProfession',675,-42,185,filterIDs,professionLabels,function() return professionFilter end,function(v) professionFilter=v; offset=0; refresh() end)
-    f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-88); f.empty:SetWidth(430); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Замовлень не знайдено. Змініть фільтри або створіть замовлення.')
+    dropdown(f,'OldKrakenOrdersFilterProfession',675,y(-42),185,filterIDs,professionLabels,function() return professionFilter end,function(v) professionFilter=v; offset=0; refresh() end)
+    f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,y(-88)); f.empty:SetWidth(430); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Замовлень не знайдено. Змініть фільтри або створіть замовлення.')
     f.orderRows=orderRows
     for i=1,CARDS_PER_PAGE do
         local col=(i-1)%2; local line=math.floor((i-1)/2)
-        local card=button(f,'',18+col*229,-80-line*124,219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
+        local card=button(f,'',18+col*229,y(-80-line*124),219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
         card:SetHeight(116)
         card.icon=card:CreateTexture(nil,'ARTWORK'); card.icon:SetPoint('TOPLEFT',card,'TOPLEFT',7,-8); card.icon:SetSize(34,34)
         local function label(template,y)
@@ -570,60 +580,94 @@ local function createWindow()
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         orderRows[i]=card
     end
-    button(f,'‹',18,-342,44,function() offset=offset-1; refresh() end)
-    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-348)
-    button(f,'›',130,-342,44,function() offset=offset+1; refresh() end)
-    local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,-349); searchLabel:SetText('Пошук')
+    button(f,'‹',18,y(-342),44,function() offset=offset-1; refresh() end)
+    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,y(-348))
+    button(f,'›',130,y(-342),44,function() offset=offset+1; refresh() end)
+    local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,y(-349)); searchLabel:SetText('Пошук')
     local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
-    search:SetPoint('TOPLEFT',f,'TOPLEFT',265,-344); search:SetSize(195,22); search:SetAutoFocus(false)
+    search:SetPoint('TOPLEFT',f,'TOPLEFT',265,y(-344)); search:SetSize(195,22); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) searchQuery=lower(self:GetText() or ''); offset=0; refresh() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
-    local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,-80); detailsScroll:SetSize(340,132)
+    local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-80)); detailsScroll:SetSize(340,132)
     f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(330,132); detailsScroll:SetScrollChild(f.detailsContent)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(330); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
-    f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,-225)
-    f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,-244); f.candidateScroll:SetSize(340,90)
+    f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-225))
+    f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-244)); f.candidateScroll:SetSize(340,90)
     f.candidateContent=CreateFrame('Frame',nil,f.candidateScroll); f.candidateContent:SetSize(330,90); f.candidateScroll:SetScrollChild(f.candidateContent); f.candidates={}
-    f.offer=button(f,'Запропонувати',495,-345,130,function() if not selected or not intent(selected,'offer') then showError() end end)
-    f.withdraw=button(f,'Відмовитися',495,-345,130,function() if not selected or not intent(selected,'withdraw') then showError() end end)
-    f.delivered=button(f,'Передав',630,-345,100,function() if not selected or not intent(selected,'delivered') then showError() end end)
-    f.finish=button(f,'Отримано',495,-345,110,function() if not selected or not ownerAction(selected,'finish') then showError() end end)
-    f.cancel=button(f,'Скасувати',610,-345,110,function() if not selected or not ownerAction(selected,'cancel') then showError() end end)
-    f.reopen=button(f,'Перевідкрити',495,-345,110,function() confirmCardAction(selected,'reopen') end)
-    f.masters=button(f,'Майстри',735,-345,110,function()
+    f.offer=button(f,'Запропонувати',495,y(-345),130,function() if not selected or not intent(selected,'offer') then showError() end end)
+    f.withdraw=button(f,'Відмовитися',495,y(-345),130,function() if not selected or not intent(selected,'withdraw') then showError() end end)
+    f.delivered=button(f,'Передав',630,y(-345),100,function() if not selected or not intent(selected,'delivered') then showError() end end)
+    f.finish=button(f,'Отримано',495,y(-345),110,function() if not selected or not ownerAction(selected,'finish') then showError() end end)
+    f.cancel=button(f,'Скасувати',610,y(-345),110,function() if not selected or not ownerAction(selected,'cancel') then showError() end end)
+    f.reopen=button(f,'Перевідкрити',495,y(-345),110,function() confirmCardAction(selected,'reopen') end)
+    f.masters=button(f,'Майстри',735,y(-345),110,function()
         local o=selected and get(selected)
         if o and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:ShowMasters(o.itemID or 0,o.recipeID or 0) end
     end)
-    local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-395); heading:SetText('Нове замовлення')
-    f.item=input(f,'Предмет або посилання',18,-420,300,''); f.quantity=input(f,'Кількість',335,-420,65,'1'); f.reward=input(f,'Винагорода (зол.)',420,-420,120,'0')
-    f.item:SetScript('OnTextChanged',function() chosenRecipe=nil end)
-    f.note=input(f,'Коментар',18,-475,360,'')
+    local form=f
+    if embedded then
+        form=CreateFrame('Frame','OldKrakenWorkshopOrderCreateFrame',parent,'BasicFrameTemplateWithInset')
+        table.insert(UISpecialFrames,'OldKrakenWorkshopOrderCreateFrame')
+        form:SetSize(720,320); form:SetPoint('CENTER',parent,'CENTER'); form:SetClampedToScreen(true); form:EnableMouse(true)
+        form:SetFrameStrata('DIALOG')
+        OldKraken.UIStyle.Window(form)
+        if form.TitleText then form.TitleText:SetText('Нове замовлення') end
+        f.createForm=form
+    end
+    local function formY(standalone,compact) return embedded and compact or standalone end
+    local heading=form:CreateFontString(nil,'OVERLAY','GameFontNormal')
+    heading:SetPoint('TOPLEFT',form,'TOPLEFT',18,formY(-395,-38)); heading:SetText('Нове замовлення')
+    form.item=input(form,'Предмет або посилання',18,formY(-420,-64),embedded and 350 or 300,'')
+    form.quantity=input(form,'Кількість',embedded and 380 or 335,formY(-420,-64),65,'1')
+    form.reward=input(form,'Винагорода (зол.)',embedded and 465 or 420,formY(-420,-64),embedded and 90 or 120,'0')
+    form.item:SetScript('OnTextChanged',function() chosenRecipe=nil end)
+    form.note=input(form,'Коментар',18,formY(-475,-115),360,'')
     local professionChoices={[0]='Оберіть професію'}; for id,name in pairs(professionNames) do professionChoices[id]=name end
-    local professionMenu=dropdown(f,'OldKrakenOrderProfession',400,-492,170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v end)
-    button(f,'Обрати рецепт',560,-438,160,function()
+    local professionMenu=dropdown(form,'OldKrakenOrderProfession',400,formY(-492,-132),embedded and 155 or 170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v end)
+    button(form,'Обрати рецепт',embedded and 570 or 560,formY(-438,-64),embedded and 130 or 160,function()
         if not OldKraken.WorkshopRecipes then showError(); return end
         OldKraken.WorkshopRecipes:Choose(function(r)
-            if not f:IsShown() or not professionNames[r.profession] then return end
+            if not form:IsShown() or not professionNames[r.profession] then return end
             profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
-            f.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe}
+            form.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe}
         end)
     end)
-    local profLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); profLabel:SetPoint('TOPLEFT',f,'TOPLEFT',400,-475); profLabel:SetText('Професія')
-    dropdown(f,'OldKrakenOrderMaterials',580,-492,140,{'customer','crafter','mixed'},materialNames,function() return materials end,function(v) materials=v end)
-    local matLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); matLabel:SetPoint('TOPLEFT',f,'TOPLEFT',580,-475); matLabel:SetText('Ресурси')
-    dropdown(f,'OldKrakenOrderDeadline',18,-550,150,{3600,21600,86400,604800},deadlineNames,function() return deadline end,function(v) deadline=v end)
-    local dueLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); dueLabel:SetPoint('TOPLEFT',f,'TOPLEFT',18,-533); dueLabel:SetText('Термін')
-    button(f,'Опублікувати',650,-548,160,function()
+    local profLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); profLabel:SetPoint('TOPLEFT',form,'TOPLEFT',400,formY(-475,-115)); profLabel:SetText('Професія')
+    dropdown(form,'OldKrakenOrderMaterials',embedded and 570 or 580,formY(-492,-132),embedded and 130 or 140,{'customer','crafter','mixed'},materialNames,function() return materials end,function(v) materials=v end)
+    local matLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); matLabel:SetPoint('TOPLEFT',form,'TOPLEFT',embedded and 570 or 580,formY(-475,-115)); matLabel:SetText('Ресурси')
+    dropdown(form,'OldKrakenOrderDeadline',18,formY(-550,-197),150,{3600,21600,86400,604800},deadlineNames,function() return deadline end,function(v) deadline=v end)
+    local dueLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); dueLabel:SetPoint('TOPLEFT',form,'TOPLEFT',18,formY(-533,-180)); dueLabel:SetText('Термін')
+    button(form,'Опублікувати',embedded and 530 or 650,formY(-548,-197),160,function()
         if not professionNames[profession] then print('Old Kraken: оберіть професію або рецепт.'); return end
-        if create(f.item:GetText(),f.quantity:GetText(),f.reward:GetText(),f.note:GetText(),chosenRecipe) then f.item:SetText(''); f.note:SetText(''); profession=0; UIDropDownMenu_SetText(professionMenu,professionChoices[0]); print('Old Kraken: замовлення збережено та поставлено в чергу.') else showError() end
+        if create(form.item:GetText(),form.quantity:GetText(),form.reward:GetText(),form.note:GetText(),chosenRecipe) then
+            form.item:SetText(''); form.note:SetText(''); profession=0; UIDropDownMenu_SetText(professionMenu,professionChoices[0])
+            if embedded then form:Hide() end
+            print('Old Kraken: замовлення збережено та поставлено в чергу.')
+        else showError() end
     end,'primary')
-    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-603); note:SetText('Передачу речі й оплату гравці виконують у грі самостійно.')
+    local note=form:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',form,'TOPLEFT',18,formY(-603,-250)); note:SetText('Передачу речі й оплату гравці виконують у грі самостійно.')
+    f:HookScript('OnShow',refresh)
+    if embedded then form:Hide() end
     f:Hide(); return f
 end
 function Orders:Show(k)
     connect(); if not active then print('Old Kraken: замовлення доступні учасникам гільдії.'); return end
     if k and get(k) then selected=k end
+    if OldKraken.UIHub and OldKraken.Workshop then
+        OldKraken.Workshop:Show('orders')
+        return
+    end
     if not window then window=createWindow() end
     window:Show(); refresh()
+end
+function Orders:CreatePanel(parent)
+    if not window then window=createWindow(parent) end
+    return window
+end
+function Orders:RefreshEmbedded()
+    if window then refresh() end
+end
+function Orders:OpenCreateForm()
+    if window and window.createForm then window.createForm:Show() end
 end
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() changed() end)

@@ -224,44 +224,84 @@ local function createWindow(parent)
         f:SetMovable(true); f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
         OldKraken.UIStyle.Window(f)
     end
-    f:SetSize(780,520); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
+    local embedded=parent~=nil
+    f:SetSize(embedded and 900 or 780,embedded and 590 or 520); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Майстерня') end
-    local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
-    search:SetSize(200,22); search:SetPoint('TOPLEFT',f,'TOPLEFT',20,-45); search:SetAutoFocus(false)
+    local content=f
+    local verticalShift=embedded and 32 or 0
+    local function y(value) return value-verticalShift end
+    if embedded then
+        f.professionView=CreateFrame('Frame',nil,f); f.professionView:SetAllPoints(f)
+        if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders.CreatePanel then
+            f.ordersView=OldKraken.WorkshopOrders:CreatePanel(f)
+        else
+            f.ordersView=CreateFrame('Frame',nil,f); f.ordersView:Hide()
+        end
+        content=f.professionView
+        f.professionTab=button(f,'Професії',18,-38,110,function() Workshop:Show('professions') end)
+        f.ordersTab=button(f,'Замовлення',136,-38,120,function()
+            if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+        end)
+        for _,tab in ipairs({f.professionTab,f.ordersTab}) do
+            tab.activeBar=tab:CreateTexture(nil,'ARTWORK')
+            tab.activeBar:SetPoint('BOTTOMLEFT',tab,'BOTTOMLEFT',2,1)
+            tab.activeBar:SetSize(tab==f.professionTab and 106 or 116,2)
+            tab.activeBar:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
+        end
+        f.newOrder=button(f,'Нове замовлення',720,-38,150,function()
+            if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:OpenCreateForm() end
+        end)
+        f.newOrder:Hide()
+    end
+    local search=CreateFrame('EditBox',nil,content,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
+    search:SetSize(200,22); search:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-45)); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) query=lower(self:GetText() or ''); offset=0; render() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
-    local drop=CreateFrame('Frame','OldKrakenWorkshopProfession',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(drop)
-    drop:SetPoint('TOPLEFT',f,'TOPLEFT',220,-40); UIDropDownMenu_SetWidth(drop,160)
+    local drop=CreateFrame('Frame','OldKrakenWorkshopProfession',content,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(drop)
+    drop:SetPoint('TOPLEFT',content,'TOPLEFT',220,y(-40)); UIDropDownMenu_SetWidth(drop,160)
     UIDropDownMenu_Initialize(drop,function(_,level)
         local all=UIDropDownMenu_CreateInfo(); all.text='Усі професії'; all.checked=filterID==0; all.func=function() filterID=0; offset=0; UIDropDownMenu_SetText(drop,'Усі професії'); render() end; UIDropDownMenu_AddButton(all,level)
         for _,p in ipairs(professions) do local entry=p; local item=UIDropDownMenu_CreateInfo(); item.text=entry.name; item.checked=filterID==entry.id
             item.func=function() filterID=entry.id; offset=0; UIDropDownMenu_SetText(drop,entry.name); render() end; UIDropDownMenu_AddButton(item,level) end
     end)
     UIDropDownMenu_SetText(drop,'Усі професії')
-    f.online=button(f,'Лише онлайн: ні',430,-43,145,function() onlineOnly=not onlineOnly; offset=0; render() end)
-    button(f,'Оновити',590,-43,120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
-    f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-78)
+    f.online=button(content,'Лише онлайн: ні',430,y(-43),145,function() onlineOnly=not onlineOnly; offset=0; render() end)
+    button(content,'Оновити',590,y(-43),120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
+    f.count=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-78))
     for i=1,12 do
-        rows[i]=button(f,'',20,-103-(i-1)*26,725,function(self)
+        rows[i]=button(content,'',20,y(-103-(i-1)*(embedded and 30 or 26)),embedded and 845 or 725,function(self)
             local entry=self.entry
             if entry and entry.online and entry.name~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(entry.name) end
         end)
         local font=rows[i]:GetFontString(); if font then font:ClearAllPoints(); font:SetJustifyH('LEFT'); font:SetPoint('LEFT',rows[i],'LEFT',8,0); font:SetPoint('RIGHT',rows[i],'RIGHT',-8,0) end
     end
-    f.previousPage=button(f,'‹',295,-430,44,function() offset=math.max(0,offset-1); render() end)
-    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-    f.page:SetPoint('TOPLEFT',f,'TOPLEFT',351,-435); f.page:SetWidth(64); f.page:SetJustifyH('CENTER')
-    f.nextPage=button(f,'›',427,-430,44,function() offset=offset+1; render() end)
-    button(f,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
-    button(f,'Пошук рецептів',175,-472,155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
-    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',345,-478); note:SetText('Відкрийте професії, щоб зчитати рецепти.')
-    f:HookScript('OnShow',render)
+    f.previousPage=button(content,'‹',embedded and 362 or 295,y(embedded and -477 or -430),44,function() offset=math.max(0,offset-1); render() end)
+    f.page=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+    f.page:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 418 or 351,y(embedded and -482 or -435)); f.page:SetWidth(64); f.page:SetJustifyH('CENTER')
+    f.nextPage=button(content,'›',embedded and 494 or 427,y(embedded and -477 or -430),44,function() offset=offset+1; render() end)
+    if not embedded then
+        button(content,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
+    end
+    button(content,'Пошук рецептів',embedded and 20 or 175,y(embedded and -525 or -472),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
+    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',345,y(embedded and -531 or -478)); note:SetText('Відкрийте професії, щоб зчитати рецепти.')
+    content:HookScript('OnShow',render)
     f:Hide(); return f
 end
-function Workshop:Show()
+function Workshop:SetView(view)
+    if not frame or not frame.professionView then return end
+    local showOrders=view=='orders'
+    frame.professionView:SetShown(not showOrders)
+    if frame.ordersView then frame.ordersView:SetShown(showOrders) end
+    frame.professionTab.activeBar:SetShown(not showOrders)
+    frame.ordersTab.activeBar:SetShown(showOrders)
+    if frame.newOrder then frame.newOrder:SetShown(showOrders) end
+    if showOrders and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:RefreshEmbedded() end
+end
+function Workshop:Show(view)
     connect(); if not active then print('Old Kraken: майстерня доступна після входу до гільдії.'); return end
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('workshop')
+        self:SetView(view or 'professions')
     else
         if not frame then frame=createWindow() end
         frame:Show()

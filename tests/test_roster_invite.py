@@ -32,6 +32,8 @@ function methods:SetText(value) self.text = value end
 function methods:GetText() return self.text or '' end
 function methods:SetSize(width, height) self.width, self.height = width, height end
 function methods:SetEnabled(value) self.enabled = value end
+function methods:SetTextColor(...) self.textColor = {...} end
+function methods:SetJustifyH(value) self.justifyH = value end
 function methods:SetScript(name, callback) self.scripts[name] = callback end
 function methods:Show() self.shown = true end
 function methods:Hide() self.shown = false end
@@ -64,7 +66,7 @@ for _, frame in ipairs(createdFrames) do
         assert(frame.text ~= 'Події' and frame.text ~= 'Майстерня')
     end
     if frame.kind == 'Button' and frame.template == 'UIPanelButtonTemplate'
-        and (frame.text == 'Інвайт' or frame.text == 'Офлайн') then
+        and frame.text == 'Інвайт' then
         inviteButtons[frame.memberName] = frame
     end
 end
@@ -72,7 +74,14 @@ end
 local online = inviteButtons['Online Member']
 local offline = inviteButtons['Offline Member']
 assert(online and online.online and online.enabled)
-assert(offline and not offline.online and not offline.enabled)
+assert(offline and not offline:IsShown() and not offline.enabled)
+assert(offline:GetText() == 'Інвайт')
+local offlineStatus
+for _, frame in ipairs(createdFrames) do
+    if frame.text == 'Офлайн' then offlineStatus = frame end
+end
+assert(offlineStatus and offlineStatus:IsShown())
+assert(offlineStatus.textColor[1] == 0.63 and offlineStatus.justifyH == 'CENTER')
 online.scripts.OnClick(online)
 assert(#inviteCalls == 1 and inviteCalls[1] == 'Online Member')
 offline.scripts.OnClick(offline)

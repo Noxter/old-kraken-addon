@@ -344,6 +344,15 @@ local function CreateRow(index, parent)
     end)
     row.inviteButton = inviteButton
 
+    local offlineStatus = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    offlineStatus:SetPoint("CENTER", inviteButton, "CENTER")
+    offlineStatus:SetWidth(76)
+    offlineStatus:SetJustifyH("CENTER")
+    offlineStatus:SetText("Офлайн")
+    offlineStatus:SetTextColor(0.63, 0.67, 0.73)
+    offlineStatus:Hide()
+    row.offlineStatus = offlineStatus
+
     rowFrames[index] = row
     return row
 end
@@ -423,7 +432,8 @@ function Roster:Render()
         row.inviteButton.memberName = member.name
         row.inviteButton.online = member.isOnline
         row.inviteButton:SetEnabled(member.isOnline)
-        row.inviteButton:SetText(member.isOnline and "Інвайт" or "Офлайн")
+        row.inviteButton:SetShown(member.isOnline)
+        row.offlineStatus:SetShown(not member.isOnline)
     end
 
     for index = #filteredData + 1, #rowFrames do
