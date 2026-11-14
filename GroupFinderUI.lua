@@ -54,6 +54,12 @@ local dungeonArt = {
     st=131872, brd=131824, dm=131835, blackmaw=7963784, lbrs=131825,
     scholo=131868, strat=131871, shapers=7963783,
 }
+local function setDungeonArt(texture, dungeonId)
+    local art = dungeonArt[dungeonId] or 7963779
+    texture:SetTexture(art)
+    if art >= 7000000 then texture:SetTexCoord(0.22, 0.78, 0.22, 0.78)
+    else texture:SetTexCoord(0.225, 0.775, 0.25, 0.80) end
+end
 local roleCoords = {
     tank={0,67/256,67/256,134/256}, healer={67/256,134/256,0,67/256},
     dps={67/256,134/256,67/256,134/256},
@@ -147,10 +153,10 @@ StaticPopupDialogs.OLDKRAKEN_REMOVE_MEMBER = {
     OnAccept = function(_, callback) if type(callback) == 'function' then callback() end end,
 }
 
-local function button(parent, label, x, y, width, callback)
+local function button(parent, label, x, y, width, callback, height)
     local b = CreateFrame('Button', nil, parent, 'UIPanelButtonTemplate')
     OldKraken.UIStyle.Button(b)
-    b:SetSize(width, 23); b:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y); b:SetText(label)
+    b:SetSize(width, height or 23); b:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y); b:SetText(label)
     b:SetScript('OnClick', callback)
     return b
 end
@@ -371,9 +377,7 @@ local function refresh()
             local g = entry.group
             local status = Finder.pending[entry.key]
             local kind = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category] or g.category
-            b.art:SetTexture(dungeonArt[g.dungeon] or 7963779)
-            if (dungeonArt[g.dungeon] or 7963779) >= 7000000 then b.art:SetTexCoord(0.20, 0.80, 0.22, 0.78)
-            else b.art:SetTexCoord(0.15, 0.85, 0.25, 0.80) end
+            setDungeonArt(b.art, g.dungeon)
             b.title:SetText(g.title == kind and g.title or (g.title .. '  ·  ' .. kind))
             b.meta:SetText(string.format('%s  ·  рівень %d–%d  ·  %d/%d', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize))
             local badge = tab == 'applications' and applicationBadges[status]
@@ -603,7 +607,7 @@ local function createWindow()
         end)
         card:SetHeight(78)
         card.art = card:CreateTexture(nil, 'ARTWORK')
-        card.art:SetPoint('TOPLEFT', card, 'TOPLEFT', 1, -1); card.art:SetPoint('BOTTOMLEFT', card, 'BOTTOMLEFT', 1, 1); card.art:SetWidth(70)
+        card.art:SetPoint('TOPLEFT', card, 'TOPLEFT', 1, -4); card.art:SetSize(70, 70)
         card.title = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
         card.title:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -8); card.title:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
         card.title:SetJustifyH('LEFT'); card.title:SetWordWrap(false)
@@ -724,10 +728,11 @@ local function createWindow()
         remove:Hide()
         f.deleteButtons[i] = remove
     end
-    f.previousPageButton = button(f, '‹', 18, -318, 50, function() offset=math.max(0, offset-CARDS_PER_PAGE); refresh() end)
-    f.nextPageButton = button(f, '›', 110, -318, 50, function() if f.visible and offset+CARDS_PER_PAGE < #f.visible then offset=offset+CARDS_PER_PAGE end; refresh() end)
+    f.previousPageButton = button(f, '‹', 18, -313, 68, function() offset=math.max(0, offset-CARDS_PER_PAGE); refresh() end, 32)
+    f.nextPageButton = button(f, '›', 130, -313, 68, function() if f.visible and offset+CARDS_PER_PAGE < #f.visible then offset=offset+CARDS_PER_PAGE end; refresh() end, 32)
     f.listPage = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.listPage:SetPoint('TOPLEFT', f, 'TOPLEFT', 72, -323)
+    f.listPage:SetPoint('TOPLEFT', f, 'TOPLEFT', 86, -323)
+    f.listPage:SetWidth(44); f.listPage:SetJustifyH('CENTER')
     f.detailsScroll = CreateFrame('ScrollFrame', nil, f, 'UIPanelScrollFrameTemplate')
     f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.detailsScroll:SetSize(300, 210)
     f.detailsContent = CreateFrame('Frame', nil, f.detailsScroll)
@@ -859,12 +864,15 @@ OldKraken:On('GROUP_FINDER_ALERT_SETTING', function()
     refresh()
 end)
 
-local function showAlert(message, kind, key)
+local function showAlert(message, kind, key, dungeonId)
     print('|cff2ec4b6Old Kraken|r: ' .. message .. '. /okr group')
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         OldKraken.UIStyle.Button(groupAlert)
         groupAlert:SetSize(560, 76)
+        groupAlert.alertArt = groupAlert:CreateTexture(nil, 'ARTWORK')
+        groupAlert.alertArt:SetSize(60, 60)
+        groupAlert.alertArt:SetPoint('LEFT', groupAlert, 'LEFT', 8, 0)
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
         groupAlert:SetFrameStrata('FULLSCREEN_DIALOG')
         groupAlert:SetFrameLevel(50)
@@ -903,6 +911,9 @@ local function showAlert(message, kind, key)
         end)
     end
     groupAlert.kind, groupAlert.groupKey = kind, key
+    local hasGroupArt = kind == 'group'
+    groupAlert.alertArt:SetShown(hasGroupArt)
+    if hasGroupArt then setDungeonArt(groupAlert.alertArt, dungeonId) end
     groupAlert.positionKind = kind == 'group' and 'group' or 'request'
     local settings = OldKraken.DB and OldKraken.DB.settings
     local positions = type(settings) == 'table' and settings.alertPositions
@@ -915,6 +926,12 @@ local function showAlert(message, kind, key)
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
     end
     groupAlert:SetText(message .. '\nКлік — відкрити пошук · Перетягніть, щоб перемістити')
+    local alertText = groupAlert:GetFontString()
+    alertText:ClearAllPoints()
+    alertText:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', hasGroupArt and 78 or 12, -8)
+    alertText:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, 8)
+    alertText:SetJustifyH(hasGroupArt and 'LEFT' or 'CENTER')
+    alertText:SetJustifyV('MIDDLE')
     groupAlert.remaining = 10
     groupAlert:Show()
     if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK then
@@ -953,7 +970,7 @@ OldKraken:On('GROUP_FINDER_NEW', function(group)
         needed = 'Вільні ролі: ' .. roleLabel('tank') .. ' ' .. missing.tank .. ', ' .. roleLabel('healer') .. ' ' .. missing.healer .. ', ' .. roleLabel('dps') .. ' ' .. missing.dps
     end
     local message = playerLabel(group.owner) .. ' збирає: ' .. group.title .. '\n' .. summary .. '\n' .. needed
-    showAlert(message, 'group')
+    showAlert(message, 'group', nil, group.dungeon)
 end)
 
 OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)

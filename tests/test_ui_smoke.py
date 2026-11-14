@@ -34,6 +34,9 @@ function GetTime() return 1 end
 local methods = {}
 function methods:SetText(v) self.text = v end
 function methods:GetText() return self.text or '' end
+function methods:SetSize(width, height) self.width = width; self.height = height end
+function methods:SetTexture(texture) self.texture = texture end
+function methods:SetTexCoord(...) self.texCoord = {...} end
 function methods:Show() self.shown = true end
 function methods:Hide() self.shown = false end
 function methods:SetShown(value) self.shown = value end
@@ -42,10 +45,17 @@ function methods:GetStringHeight() return 0 end
 function methods:SetScript(name, fn) self.scripts[name] = fn end
 function methods:CreateFontString() return CreateFrame() end
 function methods:CreateTexture() return CreateFrame() end
+function methods:GetFontString()
+    local fontString = rawget(self, 'fontString')
+    if not fontString then fontString = CreateFrame(); rawset(self, 'fontString', fontString) end
+    return fontString
+end
 local meta = {__index=function(_, k) if k == 'TitleText' then return nil end; return methods[k] or function() end end}
+createdFrames = {}
 function CreateFrame(_, name)
     local frame = setmetatable({scripts={}}, meta)
     if name then _G[name] = frame end
+    createdFrames[#createdFrames + 1] = frame
     return frame
 end
 ''')
@@ -71,7 +81,7 @@ healerGroup.memberRoles = {Tankmate='tank', DPSone='dps', DPStwo='dps'}
 local fullDungeon = addGroup('Full dungeon', 'dungeon', 'rfc', 'tank', 5, 20, 30)
 fullDungeon.members = {'Tester', 'Healer', 'DPSone', 'DPStwo', 'DPSThree'}
 fullDungeon.memberRoles = {Healer='healer', DPSone='dps', DPStwo='dps', DPSThree='dps'}
-addGroup('Other dungeon', 'dungeon', 'wc', 'tank', 5, 20, 30)
+local wcGroup = addGroup('Other dungeon', 'dungeon', 'wc', 'tank', 5, 20, 30)
 addGroup('Higher level dungeon', 'dungeon', 'rfc', 'tank', 5, 40, 50)
 addGroup('Full quest', 'quest', '', 'dps', 1, 20, 30)
 f:Show()
@@ -95,6 +105,11 @@ end
 
 filtersShown(true)
 assert(ui.previousPageButton:IsShown() and ui.nextPageButton:IsShown() and ui.listPage:IsShown())
+assert(ui.previousPageButton.width == 68 and ui.previousPageButton.height == 32)
+assert(ui.nextPageButton.width == 68 and ui.nextPageButton.height == 32)
+assert(ui.rows[1].art.width == 70 and ui.rows[1].art.height == 70)
+assert(ui.rows[1].art.texCoord[2] - ui.rows[1].art.texCoord[1]
+    == ui.rows[1].art.texCoord[4] - ui.rows[1].art.texCoord[3])
 selectTab('mine'); filtersShown(false)
 selectTab('applications'); filtersShown(false)
 selectTab('create'); filtersShown(false)
@@ -176,5 +191,16 @@ ui.requestsButton.scripts.OnClick()
 local requestWindow = OldKrakenRequestsFrame
 assert(requestWindow.entries[1].name == 'New Applicant')
 assert(requestWindow.entries[2].name == 'Old Applicant')
+
+OldKraken.listeners.GROUP_FINDER_NEW(wcGroup)
+local alert
+for _, frame in ipairs(createdFrames) do if rawget(frame, 'alertArt') then alert = frame; break end end
+assert(alert and alert.alertArt:IsShown() and alert.alertArt.texture == 131882,
+    'Unexpected alert art: ' .. tostring(alert and alert.alertArt:IsShown()) .. ', ' .. tostring(alert and alert.alertArt.texture))
+assert(alert.alertArt.width == alert.alertArt.height)
+assert(alert.alertArt.texCoord[2] - alert.alertArt.texCoord[1]
+    == alert.alertArt.texCoord[4] - alert.alertArt.texCoord[3])
+OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(tankGroup, 'Another Applicant', 'healer')
+assert(not alert.alertArt:IsShown())
 ''')
 print('UI smoke checks passed')
