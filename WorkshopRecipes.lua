@@ -169,7 +169,7 @@ local function scan()
                         recordLearned({recipe=id,item=item,profession=profession,seen=seen,name=info.name,product=product}); touched=touched+1
                     end
                 elseif info.learned==false and type(own[id])=='table' and own[id].profession==profession then
-                    own[id]=nil; ownCount=math.max(0,ownCount-1)
+                    own[id]=nil; ownCount=math.max(0,ownCount-1); recipeChanged=true
                 end
             end
         end
@@ -397,6 +397,15 @@ function Recipes:FindMasters(itemID,recipeID)
     end
     local out={}; for name,seen in pairs(found) do out[#out+1]={name=name,seen=seen} end
     table.sort(out,function(a,b) return a.name<b.name end); return out
+end
+function Recipes:Knows(itemID,recipeID)
+    if not active or not identity or not integer(itemID,0,100000000) or not integer(recipeID,0,100000000) or (itemID==0 and recipeID==0) then return false end
+    local own=people[identity]
+    if type(own)~='table' then return false end
+    for _,r in pairs(own) do
+        if validRecord(r) and ((itemID>0 and r.item==itemID) or (itemID==0 and r.recipe==recipeID)) then return true end
+    end
+    return false
 end
 function Recipes:ShowMasters(itemID,recipeID)
     self:Show(); if not active or not frame then return end

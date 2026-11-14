@@ -10,6 +10,7 @@ local deadlineNames={[3600]='1 година',[21600]='6 годин',[86400]='Д�
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
 local dirty,sequence,nextSync,lastQuery={},0,0,-60
 local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',171,'customer',86400,{}
+local statusFilter,professionFilter='all',0
 local chosenRecipe
 local refresh
 
@@ -153,7 +154,10 @@ comm:RegisterHandler('WORDER',function(sender,_,payload)
     end
     if not previous and o.status=='open' and o.rev==1 and GetServerTime()-o.created<=120 then
         local settings=OldKraken.DB and OldKraken.DB.settings
-        if type(settings)=='table' and settings.workshopOrderAlerts~=false then notify('Нове замовлення: '..o.item,professionNames[o.profession]..' · '..o.owner,k) end
+        if type(settings)=='table' and settings.workshopOrderAlerts~=false and OldKraken.WorkshopRecipes
+            and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0) then
+            notify('Нове замовлення: '..o.item,professionNames[o.profession]..' · '..o.owner,k)
+        end
     elseif previous and o.rev>previous.rev then
         if o.worker==identity and previous.worker~=identity and o.status=='assigned' then notify('Вас обрано майстром',o.item..' · '..o.owner,k)
         elseif previous.candidates[identity] and o.status=='assigned' and o.worker~=identity and previous.status=='open' then notify('Обрано іншого майстра',o.item..' · '..o.owner,k)
@@ -235,7 +239,11 @@ refresh=function()
     if not window or not window:IsShown() then return end
     local list={}; local seen={}
     for _,source in ipairs({own,observed}) do for k,o in pairs(source) do
-        if not seen[k] and (view=='all' or (view=='mine' and o.owner==identity) or (view=='work' and (o.worker==identity or o.candidates[identity]))) then
+        local status=o.status=='open' and o.deadline<GetServerTime() and 'expired' or o.status
+        local available=view=='available' and o.owner~=identity and status=='open' and not o.candidates[identity] and not intents[k]
+            and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0)
+        if not seen[k] and (view=='all' or (view=='mine' and o.owner==identity) or (view=='work' and (o.worker==identity or o.candidates[identity])) or (view=='available' and available))
+            and (statusFilter=='all' or statusFilter==status) and (professionFilter==0 or professionFilter==o.profession) then
             seen[k]=true; list[#list+1]={key=k,order=o}
         end
     end end
@@ -248,7 +256,7 @@ refresh=function()
         if entry then
             local o=entry.order; row.entryKey=entry.key
             local state=o.status=='open' and o.deadline<GetServerTime() and 'Термін минув' or statusNames[o.status]
-            row:SetText(o.item..' ×'..o.quantity..' · '..state)
+            row:SetText(o.item..' ×'..o.quantity..' · '..professionNames[o.profession]..' · '..state)
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row.entryKey=nil; row:UnlockHighlight(); row:Hide() end
@@ -295,10 +303,15 @@ local function createWindow()
     table.insert(UISpecialFrames,'OldKrakenWorkshopOrdersFrame'); f:SetSize(900,650); f:SetPoint('CENTER'); f:SetClampedToScreen(true); f:SetMovable(true); f:EnableMouse(true)
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
     OldKraken.UIStyle.Window(f); if f.TitleText then f.TitleText:SetText('Old Kraken — Замовлення') end
-    local views={all='Усі замовлення',mine='Мої замовлення',work='Моя робота'}
-    dropdown(f,'OldKrakenOrdersView',18,-42,190,{'all','mine','work'},views,function() return view end,function(v) view=v; offset=0; refresh() end)
+    local views={all='Усі замовлення',available='Доступні мені',mine='Мої замовлення',work='Моя робота'}
+    dropdown(f,'OldKrakenOrdersView',18,-42,190,{'all','available','mine','work'},views,function() return view end,function(v) view=v; offset=0; refresh() end)
     f.alerts=button(f,'Нові: увімк.',235,-42,145,function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; refresh() end)
     button(f,'Оновити',390,-42,100,function() nextSync=0; print('Old Kraken: запит замовлень поставлено в чергу.') end)
+    local statusLabels={all='Усі стани',open='Шукає майстра',assigned='У роботі',delivered='Передано',done='Виконано',cancelled='Скасовано',expired='Термін минув'}
+    dropdown(f,'OldKrakenOrdersStatus',500,-42,165,{'all','open','assigned','delivered','done','cancelled','expired'},statusLabels,function() return statusFilter end,function(v) statusFilter=v; offset=0; refresh() end)
+    local professionLabels={[0]='Усі професії'}; local filterIDs={0}
+    for _,id in ipairs(professionIDs) do professionLabels[id]=professionNames[id]; filterIDs[#filterIDs+1]=id end
+    dropdown(f,'OldKrakenOrdersFilterProfession',675,-42,185,filterIDs,professionLabels,function() return professionFilter end,function(v) professionFilter=v; offset=0; refresh() end)
     for i=1,8 do orderRows[i]=button(f,'',18,-80-(i-1)*32,450,function(self) if self.entryKey then selected=self.entryKey; refresh() end end) end
     button(f,'‹',18,-342,44,function() offset=offset-1; refresh() end)
     f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-348)
