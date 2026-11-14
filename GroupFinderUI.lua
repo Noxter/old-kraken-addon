@@ -20,17 +20,42 @@ StaticPopupDialogs.OLDKRAKEN_REMOVE_MEMBER = {
     OnAccept = function(_, callback) if type(callback) == 'function' then callback() end end,
 }
 
-local function cycle(values, value)
-    for i, item in ipairs(values) do if item == value then return values[i % #values + 1] end end
-    return values[1]
-end
-
 local function button(parent, label, x, y, width, callback)
     local b = CreateFrame('Button', nil, parent, 'UIPanelButtonTemplate')
     OldKraken.UIStyle.Button(b)
     b:SetSize(width, 23); b:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y); b:SetText(label)
     b:SetScript('OnClick', callback)
     return b
+end
+
+local dropdownCount = 0
+local function dropdown(parent, x, y, width, options, selectedValue, onSelect)
+    dropdownCount = dropdownCount + 1
+    local frame = CreateFrame('Frame', 'OldKrakenFinderSelect' .. dropdownCount, parent, 'UIDropDownMenuTemplate')
+    frame:SetPoint('TOPLEFT', parent, 'TOPLEFT', x - 16, y + 3)
+    UIDropDownMenu_SetWidth(frame, width - 34)
+    UIDropDownMenu_JustifyText(frame, 'LEFT')
+    UIDropDownMenu_Initialize(frame, function(_, level)
+        for _, option in ipairs(options) do
+            local item = option
+            local info = UIDropDownMenu_CreateInfo()
+            info.text, info.value = item.label, item.value
+            info.checked = selectedValue() == item.value
+            info.func = function() onSelect(item.value); UIDropDownMenu_SetText(frame, item.label) end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    for _, option in ipairs(options) do
+        if option.value == selectedValue() then UIDropDownMenu_SetText(frame, option.label); break end
+    end
+    return frame
+end
+
+local function choices(values, labels, first)
+    local out = {}
+    if first then out[#out + 1] = first end
+    for _, value in ipairs(values) do out[#out + 1] = {value=value, label=labels[value]} end
+    return out
 end
 
 local function input(parent, label, x, y, width, initial)
@@ -195,6 +220,7 @@ local function refresh()
     window.cancelButton:SetShown(canManage)
     window.editButton:SetShown(canManage)
     window.roleButton:SetShown(tab == 'create' or isOther)
+    window.roleLabel:SetShown(tab == 'create' or isOther)
     local applicants = {}
     if canManage then
         for name, applicantRole in pairs(Finder.requests[g.id] or {}) do
@@ -223,8 +249,8 @@ local function refresh()
     end
     if tab == 'create' then
         window.createButton:SetText(editing and 'Зберегти' or 'Створити')
-        window.createButton:Show(); window.categoryButton:Show()
-    else window.createButton:Hide(); window.categoryButton:Hide() end
+        window.createButton:Show(); window.categoryButton:Show(); window.categoryLabel:Show()
+    else window.createButton:Hide(); window.categoryButton:Hide(); window.categoryLabel:Hide() end
 end
 
 local function createWindow()
@@ -324,33 +350,26 @@ local function createWindow()
     f.requestTitle:Hide(); f.requestPrev:Hide(); f.requestNext:Hide()
     f.levelFilter = input(f, 'Фільтр рівня', 20, -465, 80, '')
     f.levelFilter:SetScript('OnTextChanged', refresh)
-    button(f, 'Категорія: усі', 120, -485, 155, function(self)
-        if filterCategory == 'all' then filterCategory=categories[1]
-        else
-            local nextCategory=cycle(categories, filterCategory)
-            filterCategory=nextCategory==categories[1] and 'all' or nextCategory
-        end
-        self:SetText(filterCategory=='all' and 'Категорія: усі' or categoryLabels[filterCategory]); refresh()
-    end)
-    button(f, 'Роль: усі', 285, -485, 125, function(self)
-        filterRole=cycle(roles, filterRole)
-        self:SetText(filterRole=='' and 'Роль: усі' or roleLabels[filterRole]); refresh()
-    end)
-    button(f, 'Вільні: усі', 420, -485, 115, function(self)
-        filterFree=not filterFree; self:SetText(filterFree and 'Є місця' or 'Вільні: усі'); refresh()
-    end)
+    dropdown(f, 110, -485, 155, choices(categories, categoryLabels, {value='all', label='Усі категорії'}),
+        function() return filterCategory end, function(value) filterCategory=value; offset=0; refresh() end)
+    dropdown(f, 270, -485, 125, choices({'tank','healer','dps','flex'}, roleLabels, {value='', label='Усі ролі'}),
+        function() return filterRole end, function(value) filterRole=value; offset=0; refresh() end)
+    dropdown(f, 400, -485, 135, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
+        function() return filterFree end, function(value) filterFree=value; offset=0; refresh() end)
     f.titleBox = input(f, 'Назва', 20, -330, 240, '')
     f.descriptionBox = input(f, 'Опис', 275, -330, 250, '')
     f.maxBox = input(f, 'Місць', 20, -385, 65, '5')
     f.minBox = input(f, 'Мін. рівень', 105, -385, 80, '1')
     f.maxLevelBox = input(f, 'Макс. рівень', 205, -385, 80, '60')
     f.createFields = {f.titleBox, f.descriptionBox, f.maxBox, f.minBox, f.maxLevelBox}
-    f.categoryButton = button(f, categoryLabels[category], 305, -408, 140, function(self)
-        category = cycle(categories, category); self:SetText(categoryLabels[category])
-    end)
-    f.roleButton = button(f, 'Роль: без ролі', 550, -330, 150, function(self)
-        role=cycle(roles, role); self:SetText('Роль: '..roleLabels[role])
-    end)
+    f.categoryButton = dropdown(f, 305, -408, 140, choices(categories, categoryLabels),
+        function() return category end, function(value) category=value end)
+    f.categoryLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText('Категорія')
+    f.roleButton = dropdown(f, 550, -330, 150, choices(roles, roleLabels),
+        function() return role end, function(value) role=value end)
+    f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -313); f.roleLabel:SetText('Роль')
     f.createButton = button(f, 'Створити', 460, -408, 120, function()
         local ok
         if editing then
@@ -378,7 +397,7 @@ local function createWindow()
         editing=g.id; tab='create'; role=g.role; category=g.category
         f.titleBox:SetText(g.title); f.descriptionBox:SetText(g.description)
         f.maxBox:SetText(tostring(g.maxSize)); f.minBox:SetText(tostring(g.minLevel)); f.maxLevelBox:SetText(tostring(g.maxLevel))
-        f.categoryButton:SetText(categoryLabels[category]); f.roleButton:SetText('Роль: '..roleLabels[role]); refresh()
+        UIDropDownMenu_SetText(f.categoryButton, categoryLabels[category]); UIDropDownMenu_SetText(f.roleButton, roleLabels[role]); refresh()
     end)
     return f
 end

@@ -66,7 +66,7 @@ local function UpdateFilterButtonLabels()
         return
     end
 
-    rosterFrame.statusButton:SetText("Статус: " .. (STATUS_LABELS[settings.status] or "Усі"))
+    UIDropDownMenu_SetText(rosterFrame.statusDropdown, "Статус: " .. (STATUS_LABELS[settings.status] or "Усі"))
     UIDropDownMenu_SetText(
         rosterFrame.classDropdown,
         settings.class == "ALL" and "Усі класи" or ClassLabel(settings.class)
@@ -198,24 +198,24 @@ local function CreateRosterWindow()
     end)
     frame.searchBox = searchBox
 
-    local statusButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    OldKraken.UIStyle.Button(statusButton)
-    statusButton:SetSize(125, 24)
-    statusButton:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
-    statusButton:SetScript("OnClick", function()
-        if settings.status == "all" then
-            settings.status = "online"
-        elseif settings.status == "online" then
-            settings.status = "offline"
-        else
-            settings.status = "all"
+    local statusDropdown = CreateFrame("Frame", "OldKrakenRosterStatusDropdown", frame, "UIDropDownMenuTemplate")
+    statusDropdown:SetPoint("LEFT", searchBox, "RIGHT", -6, -2)
+    UIDropDownMenu_SetWidth(statusDropdown, 125)
+    UIDropDownMenu_JustifyText(statusDropdown, "LEFT")
+    UIDropDownMenu_Initialize(statusDropdown, function(_, level)
+        for _, value in ipairs({"all", "online", "offline"}) do
+            local status = value
+            local info = UIDropDownMenu_CreateInfo()
+            info.text, info.value = STATUS_LABELS[status], status
+            info.checked = settings.status == status
+            info.func = function() settings.status = status; Roster:Render() end
+            UIDropDownMenu_AddButton(info, level)
         end
-        Roster:Render()
     end)
-    frame.statusButton = statusButton
+    frame.statusDropdown = statusDropdown
 
     local classDropdown = CreateFrame("Frame", "OldKrakenClassDropdown", frame, "UIDropDownMenuTemplate")
-    classDropdown:SetPoint("LEFT", statusButton, "RIGHT", -8, -2)
+    classDropdown:SetPoint("LEFT", statusDropdown, "RIGHT", -8, 0)
     UIDropDownMenu_SetWidth(classDropdown, 150)
     UIDropDownMenu_JustifyText(classDropdown, "LEFT")
     UIDropDownMenu_Initialize(classDropdown, function(self, level)
