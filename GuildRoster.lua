@@ -196,6 +196,15 @@ local function CreateRosterWindow()
         if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
     end)
 
+    local workshopButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(workshopButton)
+    workshopButton:SetSize(100, 24)
+    workshopButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -38, -65)
+    workshopButton:SetText("Майстерня")
+    workshopButton:SetScript("OnClick", function()
+        if OldKraken.Workshop then OldKraken.Workshop:Show() end
+    end)
+
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
     searchBox:SetSize(190, 24)
     searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -38)
@@ -485,7 +494,10 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
-    if command == 'events' or command == 'calendar' then
+    if command == 'workshop' or command == 'craft' then
+        if OldKraken.Workshop then OldKraken.Workshop:Show() end
+        return
+    elseif command == 'events' or command == 'calendar' then
         if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
         return
     elseif command == 'alerts group' or command == 'alerts request' or command == 'alerts event' then
