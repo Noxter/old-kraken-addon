@@ -413,14 +413,17 @@ local function datePicker(parent)
     return function() return chosen end
 end
 local function refresh()
-    if not window or not window:IsShown() then return end
+    if not window then return end
     window.alertButton:SetText(Events:AlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local list={}
     for key,e in pairs(events) do if not e.cancelled and e.when>=GetServerTime()-172800 then list[#list+1]={key=key,event=e} end end
     table.sort(list,function(a,b) if a.event.when~=b.event.when then return a.event.when<b.event.when end return a.key<b.key end)
-    page=math.max(1,math.min(page,math.max(1,math.ceil(#list/8))))
+    local pageCount=math.max(1,math.ceil(#list/8))
+    page=math.max(1,math.min(page,pageCount))
     window.visible=list
-    window.pageLabel:SetText(page..' / '..math.max(1,math.ceil(#list/8)))
+    window.pageLabel:SetText(page..' / '..pageCount)
+    window.previousPage:SetShown(pageCount>1)
+    window.nextPage:SetShown(pageCount>1)
     window.empty:SetShown(#list==0)
     for i,row in ipairs(rows) do
         local entry=list[(page-1)*8+i]
@@ -493,9 +496,10 @@ local function createWindow(parent)
         local index=i
         rows[i]=action(f,'',18,-65-(i-1)*30,410,function() local entry=f.visible and f.visible[(page-1)*8+index]; if entry then selected=entry.key; refresh() end end)
     end
-    action(f,'‹',18,-310,45,function() page=page-1; refresh() end)
-    f.pageLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.pageLabel:SetPoint('TOPLEFT',f,'TOPLEFT',75,-315)
-    action(f,'›',125,-310,45,function() page=page+1; refresh() end)
+    f.previousPage=action(f,'‹',138,-310,45,function() page=page-1; refresh() end)
+    f.pageLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+    f.pageLabel:SetPoint('TOPLEFT',f,'TOPLEFT',191,-315); f.pageLabel:SetWidth(64); f.pageLabel:SetJustifyH('CENTER')
+    f.nextPage=action(f,'›',263,-310,45,function() page=page+1; refresh() end)
     local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450,-66); scroll:SetSize(350,250)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(350,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(350); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
@@ -539,6 +543,7 @@ local function createWindow(parent)
         if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText(),activity) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
     end)
+    f:HookScript('OnShow',refresh)
     f:Hide(); return f
 end
 function Events:Show()

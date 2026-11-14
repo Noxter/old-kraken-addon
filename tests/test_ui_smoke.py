@@ -28,6 +28,7 @@ function selectDropdown(frame, value)
     error('Dropdown option not found: ' .. tostring(value))
 end
 function OldKraken:On(name, fn) self.listeners[name] = fn end
+function OldKraken:InvitePlayer() end
 function print(...) end
 function GetServerTime() return 12345 end
 function GetTime() return 1 end

@@ -194,24 +194,6 @@ local function CreateRosterWindow(parent)
         Roster:RequestUpdate()
     end)
 
-    local eventsButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    OldKraken.UIStyle.Button(eventsButton)
-    eventsButton:SetSize(92, 24)
-    eventsButton:SetPoint("RIGHT", refreshButton, "LEFT", -8, 0)
-    eventsButton:SetText("Події")
-    eventsButton:SetScript("OnClick", function()
-        if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
-    end)
-
-    local workshopButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    OldKraken.UIStyle.Button(workshopButton)
-    workshopButton:SetSize(100, 24)
-    workshopButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -38, -65)
-    workshopButton:SetText("Майстерня")
-    workshopButton:SetScript("OnClick", function()
-        if OldKraken.Workshop then OldKraken.Workshop:Show() end
-    end)
-
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
     searchBox:SetSize(190, 24)
     searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -38)
@@ -277,12 +259,13 @@ local function CreateRosterWindow(parent)
     summary:SetJustifyH("LEFT")
     frame.summaryText = summary
 
-    CreateColumnHeader(frame, "ІМ'Я", "name", 18, 190)
-    CreateColumnHeader(frame, "РАНГ", "rank", 210, 150)
-    CreateColumnHeader(frame, "РІВ.", "level", 366, 52)
-    CreateColumnHeader(frame, "КЛАС", "class", 422, 112)
-    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 538, 220)
-    CreateColumnHeader(frame, "СТАТУС", nil, 764, 100)
+    CreateColumnHeader(frame, "ІМ'Я", "name", 18, 180)
+    CreateColumnHeader(frame, "РАНГ", "rank", 202, 130)
+    CreateColumnHeader(frame, "РІВ.", "level", 336, 48)
+    CreateColumnHeader(frame, "КЛАС", "class", 388, 100)
+    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 492, 180)
+    CreateColumnHeader(frame, "СТАТУС", nil, 676, 74)
+    CreateColumnHeader(frame, "ДІЯ", nil, 754, 84)
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -132)
@@ -319,12 +302,12 @@ local function CreateRow(index, parent)
     end
 
     local columns = {
-        { x = 6, width = 190 },
-        { x = 198, width = 150 },
-        { x = 354, width = 52 },
-        { x = 410, width = 112 },
-        { x = 526, width = 220 },
-        { x = 752, width = 82 },
+        { x = 6, width = 180 },
+        { x = 190, width = 130 },
+        { x = 324, width = 48 },
+        { x = 376, width = 100 },
+        { x = 480, width = 180 },
+        { x = 664, width = 74 },
     }
 
     row.cells = {}
@@ -337,6 +320,28 @@ local function CreateRow(index, parent)
         cell:SetWordWrap(false)
         row.cells[cellIndex] = cell
     end
+
+    local inviteButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(inviteButton)
+    inviteButton:SetSize(76, 18)
+    inviteButton:SetPoint("LEFT", row, "LEFT", 746, 0)
+    inviteButton:SetText("Інвайт")
+    inviteButton:SetScript("OnClick", function(self)
+        if self.memberName and self.online then
+            OldKraken:InvitePlayer(self.memberName)
+        end
+    end)
+    inviteButton:SetScript("OnEnter", function(self)
+        if GameTooltip and self.memberName then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(self.online and ("Запросити " .. self.memberName .. " у групу") or "Гравець офлайн")
+            GameTooltip:Show()
+        end
+    end)
+    inviteButton:SetScript("OnLeave", function()
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+    row.inviteButton = inviteButton
 
     rowFrames[index] = row
     return row
@@ -414,6 +419,10 @@ function Roster:Render()
         end
 
         row:Show()
+        row.inviteButton.memberName = member.name
+        row.inviteButton.online = member.isOnline
+        row.inviteButton:SetEnabled(member.isOnline)
+        row.inviteButton:SetText(member.isOnline and "Інвайт" or "Офлайн")
     end
 
     for index = #filteredData + 1, #rowFrames do
