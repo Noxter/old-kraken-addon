@@ -45,6 +45,19 @@ for _, entry in ipairs(dungeonOptions) do
     dungeonLabels[entry.value] = entry.label
     if entry.min and entry.max then dungeonLevels[entry.value] = entry end
 end
+-- Game client loading-screen artwork, indexed by the dungeon IDs used above.
+local dungeonArt = {
+    thanes=7963781, lordaeron=7963782, wc=131882, deadmines=131833, sfk=131869,
+    excavation=7963777, bfd=131823, stockade=131870, dalaran=7963775,
+    gnomeregan=131841, rfk=131865, sm=131852, drowned=7963741, rfd=131864,
+    kroldok=7963780, uldaman=131876, zf=131885, maraudon=131850, alcaz=7963734,
+    st=131872, brd=131824, dm=131835, blackmaw=7963784, lbrs=131825,
+    scholo=131868, strat=131871, shapers=7963783,
+}
+local roleCoords = {
+    tank={0,67/256,67/256,134/256}, healer={67/256,134/256,0,67/256},
+    dps={67/256,134/256,67/256,134/256},
+}
 local categories = {'dungeon', 'quest', 'world', 'raid', 'pvp', 'other'}
 local categoryLabels = {dungeon='Підземелля', quest='Квести', world='Відкритий світ', raid='Рейд', pvp='PvP', other='Інше'}
 local roles = {'', 'tank', 'healer', 'dps', 'flex'}
@@ -230,12 +243,35 @@ local function refresh()
             local g = entry.group
             local status = Finder.pending[entry.key]
             local kind = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category] or g.category
+            b.art:SetTexture(dungeonArt[g.dungeon] or 7963779)
+            if (dungeonArt[g.dungeon] or 7963779) >= 7000000 then b.art:SetTexCoord(0.20, 0.80, 0.22, 0.78)
+            else b.art:SetTexCoord(0.15, 0.85, 0.25, 0.80) end
             b.title:SetText(g.title == kind and g.title or (g.title .. '  ·  ' .. kind))
             b.meta:SetText(string.format('%s  ·  рівень %d–%d  ·  %d/%d%s', g.owner, g.minLevel, g.maxLevel, #g.members, g.maxSize,
                 status and ('  ·  ' .. (pendingLabels[status] or status)) or ''))
             local preview = {}
             for memberIndex = 1, math.min(#g.members, 3) do preview[#preview + 1] = g.members[memberIndex] end
             b.members:SetText('Склад: ' .. table.concat(preview, ', ') .. (#g.members > 3 and ('  +' .. (#g.members - 3)) or ''))
+            for slotIndex, slot in ipairs(b.slots) do
+                if slotIndex <= math.min(5, g.maxSize) then
+                    -- In larger groups the last circle remains an entry point
+                    -- for any free place; the detailed roster retains all names.
+                    local member = g.members[slotIndex]
+                    if slotIndex == 5 and g.maxSize > 5 and #g.members < g.maxSize then member = nil end
+                    local memberRole = member and (slotIndex == 1 and g.role or (g.memberRoles and g.memberRoles[member]) or '') or ''
+                    slot.groupKey, slot.member, slot.memberRole = entry.key, member, memberRole
+                    if member then
+                        slot.ring:SetVertexColor(0.25, 0.72, 0.92, 0.95)
+                        if roleCoords[memberRole] then
+                            slot.icon:SetTexCoord(unpack(roleCoords[memberRole])); slot.icon:Show(); slot.text:Hide()
+                        else slot.icon:Hide(); slot.text:SetText(memberRole == 'flex' and 'F' or '?'); slot.text:Show() end
+                    else
+                        slot.ring:SetVertexColor(0.38, 0.44, 0.47, 0.8)
+                        slot.icon:Hide(); slot.text:SetText('+'); slot.text:Show()
+                    end
+                    slot:Show()
+                else slot:Hide() end
+            end
             if selected == entry.key then b:LockHighlight() else b:UnlockHighlight() end
             b:Show()
             if g.owner == Finder.identity and not g.hidden then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
@@ -397,6 +433,25 @@ local function createWindow()
         else print('Old Kraken: не вдалося зберегти налаштування сповіщень.') end
     end)
     f.rows, f.deleteButtons = {}, {}
+    f.slotMenu = CreateFrame('Frame', 'OldKrakenSlotRoleMenu', f, 'UIDropDownMenuTemplate')
+    UIDropDownMenu_Initialize(f.slotMenu, function(_, level)
+        for _, candidate in ipairs(roles) do
+            local choice = candidate
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = 'Подати заявку: ' .. roleLabels[choice]
+            info.notCheckable = true
+            info.func = function()
+                local key = f.slotMenu.groupKey
+                local group = key and Finder.groups[key]
+                if not group or group.owner == Finder.identity or group.closed or #group.members >= group.maxSize
+                    or Finder.pending[key] == 'pending' then return end
+                for _, name in ipairs(group.members) do if name == Finder.identity then return end end
+                if Finder:Apply(group.owner, group.id, choice) then Finder:Changed(); refresh()
+                else print('Old Kraken: не вдалося подати заявку. Перевірте зв’язок.') end
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end, 'MENU')
     f.emptyList = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.emptyList:SetPoint('TOPLEFT', f, 'TOPLEFT', 25, -75); f.emptyList:SetText('Груп не знайдено. Змініть фільтри або створіть оголошення.')
     for i=1,CARDS_PER_PAGE do
@@ -406,15 +461,66 @@ local function createWindow()
             if entry then if selected ~= entry.key then requestOffset=0; f.detailsScroll:SetVerticalScroll(0) end; selected=entry.key; refresh() end
         end)
         card:SetHeight(58)
+        card.art = card:CreateTexture(nil, 'ARTWORK')
+        card.art:SetPoint('TOPLEFT', card, 'TOPLEFT', 1, -1); card.art:SetPoint('BOTTOMLEFT', card, 'BOTTOMLEFT', 1, 1); card.art:SetWidth(70)
         card.title = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
-        card.title:SetPoint('TOPLEFT', card, 'TOPLEFT', 10, -5); card.title:SetPoint('RIGHT', card, 'RIGHT', -8, 0)
+        card.title:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -5); card.title:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
         card.title:SetJustifyH('LEFT'); card.title:SetWordWrap(false)
         card.meta = card:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-        card.meta:SetPoint('TOPLEFT', card, 'TOPLEFT', 10, -23); card.meta:SetPoint('RIGHT', card, 'RIGHT', -8, 0)
+        card.meta:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -23); card.meta:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
         card.meta:SetJustifyH('LEFT'); card.meta:SetWordWrap(false)
         card.members = card:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-        card.members:SetPoint('TOPLEFT', card, 'TOPLEFT', 10, -39); card.members:SetPoint('RIGHT', card, 'RIGHT', -8, 0)
+        card.members:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -39); card.members:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
         card.members:SetJustifyH('LEFT'); card.members:SetWordWrap(false)
+        card.slots = {}
+        for slotIndex = 1, 5 do
+            local slot = CreateFrame('Button', nil, card)
+            slot:SetSize(25, 25); slot:SetPoint('TOPRIGHT', card, 'TOPRIGHT', -8 - (5-slotIndex)*28, -7)
+            slot.ring = slot:CreateTexture(nil, 'ARTWORK')
+            slot.ring:SetAllPoints(); slot.ring:SetTexture('Interface\\CHARACTERFRAME\\TempPortraitAlphaMask')
+            slot.icon = slot:CreateTexture(nil, 'OVERLAY')
+            slot.icon:SetPoint('CENTER'); slot.icon:SetSize(17, 17); slot.icon:SetTexture('Interface\\LFGFrame\\UI-LFG-ICON-ROLES')
+            slot.text = slot:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall'); slot.text:SetPoint('CENTER'); slot.text:SetTextColor(1, 1, 1)
+            slot:SetScript('OnEnter', function(self)
+                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+                if self.member then
+                    GameTooltip:SetText(self.member)
+                    GameTooltip:AddLine('Роль: ' .. (roleLabels[self.memberRole] or 'Невідома'), 1, 1, 1)
+                else
+                    GameTooltip:SetText('Вільне місце')
+                    local group = self.groupKey and Finder.groups[self.groupKey]
+                    if group and group.owner == Finder.identity then
+                        GameTooltip:AddLine('Це ваше оголошення', 1, 1, 1, true)
+                    elseif Finder.pending[self.groupKey] == 'pending' then
+                        GameTooltip:AddLine('Заявка вже очікує відповіді', 1, 1, 1, true)
+                    else
+                        GameTooltip:AddLine('Натисніть, щоб вибрати роль і подати заявку', 1, 1, 1, true)
+                    end
+                end
+                GameTooltip:Show()
+            end)
+            slot:SetScript('OnLeave', function() GameTooltip:Hide() end)
+            slot:SetScript('OnClick', function(self)
+                local group = self.groupKey and Finder.groups[self.groupKey]
+                if not group or self.member or group.closed or group.owner == Finder.identity
+                    or #group.members >= group.maxSize or Finder.pending[self.groupKey] == 'pending' then return end
+                for _, name in ipairs(group.members) do if name == Finder.identity then return end end
+                f.slotMenu.groupKey = self.groupKey
+                ToggleDropDownMenu(1, nil, f.slotMenu, self, 0, 0)
+                local list = _G.DropDownList1
+                if list and list:IsShown() then
+                    if not list.oldKrakenRestoreHook then
+                        list:HookScript('OnHide', function(frame)
+                            if frame.oldKrakenStrata then frame:SetFrameStrata(frame.oldKrakenStrata); frame.oldKrakenStrata = nil end
+                        end)
+                        list.oldKrakenRestoreHook = true
+                    end
+                    if not list.oldKrakenStrata then list.oldKrakenStrata = list:GetFrameStrata() end
+                    list:SetFrameStrata('FULLSCREEN_DIALOG')
+                end
+            end)
+            card.slots[slotIndex] = slot
+        end
         f.rows[i] = card
         local remove = CreateFrame('Button', nil, f)
         remove:SetSize(24, 23)

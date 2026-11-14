@@ -38,6 +38,8 @@ end
 
 local categories = { dungeon=true, quest=true, world=true, raid=true, pvp=true, other=true }
 local roles = { ['']=true, tank=true, healer=true, dps=true, flex=true }
+local roleCode = { ['']='U', tank='T', healer='H', dps='D', flex='F' }
+local codeRole = { U='', T='tank', H='healer', D='dps', F='flex' }
 local MAX_GROUPS = 100
 local GROUP_TTL = 3600
 
@@ -94,6 +96,12 @@ function Finder:EncodeGroup(group)
         fields[#fields + 1] = '?'
     end
     fields[#fields + 1] = group.dungeon or ''
+    local memberRoles = {}
+    for i, member in ipairs(group.members) do
+        local memberRole = i == 1 and group.role or (group.memberRoles and group.memberRoles[member]) or ''
+        memberRoles[i] = roleCode[memberRole] or 'U'
+    end
+    fields[#fields + 1] = table.concat(memberRoles)
     return pack(fields)
 end
 
@@ -145,6 +153,9 @@ function Finder:SyncPartyMembers(party)
                     group.members, group.maxSize, group.revision, group.partyObserved = oldMembers, oldMax, oldRevision, oldObserved
                     return false, changed, #payload > 2560 and 'payload' or 'queue'
                 end
+                if group.memberRoles then
+                    for name in pairs(group.memberRoles) do if not included[name] then group.memberRoles[name] = nil end end
+                end
                 changed = true
             end
         end
@@ -153,7 +164,7 @@ function Finder:SyncPartyMembers(party)
 end
 
 function Finder:ReceiveGroup(sender, payload)
-    local f = unpackFields(payload, 214)
+    local f = unpackFields(payload, 215)
     if not f or #f < 12 then return false end
     local id, owner, rev, closed, title, category, description, maxSize, count = unpack(f, 1, 9)
     rev, maxSize, count = tonumber(rev), tonumber(maxSize), tonumber(count)
@@ -166,7 +177,7 @@ function Finder:ReceiveGroup(sender, payload)
         or not minLevel or not maxLevel or minLevel % 1 ~= 0 or maxLevel % 1 ~= 0
         or minLevel < 1 or maxLevel > 255 or minLevel > maxLevel or not roles[role]
         or not count or count % 1 ~= 0 or count < 1 or count > maxSize
-        or (#f ~= 12 + count and #f ~= 13 + count and #f ~= 14 + count) then return false end
+        or (#f ~= 12 + count and #f ~= 13 + count and #f ~= 14 + count and #f ~= 15 + count) then return false end
     local members, seen = {}, {}
     for i=1,count do
         local name = f[12+i]
@@ -177,6 +188,12 @@ function Finder:ReceiveGroup(sender, payload)
     local states = f[13 + count]
     local dungeon = f[14 + count] or ''
     if #dungeon > 32 or (dungeon ~= '' and (not validID(dungeon) or category ~= 'dungeon')) then return false end
+    local encodedRoles, memberRoles = f[15 + count], {}
+    if encodedRoles then
+        if #encodedRoles ~= count or encodedRoles:find('[^UTHDF]') then return false end
+        for i = 1, count do memberRoles[members[i]] = codeRole[encodedRoles:sub(i, i)] end
+        if memberRoles[owner] ~= role then return false end
+    else memberRoles[owner] = role end
     local observed
     if states and states ~= '?' then
         if #states ~= count or states:sub(1, 1) ~= 'A' or states:sub(2):find('[^PR]') then return false end
@@ -192,7 +209,7 @@ function Finder:ReceiveGroup(sender, payload)
     if not existing and countGroups(self.groups) >= MAX_GROUPS then return false end
     self.groups[key] = { id=id, owner=owner, revision=rev, closed=closed=='1', title=title,
         category=category, description=description, maxSize=maxSize, minLevel=minLevel,
-        maxLevel=maxLevel, role=role, members=members, partyObserved=observed, dungeon=dungeon, seenAt=GetTime() }
+        maxLevel=maxLevel, role=role, members=members, partyObserved=observed, memberRoles=memberRoles, dungeon=dungeon, seenAt=GetTime() }
     if self.pending[key] == 'pending' then
         if seen[self.identity] then self.pending[key] = 'accept'
         elseif closed == '1' then self.pending[key] = 'closed' end
@@ -260,10 +277,14 @@ function Finder:Decide(id, applicant, accept)
     if accept then
         if #group.members >= group.maxSize then return false end
         for _, member in ipairs(group.members) do if member == applicant then return false end end
+        group.memberRoles = group.memberRoles or {}
+        local oldRole = group.memberRoles[applicant]
+        group.memberRoles[applicant] = requests[applicant]
         group.members[#group.members + 1] = applicant
         group.revision = group.revision + 1
         if not self.send('UPDATE', self:EncodeGroup(group)) then
             group.members[#group.members] = nil
+            group.memberRoles[applicant] = oldRole
             group.revision = group.revision - 1
             return false
         end
@@ -346,6 +367,7 @@ function Finder:RemoveMember(id, member)
                 group.revision = group.revision - 1
                 return false
             end
+            if group.memberRoles then group.memberRoles[member] = nil end
             return true
         end
     end
