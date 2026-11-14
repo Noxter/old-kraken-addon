@@ -78,6 +78,13 @@ local roles = {'tank', 'healer', 'dps', 'flex'}
 local roleLabels = {['']='Не визначено', tank='Танк', healer='Лікар', dps='DPS', flex='Гнучка'}
 local roleColors = {tank='ff66b3ff', healer='ff69dc8c', dps='ffff7a6e', flex='ffffd06a', ['']='ffb5b5b5'}
 local pendingLabels = {pending='Очікує', accept='Прийнято', reject='Відхилено', closed='Закрито', retry='Подайте заявку знову'}
+local applicationBadges = {
+    pending={text='ОЧІКУЄ', color={1, 0.80, 0.25}},
+    accept={text='ПРИЙНЯТО', color={0.40, 0.90, 0.55}},
+    reject={text='ВІДХИЛЕНО', color={1, 0.35, 0.32}},
+    closed={text='НАБІР ЗАКРИТО', color={0.70, 0.72, 0.76}},
+    retry={text='ПОДАЙТЕ ЗНОВУ', color={1, 0.65, 0.25}},
+}
 
 local people = {}
 local function refreshPeople()
@@ -356,8 +363,11 @@ local function refresh()
             if (dungeonArt[g.dungeon] or 7963779) >= 7000000 then b.art:SetTexCoord(0.20, 0.80, 0.22, 0.78)
             else b.art:SetTexCoord(0.15, 0.85, 0.25, 0.80) end
             b.title:SetText(g.title == kind and g.title or (g.title .. '  ·  ' .. kind))
-            b.meta:SetText(string.format('%s  ·  рівень %d–%d  ·  %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize,
-                status and ('  ·  ' .. (pendingLabels[status] or status)) or ''))
+            b.meta:SetText(string.format('%s  ·  рівень %d–%d  ·  %d/%d', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize))
+            local badge = tab == 'applications' and applicationBadges[status]
+            if badge then
+                b.status:SetText(badge.text); b.status:SetTextColor(unpack(badge.color)); b.status:Show(); b.statusBackground:Show()
+            else b.status:Hide(); b.statusBackground:Hide() end
             local preview = {}
             for memberIndex = 1, math.min(#g.members, 3) do preview[#preview + 1] = playerLabel(g.members[memberIndex]) end
             b.members:SetText('Склад: ' .. table.concat(preview, ', ') .. (#g.members > 3 and ('  +' .. (#g.members - 3)) or ''))
@@ -591,6 +601,12 @@ local function createWindow()
         card.members = card:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
         card.members:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -54); card.members:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
         card.members:SetJustifyH('LEFT'); card.members:SetWordWrap(false)
+        card.statusBackground = card:CreateTexture(nil, 'ARTWORK')
+        card.statusBackground:SetPoint('BOTTOMRIGHT', card, 'BOTTOMRIGHT', -8, 7)
+        card.statusBackground:SetSize(138, 23); card.statusBackground:SetColorTexture(0.035, 0.04, 0.05, 0.92)
+        card.status = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+        card.status:SetPoint('CENTER', card.statusBackground, 'CENTER'); card.status:SetWidth(132)
+        card.status:SetJustifyH('CENTER'); card.status:SetWordWrap(false)
         card.slots = {}
         for slotIndex = 1, 5 do
             local slot = CreateFrame('Button', nil, card)
