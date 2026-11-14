@@ -471,7 +471,12 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
-    if command == 'group status' then
+    if command == 'alerts group' or command == 'alerts request' then
+        if OldKraken.GroupFinder and OldKraken.GroupFinder.PreviewAlert then
+            OldKraken.GroupFinder:PreviewAlert(command == 'alerts group' and 'group' or 'request')
+        end
+        return
+    elseif command == 'group status' then
         if OldKraken.GroupFinder then OldKraken.GroupFinder:PrintSyncStatus() end
         return
     elseif command == 'group sync' then

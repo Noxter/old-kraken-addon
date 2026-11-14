@@ -238,13 +238,16 @@ end
 
 local function showRequests()
     if not Finder.active then print('Old Kraken: пошук груп не ініціалізовано.'); return end
+    if not window or not window:IsShown() then Finder:Show() end
+    if not window or not window:IsShown() then return end
     refreshPeople()
     if not requestsWindow then
         local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', UIParent, 'BasicFrameTemplateWithInset')
-        f:SetSize(510, 335); f:SetPoint('CENTER', UIParent, 'CENTER', 160, 0)
-        f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag('LeftButton')
-        f:SetScript('OnDragStart', f.StartMoving); f:SetScript('OnDragStop', f.StopMovingOrSizing)
+        f:SetSize(510, 335); f:SetPoint('TOPRIGHT', window, 'TOPRIGHT', -24, -60)
+        f:EnableMouse(true)
         f:SetClampedToScreen(true); OldKraken.UIStyle.Window(f)
+        f:SetFrameStrata('FULLSCREEN_DIALOG')
+        f:SetFrameLevel(20)
         if f.TitleText then f.TitleText:SetText('Old Kraken — Заявки до груп') end
         f.count = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
         f.count:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, -38)
@@ -496,6 +499,7 @@ local function createWindow()
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving); f:SetScript('OnDragStop', f.StopMovingOrSizing)
     f:SetClampedToScreen(true); f:Hide()
     OldKraken.UIStyle.Window(f)
+    f:HookScript('OnHide', function() if requestsWindow then requestsWindow:Hide() end end)
     OldKraken.UIStyle.Panel(f, 12, -60, 526, 255)
     OldKraken.UIStyle.Panel(f, 542, -60, 335, 255)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
@@ -780,7 +784,26 @@ local function showAlert(message, kind, key)
         groupAlert:SetSize(560, 76)
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
         groupAlert:SetFrameStrata('FULLSCREEN_DIALOG')
-        groupAlert:SetFrameLevel(10)
+        groupAlert:SetFrameLevel(50)
+        groupAlert:SetMovable(true)
+        groupAlert:SetClampedToScreen(true)
+        groupAlert:RegisterForDrag('LeftButton')
+        groupAlert:SetScript('OnDragStart', function(self)
+            self.dragging = true
+            self:StartMoving()
+        end)
+        groupAlert:SetScript('OnDragStop', function(self)
+            self:StopMovingOrSizing()
+            self.dragging = false
+            self.remaining = 10
+            local x, y = self:GetCenter()
+            local px, py = UIParent:GetCenter()
+            local settings = OldKraken.DB and OldKraken.DB.settings
+            if x and y and px and py and type(settings) == 'table' then
+                if type(settings.alertPositions) ~= 'table' then settings.alertPositions = {} end
+                settings.alertPositions[self.positionKind] = {x=x-px, y=y-py}
+            end
+        end)
         groupAlert:SetScript('OnClick', function(self)
             local target = self.groupKey
             local alertKind = self.kind
@@ -791,16 +814,36 @@ local function showAlert(message, kind, key)
             Finder:Show()
         end)
         groupAlert:SetScript('OnUpdate', function(self, elapsed)
+            if self.dragging then return end
             self.remaining = (self.remaining or 0) - elapsed
             if self.remaining <= 0 then self:Hide() end
         end)
     end
     groupAlert.kind, groupAlert.groupKey = kind, key
-    groupAlert:SetText(message .. '\nНатисніть, щоб відкрити пошук груп')
+    groupAlert.positionKind = kind == 'group' and 'group' or 'request'
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    local positions = type(settings) == 'table' and settings.alertPositions
+    local pos = type(positions) == 'table' and positions[groupAlert.positionKind]
+    groupAlert:ClearAllPoints()
+    if type(pos) == 'table' and type(pos.x) == 'number' and type(pos.y) == 'number'
+        and pos.x == pos.x and pos.y == pos.y and math.abs(pos.x) < 10000 and math.abs(pos.y) < 10000 then
+        groupAlert:SetPoint('CENTER', UIParent, 'CENTER', pos.x, pos.y)
+    else
+        groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
+    end
+    groupAlert:SetText(message .. '\nКлік — відкрити пошук · Перетягніть, щоб перемістити')
     groupAlert.remaining = 10
     groupAlert:Show()
     if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK then
         pcall(PlaySound, SOUNDKIT.READY_CHECK)
+    end
+end
+
+function Finder:PreviewAlert(kind)
+    if kind == 'group' then
+        showAlert('Приклад: нове оголошення про набір\nПеретягніть банер у потрібне місце', 'group')
+    elseif kind == 'request' then
+        showAlert('Приклад: сповіщення про заявку\nПеретягніть банер у потрібне місце', 'request')
     end
 end
 
