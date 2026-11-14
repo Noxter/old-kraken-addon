@@ -86,23 +86,27 @@ local function decode(sender, payload, isRelay)
 end
 local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
 
-local function receiveEvent(sender, _, payload, isAnnouncement, isRelay)
+local function receiveEvent(sender, _, payload, isAnnouncement, isRelay, cancellationOnly)
     if not active then return end
     local e = decode(sender, payload, isRelay); if not e then return end
+    if cancellationOnly and not e.cancelled then return end
     local key = eventKey(e.owner,e.id)
     local old = events[key]
     if isRelay then
-        if not e.cancelled or not old or old.owner==identity or old.cancelled or e.rev<=old.rev
+        if not old or old.owner==identity or old.cancelled or e.rev<=old.rev
             or old.when~=e.when or old.kind~=e.kind or old.title~=e.title
             or old.description~=e.description or old.size~=e.size or old.activity~=e.activity then return end
         e.relayed=true
+        e.ownerRev=old.ownerRev or (not old.relayed and old.rev or 0)
     elseif old and old.relayed then
-        -- A direct owner snapshot overrides a cancellation received from a peer.
+        -- Ignore owner snapshots older than the last direct owner revision.
+        if e.rev < (old.ownerRev or 0) then return end
         if not e.cancelled then storage.cancelledSeen[key]=nil end
         old=nil
     end
     if old and old.rev > e.rev then return end
     if old and old.rev == e.rev then
+        if not isRelay and e.owner~=identity then storage.relays[key]=payload end
         local intent = intents[key]
         if intent and ((intent.role == 'leave' and not old.people[identity]) or (intent.role ~= 'leave' and old.people[identity] == intent.role and old.statuses[identity] ~= 'rejected') or old.cancelled) then
             intents[key] = nil; save(); fire()
@@ -111,12 +115,13 @@ local function receiveEvent(sender, _, payload, isAnnouncement, isRelay)
     end
     if not old and not events[key] and count(events) >= 100 then return end
     if e.owner == identity and old then e.versions = old.versions end
+    if not isRelay then e.ownerRev=e.rev end
     events[key] = e
     if not isRelay and e.owner~=identity then
-        if e.cancelled then storage.relays[key]=payload else storage.relays[key]=nil; relayDirty[key]=nil end
+        storage.relays[key]=payload
     end
     local intent = intents[key]
-    if intent and ((intent.role == 'leave' and not e.people[identity]) or (intent.role ~= 'leave' and e.people[identity] == intent.role and e.statuses[identity] ~= 'rejected') or e.cancelled) then intents[key] = nil end
+    if intent and (not isRelay or e.cancelled) and ((intent.role == 'leave' and not e.people[identity]) or (intent.role ~= 'leave' and e.people[identity] == intent.role and e.statuses[identity] ~= 'rejected') or e.cancelled) then intents[key] = nil end
     if e.cancelled and e.owner~=identity and e.people[identity] and e.statuses[identity]~='rejected' and not storage.cancelledSeen[key] then
         storage.cancelledSeen[key]=e.when+172800
         OldKraken:Fire('GUILD_EVENTS_CANCELLED',key,e)
@@ -130,7 +135,8 @@ local function receiveEvent(sender, _, payload, isAnnouncement, isRelay)
 end
 comm:RegisterHandler('CEVENT', function(sender,id,payload) receiveEvent(sender,id,payload,false) end)
 comm:RegisterHandler('CVNEW', function(sender,id,payload) receiveEvent(sender,id,payload,true) end)
-comm:RegisterHandler('CVCANCEL', function(sender,id,payload) receiveEvent(sender,id,payload,false,true) end)
+comm:RegisterHandler('CVCANCEL', function(sender,id,payload) receiveEvent(sender,id,payload,false,true,true) end)
+comm:RegisterHandler('CVSTATE', function(sender,id,payload) receiveEvent(sender,id,payload,false,true) end)
 
 local function updateSignup(sender, owner, id, role, version)
     local key = eventKey(owner,id)
@@ -241,13 +247,17 @@ local function connect()
             if type(e)=='table' and e.owner~=identity and validText(e.owner,1,128) and type(e.people)=='table' then
                 local ok,payload=pcall(encode,e)
                 local valid=ok and decode(e.owner,payload)
-                if valid and k==eventKey(valid.owner,valid.id) then valid.relayed=e.relayed==true; events[k]=valid end
+                if valid and k==eventKey(valid.owner,valid.id) then
+                    valid.relayed=e.relayed==true
+                    valid.ownerRev=valid.relayed and (type(e.ownerRev)=='number' and math.max(0,math.min(valid.rev,e.ownerRev)) or 0) or valid.rev
+                    events[k]=valid
+                end
             end
         end
     end
     for k,payload in pairs(storage.relays) do
         local e=type(payload)=='string' and decode(nil,payload,true)
-        if not e or not e.cancelled or e.owner==identity or k~=eventKey(e.owner,e.id) then storage.relays[k]=nil end
+        if not e or e.owner==identity or k~=eventKey(e.owner,e.id) then storage.relays[k]=nil end
     end
     if type(storage.intents)=='table' then
         for k,v in pairs(storage.intents) do
@@ -286,9 +296,9 @@ if C_Timer and C_Timer.NewTicker then
             if not e or comm:SendProtocol(announce and 'CVNEW' or 'CEVENT',encode(e)) then dirty[key],newDirty[key]=nil,nil end
         end
         local relayKey=next(relayDirty)
-        if relayKey then
+        if relayKey and #comm.queue<=8 then
             local payload=storage.relays[relayKey]
-            if not payload or comm:SendProtocol('CVCANCEL',payload) then relayDirty[relayKey]=nil end
+            if not payload or comm:SendProtocol('CVSTATE',payload) then relayDirty[relayKey]=nil end
         end
     end)
 end
@@ -432,7 +442,7 @@ local function refresh()
             lines[#lines+1]=(catalog.roleIcons[role] or '')..' '..name..' — '..(roles[role] or role)..' · '..statuses[e.statuses[name]]
         end
         local own=e.owner==identity
-        window.details:SetText(e.title..'\n'..kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · прийнято '..acceptedCount(e)..'/'..e.size..'\n'..e.description..'\n\n'..(own and 'Заявки та учасники:' or 'Заявки та учасники:\n'..(#lines>0 and table.concat(lines,'\n') or 'Поки немає'))..(pending and '\n\nОчікується доставка автору' or ''))
+        window.details:SetText(e.title..'\n'..kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · прийнято '..acceptedCount(e)..'/'..e.size..(e.relayed and '\nСтан отримано через гільдію' or '')..'\n'..e.description..'\n\n'..(own and 'Заявки та учасники:' or 'Заявки та учасники:\n'..(#lines>0 and table.concat(lines,'\n') or 'Поки немає'))..(pending and '\n\nОчікується доставка автору' or ''))
         local height=window.details:GetStringHeight()+8
         if own then
             for i,name in ipairs(names) do
