@@ -11,7 +11,7 @@ local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]
 local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.70,0.75,0.80},cancelled={1,0.42,0.38},expired={0.72,0.72,0.72}}
 local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
-local dirty,sequence,nextSync,lastQuery,nextDisplay={},0,0,-60,0
+local dirty,relayDirty,sequence,nextSync,lastQuery,nextDisplay={}, {},0,0,-60,0
 local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',0,'customer',86400,{}
 local statusFilter,professionFilter='all',0
 local searchQuery=''
@@ -48,12 +48,12 @@ local function encode(o)
     fields[#fields+1]=o.itemID or 0; fields[#fields+1]=o.recipeID or 0
     return codec._pack(fields)
 end
-local function decode(payload,sender)
+local function decode(payload,sender,isRelay)
     local f=codec._unpackFields(payload,80); if not f or #f<15 then return nil end
     local owner,id,rev,created,due,prof,item,qty,reward,mats,note,status,worker,n=unpack(f,1,14)
     rev,created,due,prof,qty,reward,n=tonumber(rev),tonumber(created),tonumber(due),tonumber(prof),tonumber(qty),tonumber(reward),tonumber(n)
     local now=GetServerTime()
-    if not nameOK(owner) or owner~=sender or not idOK(id) or not int(rev,1,2147483647) or not int(created,now-2592000,now+600)
+    if not nameOK(owner) or (not isRelay and owner~=sender) or not idOK(id) or not int(rev,1,2147483647) or not int(created,now-2592000,now+600)
         or not int(due,created+1,created+2592000) or not professionNames[prof] or not textOK(item,1,160) or not int(qty,1,200)
         or not int(reward,0,100000) or not materialNames[mats] or not textOK(note,0,180) or not statusNames[status]
         or (worker~='' and not nameOK(worker)) or not int(n,0,20) or #f<15+n then return nil end
@@ -94,7 +94,7 @@ end
 local function connect()
     local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
     if not name or not textOK(guild,1,128) or type(realm)~='string' or not OldKraken.DB then
-        active,identity,profile,scope,own,observed,intents,dirty=false,nil,nil,nil,{}, {}, {}, {}
+        active,identity,profile,scope,own,observed,intents,dirty,relayDirty=false,nil,nil,nil,{}, {}, {}, {}, {}
         if window then window:Hide() end; return
     end
     local guildKey=realm..'\001'..guild
@@ -103,20 +103,30 @@ local function connect()
     if type(db.workshop.guilds)~='table' then db.workshop.guilds={} end
     if type(db.workshop.guilds[guildKey])~='table' then db.workshop.guilds[guildKey]={} end
     scope=db.workshop.guilds[guildKey]
-    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences'}) do if type(scope[field])~='table' then scope[field]={} end end
+    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays'}) do if type(scope[field])~='table' then scope[field]={} end end
     active,identity,profile=true,name,guildKey
-    own,observed,intents,dirty={}, {}, {}, {}
+    own,observed,intents,dirty,relayDirty={}, {}, {}, {}, {}
     local function loadOrders(source,target,requireOwner)
         if type(source)~='table' then return end
         for k,o in pairs(source) do
             if size(target)>=100 then break end
             if type(o)=='table' and type(o.candidates)=='table' and type(o.acks)=='table' and nameOK(o.owner) and (not requireOwner or o.owner==identity) then
                 local ok,payload=pcall(encode,o); local valid=ok and decode(payload,o.owner)
-                if valid and k==key(valid.owner,valid.id) then target[k]=valid end
+                if valid and k==key(valid.owner,valid.id) then
+                    if not requireOwner then
+                        valid.relayed=o.relayed==true
+                        valid.ownerRev=valid.relayed and (int(o.ownerRev,0,valid.rev) and o.ownerRev or 0) or valid.rev
+                    end
+                    target[k]=valid
+                end
             end
         end
     end
     loadOrders(scope.orderOwners[name],own,true); loadOrders(scope.orderObserved,observed,false)
+    for k,payload in pairs(scope.orderRelays) do
+        local o=type(payload)=='string' and #payload<=2560 and decode(payload,nil,true)
+        if not o or o.owner==identity or k~=key(o.owner,o.id) then scope.orderRelays[k]=nil end
+    end
     local stored=scope.orderIntents[name]
     if type(stored)=='table' then for k,v in pairs(stored) do
         if type(k)=='string' and #k<194 and type(v)=='table' and (v.action=='offer' or v.action=='withdraw' or v.action=='delivered') and int(v.version,1,9000000000000000) then intents[k]={action=v.action,version=v.version} end
@@ -163,21 +173,39 @@ local function ownerAction(k,action,actor)
     dirty[k]=true; persist(); changed(); return true
 end
 
-comm:RegisterHandler('WORDER',function(sender,_,payload)
-    if not active or sender==identity then return end
-    local o=decode(payload,sender); if not o then return end
+local function sameOrder(a,b)
+    return a.owner==b.owner and a.id==b.id and a.created==b.created and a.profession==b.profession
+        and a.item==b.item and a.itemID==b.itemID and a.recipeID==b.recipeID
+        and a.quantity==b.quantity and a.reward==b.reward and a.materials==b.materials and a.note==b.note
+end
+local function receiveOrder(sender,payload,isRelay)
+    if not active or not nameOK(sender) or sender==identity or type(payload)~='string' or #payload>2560 then return end
+    local o=decode(payload,sender,isRelay); if not o or o.owner==identity or (isRelay and sender==o.owner) then return end
     local k=key(o.owner,o.id); local previous=observed[k]
-    if previous and previous.rev>o.rev then return end
-    if previous and previous.rev==o.rev and encode(previous)~=encode(o) then return end
+    if previous and not sameOrder(previous,o) then
+        if isRelay or not previous.relayed then return end
+        local direct=scope.orderRelays[k] and decode(scope.orderRelays[k],nil,true)
+        if direct and not sameOrder(direct,o) then return end
+    end
+    if isRelay then
+        if previous and previous.rev>=o.rev then return end
+        o.relayed=true; o.ownerRev=previous and (previous.ownerRev or (not previous.relayed and previous.rev) or 0) or 0
+    else
+        local ownerRev=previous and (previous.ownerRev or (not previous.relayed and previous.rev) or 0) or 0
+        if o.rev<ownerRev then return end
+        if previous and not previous.relayed and previous.rev==o.rev and encode(previous)~=encode(o) then return end
+        o.ownerRev=o.rev
+    end
     if not previous and size(observed)>=100 then return end
+    if not isRelay then scope.orderRelays[k]=payload end
     observed[k]=o
     local pending=intents[k]
-    if pending and (o.acks[identity] or 0)>=pending.version then
+    if not isRelay and pending and (o.acks[identity] or 0)>=pending.version then
         local applied=(pending.action=='offer' and o.candidates[identity]) or (pending.action=='withdraw' and not o.candidates[identity] and o.worker~=identity) or (pending.action=='delivered' and o.status=='delivered' and o.worker==identity)
         intents[k]=nil
         if not applied then notify('Дію щодо замовлення не виконано',o.item..' · стан змінився',k) end
     end
-    if not previous and o.status=='open' and o.rev==1 and GetServerTime()-o.created<=120 then
+    if not isRelay and not previous and o.status=='open' and o.rev==1 and GetServerTime()-o.created<=120 then
         local settings=OldKraken.DB and OldKraken.DB.settings
         local matches,manual=canCraft(o)
         if type(settings)=='table' and settings.workshopOrderAlerts~=false and matches then
@@ -191,7 +219,9 @@ comm:RegisterHandler('WORDER',function(sender,_,payload)
         elseif previous.worker==identity and o.status=='done' and previous.status~='done' then notify('Замовлення підтверджено',o.item..' · '..o.owner,k) end
     end
     persist(); changed()
-end)
+end
+comm:RegisterHandler('WORDER',function(sender,_,payload) receiveOrder(sender,payload,false) end)
+comm:RegisterHandler('WORELAY',function(sender,_,payload) receiveOrder(sender,payload,true) end)
 comm:RegisterHandler('WOREQ',function(sender,_,payload)
     if not active or not nameOK(sender) or sender==identity then return end
     local f=codec._unpackFields(payload,4); if not f or #f~=4 or f[1]~=identity or not idOK(f[2]) then return end
@@ -225,6 +255,7 @@ comm:RegisterHandler('WOQUERY',function(sender,_,payload)
     if not active or payload~='' or sender==identity then return end
     local now=GetTime(); if now-lastQuery<30 then return end; lastQuery=now
     for k in pairs(own) do dirty[k]=true end
+    for k in pairs(scope.orderRelays) do relayDirty[k]=true end
 end)
 
 local listener=CreateFrame('Frame')
@@ -237,10 +268,15 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
         for k,pending in pairs(intents) do local o=observed[k]; if o then comm:SendProtocol('WOREQ',codec._pack({o.owner,o.id,pending.action,string.format('%.0f',pending.version)})) end end
     end
     local expired=false; for k,o in pairs(own) do if o.created<GetServerTime()-2592000 then own[k],dirty[k]=nil,nil; expired=true end end
-    for k,o in pairs(observed) do if o.created<GetServerTime()-2592000 then observed[k],intents[k]=nil,nil; expired=true end end
+    for k,o in pairs(observed) do if o.created<GetServerTime()-2592000 then observed[k],intents[k],relayDirty[k],scope.orderRelays[k]=nil,nil,nil,nil; expired=true end end
     if expired then persist(); changed() end
     if now>=nextDisplay then nextDisplay=now+30; changed() end
     local k=next(dirty); if k then local o=own[k]; if not o or comm:SendProtocol('WORDER',encode(o)) then dirty[k]=nil end end
+    local relayKey=next(relayDirty)
+    if relayKey and #comm.queue<=8 then
+        local payload=scope.orderRelays[relayKey]
+        if not payload or comm:SendProtocol('WORELAY',payload) then relayDirty[relayKey]=nil end
+    end
 end) end
 
 local function button(parent,label,x,y,width,callback)
@@ -399,7 +435,7 @@ refresh=function()
         local masters=hasRecipe and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:FindMasters(o.itemID or 0,o.recipeID or 0) or {}
         local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..')' end
         local known=hasRecipe and ('\nВідомі майстри: '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\nПошук за професією; знання рецепта не підтверджено.'
-        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
+        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..(o.relayed and '\nСтан отримано через гільдію; може бути застарілим.' or '')..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
         window.detailsContent:SetHeight(math.max(132,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
         window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending)

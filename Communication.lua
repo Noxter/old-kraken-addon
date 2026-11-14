@@ -49,7 +49,7 @@ local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = tr
     UPDATE = true, QUERY = true, SYNC = true, BUMP = true,
     CEVENT = true, CVNEW = true, CVSTATE = true, CVCANCEL = true, CEVQUERY = true, CEVRSVP = true,
     WKPROF = true, WKQUERY = true, WRQUERY = true, WRRESULT = true, WRLEARN = true,
-    WORDER = true, WOREQ = true, WOERROR = true, WOQUERY = true }
+    WORDER = true, WORELAY = true, WOREQ = true, WOERROR = true, WOQUERY = true }
 
 function Communication:RegisterHandler(kind, callback)
     if not VALID_TYPES[kind] or type(callback) ~= "function" or self.handlers[kind] then

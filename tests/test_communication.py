@@ -26,6 +26,14 @@ lua.execute((Path(__file__).resolve().parents[1] / 'Communication.lua').read_tex
 lua.execute('''
 local c = OldKraken.Communication
 c.ready = true
+local relayed
+assert(c:RegisterHandler('WORELAY', function(sender, id, payload) relayed=payload end))
+assert(c:SendProtocol('WORELAY', string.rep('я', 100)))
+local relayParts={}; for i,entry in ipairs(c.queue) do relayParts[i]=entry.message end
+assert(#relayParts==3)
+for i=#relayParts,1,-1 do c:OnAddonMessage(c.PREFIX,relayParts[i],'GUILD','Relay') end
+assert(relayed==string.rep('я',100))
+for i=#c.queue,1,-1 do table.remove(c.queue,i) end
 local got
 assert(c:RegisterHandler('ANNOUNCE', function(sender, id, payload) got = {sender,id,payload} end))
 assert(not c:RegisterHandler('ANNOUNCE', function() end))

@@ -79,6 +79,19 @@ def tick(lua):
     lua.execute('clock=clock+4; for _,f in ipairs(timers) do f() end')
 
 
+def restart(lua):
+    lua.execute('''
+        saved=OldKraken.DB; OldKraken={DB=saved,UIStyle={Button=function() end,Window=function() end,Dropdown=function() end}}
+        function OldKraken:On() end; function OldKraken:Fire(...) notices[#notices+1]={...} end
+        OldKraken.Communication={queue={}}; function OldKraken.Communication:RegisterHandler(kind,fn) handlers[kind]=fn end
+        function OldKraken.Communication:SendProtocol(kind,payload) outgoing[#outgoing+1]={kind,payload}; return true end
+        frames={}; timers={}; handlers={}; outgoing={}
+    ''')
+    for source in SOURCES:
+        lua.execute(source)
+    lua.execute('for _,f in ipairs(frames) do if f.events.PLAYER_LOGIN then f.scripts.OnEvent(f,"PLAYER_LOGIN") end end')
+
+
 def flush(sender, recipient, repeat=False):
     outgoing = sender.globals().outgoing
     packets = [(outgoing[i][1], outgoing[i][2]) for i in range(1, len(outgoing)+1)]
@@ -188,8 +201,80 @@ def test_partial_recipe_scan_retains_records():
     lua.execute("assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].recipes['Tester Mon'][456])")
 
 
+def test_order_relay_and_owner_authority():
+    alice, bob, carol, dave = (client(name) for name in ('Alice', 'Bob', 'Carol', 'Dave'))
+    tick(alice); tick(bob)
+    alice.execute('''
+        OldKraken.WorkshopOrders:Show(); OldKrakenWorkshopOrdersFrame.item:SetText('Relay potion')
+        selectOption(OldKrakenOrderProfession,171); click('Опублікувати')
+        for k,v in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Alice Mon']) do orderKey=k; order=v end
+    ''')
+    tick(alice); flush(alice, bob)
+    bob.execute('''
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        for k,v in pairs(s.orderObserved) do orderKey=k; order=v end
+        assert(order and not order.relayed and s.orderRelays[orderKey])
+    ''')
+    bob.execute('clock=clock+40')
+    tick(carol); flush(carol, bob); tick(bob); flush(bob, carol, True)
+    carol.execute('''
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        for k,v in pairs(s.orderObserved) do orderKey=k; order=v end
+        assert(order and order.item=='Relay potion' and order.relayed and order.ownerRev==0)
+        assert(not s.orderRelays[orderKey])
+        OldKraken.WorkshopOrders:Show(orderKey); assert(OldKrakenWorkshopOrdersFrame.details.text:find('через гільдію'))
+        click('Запропонувати допомогу')
+        assert(s.orderIntents['Carol Mon'][orderKey])
+    ''')
+    restart(carol); restart(bob)
+    carol.execute('''
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; assert(s.orderObserved[orderKey].relayed)
+        assert(s.orderIntents['Carol Mon'][orderKey] and not s.orderRelays[orderKey])
+    ''')
+    bob.execute("assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderRelays[orderKey])")
+    tick(dave); flush(dave, carol); tick(carol); flush(carol, dave)
+    dave.execute("assert(next(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved)==nil)")
+    # A relay may carry a forged higher revision; the owner's next direct snapshot wins.
+    bob.execute('''
+        local p=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderRelays[orderKey]
+        local f=OldKraken.GroupFinder._unpackFields(p,80); f[3]='999'; fake=OldKraken.GroupFinder._pack(f)
+        f[7]='Forged item'; forged=OldKraken.GroupFinder._pack(f); direct=p
+    ''')
+    eve=client('Eve')
+    eve.globals().handlers['WORELAY']('Bob Mon','GUILD',bob.globals().forged)
+    eve.globals().handlers['WORDER']('Alice Mon','GUILD',bob.globals().direct)
+    eve.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o; for _,v in pairs(s.orderObserved) do o=v end; assert(o and o.item=='Relay potion' and o.rev==1 and not o.relayed)")
+    carol.globals().handlers['WORELAY']('Bob Mon', 'GUILD', bob.globals().fake)
+    carol.execute("assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved[orderKey].rev==999)")
+    carol.execute('clock=clock+180')
+    tick(carol); flush(carol, alice, True); tick(alice)
+    alice.execute('''
+        for _,packet in ipairs(outgoing) do if packet[1]=='WORDER' then
+            local f=OldKraken.GroupFinder._unpackFields(packet[2],80); f[3]='1000'; spoofedAck=OldKraken.GroupFinder._pack(f)
+        end end
+        assert(spoofedAck)
+    ''')
+    carol.globals().handlers['WORELAY']('Bob Mon','GUILD',alice.globals().spoofedAck)
+    carol.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; assert(s.orderObserved[orderKey].rev==1000 and s.orderIntents['Carol Mon'][orderKey])")
+    flush(alice, carol)
+    carol.execute('''
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o=s.orderObserved[orderKey]
+        assert(o.rev==2 and not o.relayed and o.candidates['Carol Mon'])
+        assert(not s.orderIntents['Carol Mon'][orderKey] and s.orderRelays[orderKey])
+    ''')
+    # A previously observed terminal state can be recovered while the owner is offline.
+    alice.execute("OldKraken.WorkshopOrders:Show(orderKey); local b=OldKrakenWorkshopOrdersFrame.cancel; b.scripts.OnClick(b); assert(order.status=='cancelled')")
+    tick(alice); flush(alice, bob)
+    bob.execute("assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved[orderKey].status=='cancelled')")
+    dave.execute("clock=clock+40; OldKraken.Communication:SendProtocol('WOQUERY','')")
+    bob.execute('clock=clock+40')
+    flush(dave,bob); tick(bob); flush(bob,dave)
+    dave.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o; for _,v in pairs(s.orderObserved) do o=v end; assert(o and o.status=='cancelled' and o.relayed)")
+
+
 if __name__ == '__main__':
     test_orders()
     test_incomplete_profession_scan()
     test_partial_recipe_scan_retains_records()
+    test_order_relay_and_owner_authority()
     print('Workshop order checks passed')
