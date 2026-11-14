@@ -219,11 +219,19 @@ local function refreshRequests()
         local group = Finder.groups[Finder.identity .. '\001' .. id]
         if group and not group.closed and not group.hidden then
             for name, applicantRole in pairs(requests) do
-                entries[#entries + 1] = {id=id, name=name, role=applicantRole, title=group.title}
+                local requestKey = id .. '\001' .. name
+                entries[#entries + 1] = {
+                    id=id, name=name, role=applicantRole, title=group.title,
+                    time=Finder.requestVersions[requestKey] or 0,
+                }
             end
         end
     end
-    table.sort(entries, function(a, b) if a.title ~= b.title then return a.title < b.title end return a.name < b.name end)
+    table.sort(entries, function(a, b)
+        if a.time ~= b.time then return a.time > b.time end
+        if a.title ~= b.title then return a.title < b.title end
+        return a.name < b.name
+    end)
     if requestOffset >= #entries then requestOffset = math.max(0, math.floor((#entries - 1) / REQUESTS_PER_PAGE) * REQUESTS_PER_PAGE) end
     requestsWindow.entries = entries
     requestsWindow.empty:SetShown(#entries == 0)

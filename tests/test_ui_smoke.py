@@ -4,7 +4,7 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {listeners = {}}; UIParent = {}; StaticPopupDialogs = {}; UISpecialFrames = {}
+OldKraken = {listeners = {}}; UIParent = {GetWidth=function() return 0 end}; StaticPopupDialogs = {}; UISpecialFrames = {}
 OldKraken.UIStyle = {
     Window = function() end,
     Button = function() end,
@@ -156,5 +156,14 @@ ui.rows[1].scripts.OnClick()
 assert(ui.applicationActionButton:IsShown() and ui.applicationActionButton.text == 'Відкликати')
 ui.applicationActionButton.scripts.OnClick()
 assert(f.pending[applicationKey] == nil and #ui.visible == 0)
+
+local olderGroup = addGroup('A request', 'quest', '', 'dps', 5, 1, 60)
+local newerGroup = addGroup('Z request', 'quest', '', 'dps', 5, 1, 60)
+assert(f:ReceiveJoin('Old Applicant', f._pack({f.identity, olderGroup.id, 'dps', 'apply', '100'})))
+assert(f:ReceiveJoin('New Applicant', f._pack({f.identity, newerGroup.id, 'dps', 'apply', '200'})))
+ui.requestsButton.scripts.OnClick()
+local requestWindow = OldKrakenRequestsFrame
+assert(requestWindow.entries[1].name == 'New Applicant')
+assert(requestWindow.entries[2].name == 'Old Applicant')
 ''')
 print('UI smoke checks passed')
