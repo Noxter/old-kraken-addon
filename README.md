@@ -142,6 +142,10 @@ tests/
 - `Core.lua` — життєвий цикл аддона та внутрішні події `OldKraken:On()` / `OldKraken:Fire()`.
 - `Communication.lua` — діагностичний транспорт обміну addon messages у каналі `GUILD`.
 - `GuildRoster.lua` — інтерфейс і робота з ігровим API ростера; налаштування читаються з `OldKraken.DB.settings.roster`.
+- `GroupFinder.lua` — модель оголошень, заявок, рішень і версійованої синхронізації.
+- `GroupFinderIntegration.lua` — прив’язка до гільдії/поточної групи, sender identity та збереження Group Finder у SavedVariables.
+- `GroupFinderUI.lua` — вікно гільдійного Group Finder.
+- `GroupFinderAPI.lua` — read-only діагностика нативного `C_LFGList`; не запускає пошук і не створює listing.
 - Існуючі таблиці `settings`, `roster` та `events` зберігаються під час ініціалізації. Нові поля додаються без очищення наявних даних.
 - Поточна схема БД — `2`. Поле `version` залишається версією аддона, а `schemaVersion` використовується для міграцій структури даних.
 
