@@ -600,6 +600,7 @@ local function createWindow()
     f.note=input(f,'Коментар',18,-475,360,'')
     local professionChoices={[0]='Оберіть професію'}; for id,name in pairs(professionNames) do professionChoices[id]=name end
     local professionMenu=dropdown(f,'OldKrakenOrderProfession',400,-492,170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v end)
+    f.professionMenu=professionMenu
     button(f,'Обрати рецепт',560,-438,160,function()
         if not OldKraken.WorkshopRecipes then showError(); return end
         OldKraken.WorkshopRecipes:Choose(function(r)
@@ -625,5 +626,17 @@ function Orders:Show(k)
     if k and get(k) then selected=k end
     if not window then window=createWindow() end
     window:Show(); refresh()
+end
+function Orders:SupportsProfession(id) return professionNames[id]~=nil end
+function Orders:ShowRecipe(r)
+    if type(r)~='table' or not professionNames[r.profession] or not int(r.recipe,1,100000000) or not int(r.item,0,100000000) then
+        print('Old Kraken: замовлення для цієї професії недоступне.'); return
+    end
+    self:Show(); if not active or not window then return end
+    profession=r.profession
+    UIDropDownMenu_SetText(window.professionMenu,professionNames[profession])
+    window.item:SetText(r.product~='' and r.product or r.name)
+    chosenRecipe={item=r.item,recipe=r.recipe}
+    window:Raise()
 end
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() changed() end)

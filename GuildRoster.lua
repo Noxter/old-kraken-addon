@@ -264,7 +264,8 @@ local function CreateRosterWindow(parent)
     CreateColumnHeader(frame, "РАНГ", "rank", 202, 130)
     CreateColumnHeader(frame, "РІВ.", "level", 336, 48)
     CreateColumnHeader(frame, "КЛАС", "class", 388, 100)
-    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 492, 180)
+    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 492, 100)
+    CreateColumnHeader(frame, "ПРОФЕСІЇ", nil, 594, 80)
     CreateColumnHeader(frame, "СТАТУС", nil, 676, 74)
     CreateColumnHeader(frame, "ДІЯ", nil, 754, 84)
 
@@ -307,7 +308,7 @@ local function CreateRow(index, parent)
         { x = 190, width = 130 },
         { x = 324, width = 48 },
         { x = 376, width = 100 },
-        { x = 480, width = 180 },
+        { x = 480, width = 100 },
         { x = 664, width = 74 },
     }
 
@@ -320,6 +321,28 @@ local function CreateRow(index, parent)
         cell:SetJustifyH("LEFT")
         cell:SetWordWrap(false)
         row.cells[cellIndex] = cell
+    end
+
+    row.professions = {}
+    for i=1,5 do
+        local icon=CreateFrame('Button',nil,row)
+        icon:SetSize(15,15); icon:SetPoint('LEFT',row,'LEFT',584+(i-1)*16,0)
+        icon.texture=icon:CreateTexture(nil,'ARTWORK'); icon.texture:SetAllPoints(icon)
+        icon:SetScript('OnClick',function(self)
+            if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
+                OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName,self.professionID)
+            end
+        end)
+        icon:SetScript('OnEnter',function(self)
+            if not GameTooltip or not self.professionID or not OldKraken.Workshop then return end
+            local name=OldKraken.Workshop:ProfessionInfo(self.professionID)
+            GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(name)
+            if self.native then GameTooltip:AddLine('Професія з ігрового ростера; рівень і рецепти невідомі.',1,1,1,true)
+            elseif self.rank then GameTooltip:AddLine('Рівень: '..tostring(self.rank)..'/'..tostring(self.maximum or '?'),1,1,1) end
+            GameTooltip:AddLine('Натисніть, щоб переглянути збережені рецепти.',0.6,0.9,1,true); GameTooltip:Show()
+        end)
+        icon:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        icon:Hide(); row.professions[i]=icon
     end
 
     local inviteButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
@@ -424,6 +447,15 @@ function Roster:Render()
         row.inviteButton.online = member.isOnline
         row.inviteButton:SetEnabled(member.isOnline)
         row.inviteButton:SetText(member.isOnline and "Інвайт" or "Офлайн")
+        local professions=OldKraken.Workshop and OldKraken.Workshop:GetMemberProfessions(member.name) or {}
+        for i,icon in ipairs(row.professions) do
+            local profession=professions[i]
+            if profession then
+                local _,texture=OldKraken.Workshop:ProfessionInfo(profession.id)
+                icon.professionID,icon.memberName,icon.native,icon.rank,icon.maximum=profession.id,member.name,profession.native,profession.rank,profession.maximum
+                icon.texture:SetTexture(texture); icon.texture:SetAlpha(profession.native and 0.55 or 1); icon:Show()
+            else icon.professionID=nil; icon:Hide() end
+        end
     end
 
     for index = #filteredData + 1, #rowFrames do
@@ -432,6 +464,7 @@ function Roster:Render()
 end
 
 function Roster:Load()
+    if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     local total = GetNumGuildMembers()
     total = tonumber(total) or 0
 
@@ -514,6 +547,11 @@ eventFrame:SetScript("OnEvent", function()
         Roster:Load()
     end
 end)
+if type(OldKraken.On)=='function' then
+    OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function()
+        if rosterFrame and rosterFrame:IsShown() then Roster:Render() end
+    end)
+end
 
 SLASH_OLDKRAKEN1 = "/okr"
 SLASH_OLDKRAKEN2 = "/oldkraken"

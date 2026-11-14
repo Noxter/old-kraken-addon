@@ -2,13 +2,14 @@
 local Recipes={}
 OldKraken.WorkshopRecipes=Recipes
 local comm,codec=OldKraken.Communication,OldKraken.GroupFinder
-local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування',[185]='Кулінарія',[129]='Перша допомога',[186]='Гірництво'}
+local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування',[185]='Кулінарія',[129]='Перша допомога',[186]='Гірництво',[182]='Травництво',[393]='Свіжування',[356]='Риболовля'}
 local active,identity,profile,scope,people=false,nil,nil,nil,{}
 local pendingLearned,learnAttempts={},{}
+local recipeCatalog,catalogCursor,catalogPending,catalogSize=nil,nil,false,0
 local scanPending,tradeOpen,sendQueue=false,false,{}
 local activeQuery,sequence,lastQuery,lastIncoming=nil,0,-60,{}
 local frame,rows,offset,resultSet=nil,{},0,{}
-local selectRecipe
+local selectRecipe,selectedEntry,viewOwner
 local recipeChanged=false
 local scanStatus='Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
 local render, matches
@@ -45,6 +46,9 @@ local function connect()
     local k=realm..'\001'..guild
     if active and identity==name and profile==k then return end
     local db=OldKraken.DB; if type(db.workshop)~='table' then db.workshop={} end
+    if type(db.workshop.recipeCatalog)~='table' then db.workshop.recipeCatalog={} end
+    recipeCatalog,catalogCursor,catalogPending=db.workshop.recipeCatalog,nil,true
+    catalogSize=count(recipeCatalog)
     if type(db.workshop.guilds)~='table' then db.workshop.guilds={} end
     if type(db.workshop.guilds[k])~='table' then db.workshop.guilds[k]={} end
     scope=db.workshop.guilds[k]; if type(scope.recipes)~='table' then scope.recipes={} end
@@ -106,6 +110,10 @@ local function recordLearned(r)
     if not previous and count(own)>=5000 then return false end
     if r.product=='' and type(previous)=='table' and previous.item==r.item and safeText(previous.product,0,120) then r.product=previous.product end
     own[r.recipe]=r
+    if recipeCatalog and (recipeCatalog[r.recipe] or catalogSize<10000) then
+        if not recipeCatalog[r.recipe] then catalogSize=catalogSize+1 end
+        recipeCatalog[r.recipe]={recipe=r.recipe,item=r.item,profession=r.profession,seen=r.seen,name=r.name,product=r.product}
+    end
     recipeChanged=true
     if pendingLearned[r.recipe] then
         if #sendQueue<100 then
@@ -178,6 +186,8 @@ local function scan()
 end
 matches=function(r,query)
     if not validRecord(r) then return false end
+    local profession=query:match('^prof:(%d+)$')
+    if profession then return r.profession==tonumber(profession) end
     local item=query:match('^item:(%d+)$')
     if item then return r.item==tonumber(item) end
     local recipe=query:match('^recipe:(%d+)$')
@@ -192,10 +202,11 @@ local function resolveProduct(r)
 end
 local function addCached(query)
     resultSet={}
+    local limit=query:match('^prof:%d+$') and 5000 or 500
     for name,items in pairs(people) do
         if safeText(name,1,128) and type(items)=='table' then
             for _,r in pairs(items) do
-                if count(resultSet)>=500 then return end
+                if count(resultSet)>=limit then return end
                 resolveProduct(r)
                 if matches(r,query) then resultSet[name..'\001'..r.recipe]={owner=name,record=r} end
             end
@@ -216,7 +227,7 @@ local function search(value)
     sequence=sequence+1
     local token=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
     if not comm:SendProtocol('WRQUERY',codec._pack({token,q})) then activeQuery=nil; changed(); print('Old Kraken: показано збережені результати; запит гільдії надіслати не вдалося.'); return false end
-    lastQuery=now; activeQuery={token=token,query=q,untilTime=now+120}; changed(); return true
+    lastQuery=now; activeQuery={token=token,query=q,untilTime=now+(q:match('^prof:%d+$') and 600 or 120)}; changed(); return true
 end
 comm:RegisterHandler('WRQUERY',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
@@ -228,11 +239,47 @@ comm:RegisterHandler('WRQUERY',function(sender,_,payload)
     local found={}
     for _,r in pairs(people[identity] or {}) do resolveProduct(r); if matches(r,f[2]) then found[#found+1]=r end end
     table.sort(found,function(a,b) return a.recipe<b.recipe end)
+    if f[2]:match('^prof:%d+$') then
+        local batch={sender,f[1]}; local n=0
+        local function flush()
+            if n==0 or #sendQueue>=100 then return false end
+            sendQueue[#sendQueue+1]={kind='WRBATCH',payload=codec._pack(batch),expires=now+600}; batch={sender,f[1]}; n=0; return true
+        end
+        for _,r in ipairs(found) do
+            local fields={r.recipe,r.item,r.profession,r.seen,r.name,r.product}
+            local candidate={unpack(batch)}; for _,value in ipairs(fields) do candidate[#candidate+1]=value end
+            if n>=16 or #codec._pack(candidate)>2300 then
+                if not flush() then break end
+                candidate={sender,f[1]}; for _,value in ipairs(fields) do candidate[#candidate+1]=value end
+            end
+            batch=candidate; n=n+1
+        end
+        flush(); return
+    end
     for i=1,math.min(#found,12) do
         if #sendQueue>=100 then break end
         local r=found[i]; local msg=codec._pack({sender,f[1],r.recipe,r.item,r.profession,r.seen,r.name,r.product})
         sendQueue[#sendQueue+1]={payload=msg,expires=now+120}
     end
+end)
+comm:RegisterHandler('WRBATCH',function(sender,_,payload)
+    if not active or not activeQuery or GetTime()>activeQuery.untilTime or not safeText(sender,1,128) or sender==identity then return end
+    local f=codec._unpackFields(payload,98)
+    if not f or #f<8 or (#f-2)%6~=0 or #f>98 or f[1]~=identity or f[2]~=activeQuery.token or not activeQuery.query:match('^prof:%d+$') then return end
+    if type(people[sender])~='table' then if count(people)>=1000 then return end; people[sender]={} end
+    local updated=false; local cachedCount=count(people[sender]); local resultCount=count(resultSet)
+    for i=3,#f,6 do
+        local r={recipe=tonumber(f[i]),item=tonumber(f[i+1]),profession=tonumber(f[i+2]),seen=tonumber(f[i+3]),name=f[i+4],product=f[i+5]}
+        if matches(r,activeQuery.query) and (people[sender][r.recipe] or cachedCount<5000) then
+            local old=people[sender][r.recipe]
+            if not old then cachedCount=cachedCount+1 end
+            if not validRecord(old) or old.seen<=r.seen then people[sender][r.recipe]=r end
+            local k=sender..'\001'..r.recipe
+            if resultSet[k] or resultCount<5000 then if not resultSet[k] then resultCount=resultCount+1 end; resultSet[k]={owner=sender,record=people[sender][r.recipe]} end
+            updated=true
+        end
+    end
+    if updated then changed(); recipeChanged=true end
 end)
 comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if not active or not activeQuery or GetTime()>activeQuery.untilTime or not safeText(sender,1,128) then return end
@@ -267,7 +314,7 @@ comm:RegisterHandler('WRLEARN',function(sender,_,payload)
 end)
 
 local events=CreateFrame('Frame')
-for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','TRADE_SKILL_SHOW','TRADE_SKILL_LIST_UPDATE','TRADE_SKILL_DATA_SOURCE_CHANGED','TRADE_SKILL_CLOSE','NEW_RECIPE_LEARNED'}) do pcall(events.RegisterEvent,events,event) end
+for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','TRADE_SKILL_SHOW','TRADE_SKILL_LIST_UPDATE','TRADE_SKILL_DATA_SOURCE_CHANGED','TRADE_SKILL_CLOSE','NEW_RECIPE_LEARNED','SPELLS_CHANGED'}) do pcall(events.RegisterEvent,events,event) end
 events:SetScript('OnEvent',function(_,event,recipeID)
     if event=='PLAYER_LOGIN' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect()
     elseif event=='NEW_RECIPE_LEARNED' then
@@ -276,6 +323,7 @@ events:SetScript('OnEvent',function(_,event,recipeID)
             pendingLearned[recipeID]=true; learnAttempts[recipeID]=0
             if tradeOpen then scanPending=true end
         end
+    elseif event=='SPELLS_CHANGED' then catalogCursor=nil; catalogPending=true
     elseif event=='TRADE_SKILL_CLOSE' then tradeOpen=false; scanPending=false
     elseif event=='TRADE_SKILL_SHOW' then tradeOpen=true; scanPending=true; learnAttempts={}
     elseif tradeOpen then scanPending=true end
@@ -289,6 +337,25 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
             scanStatus='Не вдалося зчитати власну професію. Відкрийте її та перевірте доступність API.'
             if frame and frame:IsShown() then frame.status:SetText(scanStatus) end
         end
+    end
+    if catalogPending and recipeCatalog then
+        local known=type(IsPlayerSpell)=='function' and IsPlayerSpell or (type(C_SpellBook)=='table' and type(C_SpellBook.IsSpellKnown)=='function' and C_SpellBook.IsSpellKnown)
+        if known then
+            local profs={}
+            for _=1,50 do
+                local id,r=next(recipeCatalog,catalogCursor); catalogCursor=id
+                if not id then catalogPending=false; break end
+                if validRecord(r) and not people[identity][r.recipe] then
+                    if profs[r.profession]==nil then profs[r.profession]=playerHasProfession(r.profession) end
+                    if profs[r.profession] then
+                        local ok,value=pcall(known,r.recipe)
+                        if ok and usable(value,'boolean') and value then
+                            recordLearned({recipe=r.recipe,item=r.item,profession=r.profession,seen=GetServerTime(),name=r.name,product=r.product})
+                        end
+                    end
+                end
+            end
+        else catalogPending=false end
     end
     for id in pairs(pendingLearned) do
         if not integer(id,1,100000000) then pendingLearned[id]=nil
@@ -317,10 +384,49 @@ local function onlineIndex()
         if success and usable(name,'string') and usable(online,'boolean') then result[name]=online end end
     return result
 end
+local function recipeIcon(r)
+    local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
+    if r.item>0 and type(getIcon)=='function' then
+        local ok,icon=pcall(getIcon,r.item); if ok and (usable(icon,'number') or usable(icon,'string')) then return icon end
+    end
+    if type(C_Spell)=='table' and type(C_Spell.GetSpellTexture)=='function' then
+        local ok,icon=pcall(C_Spell.GetSpellTexture,r.recipe); if ok and (usable(icon,'number') or usable(icon,'string')) then return icon end
+    end
+    return 134400
+end
+local function reagentText(r)
+    if type(C_TradeSkillUI)~='table' or type(C_TradeSkillUI.GetRecipeSchematic)~='function' then return 'Матеріали: дані гри недоступні.' end
+    local ok,schematic=pcall(C_TradeSkillUI.GetRecipeSchematic,r.recipe,false)
+    if not ok or not usable(schematic,'table') or not usable(schematic.reagentSlotSchematics,'table') then return 'Матеріали: гра не надала даних для цього рецепта.' end
+    local lines={}
+    for _,slot in ipairs(schematic.reagentSlotSchematics) do
+        if #lines>=8 then lines[#lines+1]='…'; break end
+        if usable(slot,'table') and usable(slot.reagents,'table') then
+            local reagent=slot.reagents[1]; local id=usable(reagent,'table') and reagent.itemID
+            if integer(id,1,100000000) then
+                local name; if type(GetItemInfo)=='function' then local got,value=pcall(GetItemInfo,id); if got and safeText(value,1,120) then name=value end end
+                local amount=integer(slot.quantityRequired,1,10000) and slot.quantityRequired or 1
+                local getCount=type(C_Item)=='table' and C_Item.GetItemCount or GetItemCount
+                local countText=''; if type(getCount)=='function' then local got,value=pcall(getCount,id); if got and integer(value,0,10000000) then countText=' · у сумках: '..value end end
+                lines[#lines+1]=(name or ('Предмет #'..id))..' ×'..amount..countText
+            end
+        end
+    end
+    return #lines>0 and ('Матеріали:\n'..table.concat(lines,'\n')) or 'Матеріали: гра не надала даних для цього рецепта.'
+end
 render=function()
     if not frame or not frame:IsShown() then return end
-    local online=onlineIndex(); local list={}
-    for _,entry in pairs(resultSet) do if validRecord(entry.record) then list[#list+1]=entry end end
+    local online=onlineIndex(); local list={}; local grouped={}
+    local byRecipe=not selectRecipe and not viewOwner and activeQuery and activeQuery.query:match('^prof:%d+$')
+    for _,entry in pairs(resultSet) do
+        if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) then
+            if byRecipe then
+                local id=entry.record.recipe; local old=grouped[id]
+                if not old or (online[entry.owner] and not online[old.owner]) or ((online[entry.owner] and true or false)==(online[old.owner] and true or false) and entry.record.seen>old.record.seen) then grouped[id]=entry end
+            else list[#list+1]=entry end
+        end
+    end
+    if byRecipe then for _,entry in pairs(grouped) do list[#list+1]=entry end end
     table.sort(list,function(a,b) if a.record.name~=b.record.name then return a.record.name<b.record.name end return a.owner<b.owner end)
     offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/12)-1)))
     frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/12)))
@@ -329,9 +435,26 @@ render=function()
         local entry=list[offset*12+i]
         if entry then
             local r=entry.record; row.entry=entry
-            row:SetText((r.product~='' and r.product or r.name)..' · '..entry.owner..' · '..professionNames[r.profession]..' · '..(online[entry.owner] and 'у грі' or 'офлайн / невідомо')..' · '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or ''))
+            row.icon:SetTexture(recipeIcon(r))
+            row.name:SetText(r.product~='' and r.product or r.name)
+            row.meta:SetText(entry.owner..' · '..professionNames[r.profession]..' · '..(online[entry.owner] and 'онлайн' or 'офлайн / невідомо'))
+            if selectedEntry and selectedEntry.owner==entry.owner and selectedEntry.record.recipe==r.recipe then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
-        else row.entry=nil; row:Hide() end
+        else row.entry=nil; row:UnlockHighlight(); row:Hide() end
+    end
+    local entry=selectedEntry; local r=entry and entry.record
+    frame.detailIcon:SetShown(r~=nil); frame.whisper:SetShown(r~=nil and entry.owner~=identity)
+    frame.order:SetShown(r~=nil and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false)
+    if r then
+        frame.detailIcon:SetTexture(recipeIcon(r))
+        frame.detailTitle:SetText(r.product~='' and r.product or r.name)
+        local masters=Recipes:FindMasters(r.item,r.recipe); local names={}
+        table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
+        for i=1,math.min(#masters,8) do local m=masters[i]; names[#names+1]=m.name..(online[m.name] and ' · онлайн' or ' · офлайн / невідомо') end
+        frame.detailInfo:SetText(professionNames[r.profession]..'\nЗбережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..'\n'..(#names>0 and table.concat(names,'\n') or 'Немає даних')..(#masters>8 and '\n…' or ''))
+        frame.detailReagents:SetText(reagentText(r))
+    else
+        frame.detailTitle:SetText('Оберіть рецепт'); frame.detailInfo:SetText('Перегляньте збережені рецепти або знайдіть предмет.'); frame.detailReagents:SetText('')
     end
 end
 local function createWindow()
@@ -340,23 +463,31 @@ local function createWindow()
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); OldKraken.UIStyle.Window(f)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук рецептів') end
     f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(f.query)
-    f.query:SetSize(460,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-48); f.query:SetAutoFocus(false)
+    f.query:SetSize(350,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-48); f.query:SetAutoFocus(false)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
-    f.query:SetScript('OnEnterPressed',function(self) if search(self:GetText() or '') then self:ClearFocus() end end)
-    button(f,'Знайти',500,-48,120,function() search(f.query:GetText() or '') end,'primary')
+    f.query:SetScript('OnEnterPressed',function(self) selectedEntry=nil; viewOwner=nil; if search(self:GetText() or '') then self:ClearFocus() end end)
+    button(f,'Знайти',385,-48,105,function() selectedEntry=nil; viewOwner=nil; search(f.query:GetText() or '') end,'primary')
     f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-78)
     for i=1,12 do
-        rows[i]=button(f,'',20,-102-(i-1)*26,770,function(self)
+        rows[i]=button(f,'',20,-102-(i-1)*26,465,function(self)
             if self.entry and selectRecipe then
                 local callback=selectRecipe; selectRecipe=nil; f:Hide(); callback(self.entry.record)
-            elseif self.entry and self.entry.owner~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(self.entry.owner) end
+            elseif self.entry then selectedEntry=self.entry; render() end
         end)
-        local text=rows[i]:GetFontString(); if text then text:ClearAllPoints(); text:SetPoint('LEFT',rows[i],'LEFT',8,0); text:SetPoint('RIGHT',rows[i],'RIGHT',-8,0); text:SetJustifyH('LEFT') end
+        rows[i].icon=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].icon:SetSize(21,21); rows[i].icon:SetPoint('LEFT',rows[i],'LEFT',3,0)
+        rows[i].name=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); rows[i].name:SetPoint('TOPLEFT',rows[i],'TOPLEFT',29,-1); rows[i].name:SetWidth(425); rows[i].name:SetJustifyH('LEFT'); rows[i].name:SetWordWrap(false)
+        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); rows[i].meta:SetPoint('BOTTOMLEFT',rows[i],'BOTTOMLEFT',29,1); rows[i].meta:SetWidth(425); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false)
     end
+    f.detailIcon=f:CreateTexture(nil,'ARTWORK'); f.detailIcon:SetSize(46,46); f.detailIcon:SetPoint('TOPLEFT',f,'TOPLEFT',505,-104)
+    f.detailTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.detailTitle:SetPoint('TOPLEFT',f,'TOPLEFT',560,-107); f.detailTitle:SetWidth(230); f.detailTitle:SetJustifyH('LEFT'); f.detailTitle:SetWordWrap(true)
+    f.detailInfo=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailInfo:SetPoint('TOPLEFT',f,'TOPLEFT',505,-160); f.detailInfo:SetWidth(280); f.detailInfo:SetJustifyH('LEFT'); f.detailInfo:SetJustifyV('TOP')
+    f.detailReagents=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailReagents:SetPoint('TOPLEFT',f,'TOPLEFT',505,-315); f.detailReagents:SetWidth(280); f.detailReagents:SetJustifyH('LEFT'); f.detailReagents:SetJustifyV('TOP')
+    f.whisper=button(f,'Шепнути',505,-442,110,function() if selectedEntry and selectedEntry.owner~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(selectedEntry.owner) end end)
+    f.order=button(f,'Замовити',625,-442,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
     button(f,'‹',20,-425,44,function() offset=offset-1; render() end)
     f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-430)
     button(f,'›',130,-425,44,function() offset=offset+1; render() end)
-    f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-465); f.status:SetWidth(760); f.status:SetJustifyH('LEFT')
+    f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-465); f.status:SetWidth(465); f.status:SetJustifyH('LEFT')
     f.status:SetText(scanStatus)
     f:SetScript('OnHide',function() selectRecipe=nil end)
     f:Hide(); return f
@@ -366,10 +497,44 @@ function Recipes:Show()
     if not frame then frame=createWindow() end
     frame:Show(); render()
 end
+function Recipes:GetProfessionSummaries()
+    local result,seen={},{}
+    for name,items in pairs(people) do
+        if safeText(name,1,128) and type(items)=='table' then
+            for _,r in pairs(items) do
+                if validRecord(r) then
+                    local summary=result[r.profession] or {recipes=0,members=0}; result[r.profession]=summary
+                    local id=r.profession..':'..r.recipe
+                    if not seen[id] then seen[id]=true; summary.recipes=summary.recipes+1 end
+                    local who=r.profession..':'..name
+                    if not seen[who] then seen[who]=true; summary.members=summary.members+1 end
+                end
+            end
+        end
+    end
+    return result
+end
+function Recipes:ShowProfession(profession)
+    if not professionNames[profession] then return end
+    self:Show(); if not active or not frame then return end
+    selectRecipe=nil; selectedEntry=nil; viewOwner=nil
+    frame.query:SetText('')
+    frame.status:SetText(professionNames[profession]..': збережені рецепти та відповіді онлайн-майстрів; список може бути неповним.')
+    search('prof:'..profession); frame:Raise(); render()
+end
+function Recipes:ShowMemberProfession(name,profession)
+    if not safeText(name,1,128) or not professionNames[profession] then return end
+    self:ShowProfession(profession)
+    if active and frame then
+        viewOwner=name; selectedEntry=nil
+        frame.status:SetText(name..' · '..professionNames[profession]..': збережені рецепти; список може бути неповним.')
+        render()
+    end
+end
 function Recipes:Choose(callback)
     if type(callback)~='function' then return end
     self:Show(); if not active or not frame then return end
-    selectRecipe=callback; resultSet={}; offset=0
+    selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; offset=0
     for name,items in pairs(people) do
         if safeText(name,1,128) and type(items)=='table' then
             for _,r in pairs(items) do
@@ -408,7 +573,7 @@ function Recipes:Knows(itemID,recipeID)
 end
 function Recipes:ShowMasters(itemID,recipeID)
     self:Show(); if not active or not frame then return end
-    selectRecipe=nil
+    selectRecipe=nil; selectedEntry=nil; viewOwner=nil
     local query=itemID>0 and ('item:'..itemID) or ('recipe:'..recipeID)
     frame.query:SetText(query); frame.status:SetText('Відомі майстри; дата показує останнє зчитування рецепта.')
     search(query); frame:Raise()
