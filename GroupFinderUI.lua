@@ -228,9 +228,9 @@ local function refreshRequests()
         if entry then
             row.name:SetText(playerLabel(entry.name) .. ' · ' .. roleLabel(entry.role))
             row.group:SetText(entry.title)
-            row.name:Show(); row.group:Show(); row.accept:Show(); row.reject:Show()
+            row.name:Show(); row.group:Show(); row.hover:Show(); row.accept:Show(); row.reject:Show()
         else
-            row.name:Hide(); row.group:Hide(); row.accept:Hide(); row.reject:Hide()
+            row.name:Hide(); row.group:Hide(); row.hover:Hide(); row.accept:Hide(); row.reject:Hide()
         end
     end
     requestsWindow.page:SetText(#entries == 0 and '' or (math.floor(requestOffset / REQUESTS_PER_PAGE) + 1) .. ' / ' .. math.ceil(#entries / REQUESTS_PER_PAGE))
@@ -242,12 +242,23 @@ local function showRequests()
     if not window or not window:IsShown() then return end
     refreshPeople()
     if not requestsWindow then
-        local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', UIParent, 'BasicFrameTemplateWithInset')
-        f:SetSize(510, 335); f:SetPoint('TOPRIGHT', window, 'TOPRIGHT', -24, -60)
+        local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', window, 'BasicFrameTemplateWithInset')
+        f:Hide()
+        f:SetSize(370, 335); f:SetPoint('TOPLEFT', window, 'TOPRIGHT', 8, 0)
         f:EnableMouse(true)
-        f:SetClampedToScreen(true); OldKraken.UIStyle.Window(f)
+        OldKraken.UIStyle.Window(f)
         f:SetFrameStrata('FULLSCREEN_DIALOG')
         f:SetFrameLevel(20)
+        f:SetScript('OnHide', function(self)
+            local saved = self.mainPosition
+            if not saved then return end
+            window:SetScale(saved.scale)
+            if not self.mainMoved then
+                window:ClearAllPoints()
+                window:SetPoint(saved.point, saved.relative, saved.relativePoint, saved.x, saved.y)
+            end
+            self.mainPosition = nil
+        end)
         if f.TitleText then f.TitleText:SetText('Old Kraken — Заявки до груп') end
         f.count = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
         f.count:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, -38)
@@ -258,11 +269,20 @@ local function showRequests()
             local row = {}
             local y = -62 - (i - 1) * 46
             row.name = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-            row.name:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y); row.name:SetSize(260, 18)
+            row.name:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y); row.name:SetSize(150, 18)
             row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
             row.group = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-            row.group:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y - 19); row.group:SetSize(260, 16)
+            row.group:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y - 19); row.group:SetSize(150, 16)
             row.group:SetJustifyH('LEFT'); row.group:SetWordWrap(false)
+            row.hover = CreateFrame('Frame', nil, f)
+            row.hover:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y); row.hover:SetSize(150, 38); row.hover:EnableMouse(true)
+            row.hover:SetScript('OnEnter', function(self)
+                if not row.entry then return end
+                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+                GameTooltip:SetText(playerLabel(row.entry.name) .. ' · ' .. roleLabel(row.entry.role))
+                GameTooltip:AddLine(row.entry.title, 1, 1, 1, true); GameTooltip:Show()
+            end)
+            row.hover:SetScript('OnLeave', function() GameTooltip:Hide() end)
             local function decide(accept)
                 local entry = row.entry
                 if not entry then return end
@@ -274,8 +294,8 @@ local function showRequests()
                     refreshRequests()
                 else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
             end
-            row.accept = button(f, 'Прийняти', 290, y - 3, 92, function() decide(true) end)
-            row.reject = button(f, 'Відхилити', 390, y - 3, 100, function() decide(false) end)
+            row.accept = button(f, 'Прийняти', 175, y - 3, 85, function() decide(true) end)
+            row.reject = button(f, 'Відхилити', 265, y - 3, 95, function() decide(false) end)
             f.rows[i] = row
         end
         button(f, '‹', 18, -300, 45, function() requestOffset=math.max(0, requestOffset-REQUESTS_PER_PAGE); refreshRequests() end)
@@ -283,6 +303,19 @@ local function showRequests()
         f.page = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
         f.page:SetPoint('TOPLEFT', f, 'TOPLEFT', 70, -304)
         requestsWindow = f
+    end
+    if not requestsWindow:IsShown() then
+        local point, relative, relativePoint, x, y = window:GetPoint(1)
+        requestsWindow.mainPosition = {point=point, relative=relative, relativePoint=relativePoint, x=x, y=y, scale=window:GetScale()}
+        requestsWindow.mainMoved = false
+        local totalWidth = 900 + 8 + 370
+        local screenWidth = UIParent:GetWidth()
+        if screenWidth and screenWidth > 0 then
+            local scale = math.min(window:GetScale(), screenWidth * 0.96 / totalWidth)
+            window:SetScale(scale)
+            window:ClearAllPoints()
+            window:SetPoint('CENTER', UIParent, 'CENTER', -(370 + 8) * scale / 2, 0)
+        end
     end
     requestsWindow:Show(); refreshRequests()
 end
@@ -496,7 +529,11 @@ end
 local function createWindow()
     local f = CreateFrame('Frame', 'OldKrakenGroupFinderFrame', UIParent, 'BasicFrameTemplateWithInset')
     f:SetSize(900, 590); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true)
-    f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving); f:SetScript('OnDragStop', f.StopMovingOrSizing)
+    f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving)
+    f:SetScript('OnDragStop', function(self)
+        self:StopMovingOrSizing()
+        if requestsWindow and requestsWindow:IsShown() then requestsWindow.mainMoved = true end
+    end)
     f:SetClampedToScreen(true); f:Hide()
     OldKraken.UIStyle.Window(f)
     f:HookScript('OnHide', function() if requestsWindow then requestsWindow:Hide() end end)
@@ -701,7 +738,7 @@ local function createWindow()
         function() return role end, function(value) role=value end)
     f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -313); f.roleLabel:SetText('Роль')
-    f.dungeonButton = dropdown(f, 550, -450, 280, dungeonOptions,
+    f.dungeonButton = dropdown(f, 460, -408, 260, dungeonOptions,
         function() return dungeon end, function(value)
             dungeon=value
             local recommended = dungeonLevels[value]
@@ -712,8 +749,8 @@ local function createWindow()
             if value ~= '' and f.titleBox:GetText() == '' then f.titleBox:SetText(dungeonLabels[value]) end
         end)
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -432); f.dungeonLabel:SetText('Підземелля')
-    f.createButton = button(f, 'Створити', 460, -408, 120, function()
+    f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
+    f.createButton = button(f, 'Створити', 550, -455, 150, function()
         local ok
         if editing then
             ok = Finder:Edit(editing, f.titleBox:GetText(), f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, category, dungeon)
