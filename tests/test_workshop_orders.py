@@ -6,12 +6,28 @@ SOURCES = [(ROOT / name).read_text(encoding='utf-8') for name in (
     'GroupFinder.lua', 'Workshop.lua', 'WorkshopRecipes.lua', 'WorkshopOrders.lua')]
 
 
-def client(name):
+def client(name, embedded=False):
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.globals().player = name
+    lua.globals().embedded = embedded
     lua.execute('''
         now=1700000000; clock=100; outgoing={}; timers={}; frames={}; notices={}; handlers={}
-        OldKraken={DB={settings={}},UIStyle={Button=function() end,Window=function() end,Dropdown=function() end,Input=function() end}}
+        OldKraken={DB={settings={}},UIStyle={
+            Colors={brandGold={0.88,0.69,0.32,1}},
+            Button=function(button,variant) button.variant=variant end,
+            Window=function() end,Dropdown=function() end,Input=function() end,
+        }}
+        if embedded then
+            OldKraken.UIHub={pages={}}
+            function OldKraken.UIHub:RegisterPage(key,title,shortcut,create)
+                self.pages[key]={title=title,create=create}
+            end
+            function OldKraken.UIHub:ShowPage(key)
+                local page=self.pages[key]; assert(page,'missing Hub page '..key)
+                if not page.frame then page.frame=page.create(CreateFrame('Frame')) end
+                self.currentPage=key; page.frame:Show(); return page.frame
+            end
+        end
         function OldKraken:On() end
         function OldKraken:Fire(...) notices[#notices+1]={...} end
         function print(...) end
@@ -39,6 +55,7 @@ def client(name):
             error('missing option '..tostring(value))
         end
         local methods={}
+        function methods:SetSize(width,height) self.width=width; self.height=height end
         function methods:SetScript(k,fn) self.scripts[k]=fn end
         function methods:RegisterEvent(event) self.events[event]=true end
         function methods:SetText(text) self.text=text; if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self) end end
@@ -115,6 +132,8 @@ def test_orders():
         assert(order and order.profession==171 and order.status=='open')
     ''')
     tick(alice); flush(alice, bob, True)
+
+
     bob.execute('''
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; for k,v in pairs(s.orderObserved) do orderKey=k; order=v end
         assert(order and order.item=='Manual potion')
@@ -288,8 +307,47 @@ def test_order_relay_and_owner_authority():
     dave.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o; for _,v in pairs(s.orderObserved) do o=v end; assert(o and o.status=='deleted')")
 
 
+def test_embedded_orders():
+    lua = client('Cara', embedded=True)
+    tick(lua)
+    lua.execute('''
+        OldKraken.WorkshopOrders:Show()
+        local workshop=OldKraken.UIHub.pages.workshop.frame
+        assert(OldKraken.UIHub.currentPage=='workshop')
+        assert(workshop.ordersView and workshop.ordersView:IsShown())
+        assert(workshop.ordersView.width==900 and workshop.ordersView.height==590)
+        assert(not workshop.professionView:IsShown())
+        assert(workshop.ordersTab.activeBar:IsShown() and not workshop.professionTab.activeBar:IsShown())
+        assert(not OldKrakenWorkshopOrdersFrame, 'embedded orders created a separate window')
+        assert(workshop.newOrder:IsShown())
+        assert(workshop.newOrder.parent==workshop.ordersView, 'new-order button is not attached to the orders panel')
+        assert(workshop.newOrder.variant=='primary', 'new-order action is not styled as primary')
+        workshop.professionTab.scripts.OnClick(workshop.professionTab)
+        assert(workshop.professionView:IsShown() and not workshop.ordersView:IsShown())
+        assert(workshop.professionTab.activeBar:IsShown() and not workshop.ordersTab.activeBar:IsShown())
+        workshop.ordersTab.scripts.OnClick(workshop.ordersTab)
+        assert(workshop.ordersView:IsShown() and not workshop.professionView:IsShown())
+        workshop.newOrder.scripts.OnClick(workshop.newOrder)
+        local form=workshop.ordersView.createForm
+        assert(form:IsShown(), 'new-order form did not open modally')
+        assert(form.width==720 and form.height==320, 'new-order form is not compact')
+        form.item:SetText('Embedded potion')
+        selectOption(OldKrakenOrderProfession,171)
+        click('Опублікувати')
+        assert(not form:IsShown(), 'successful order creation did not close the modal')
+        local orders=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Cara Mon']
+        local order; for _,entry in pairs(orders) do order=entry end
+        assert(order and order.item=='Embedded potion' and order.status=='open')
+        OldKraken.WorkshopOrders:Show(order.id)
+        assert(workshop.ordersView.details.text:find('Embedded potion'))
+        assert(not OldKrakenWorkshopOrdersFrame, 'opening an order escaped the Hub')
+    ''')
+    print('Embedded workshop order checks passed')
+
+
 if __name__ == '__main__':
     test_orders()
+    test_embedded_orders()
     test_incomplete_profession_scan()
     test_partial_recipe_scan_retains_records()
     test_order_relay_and_owner_authority()

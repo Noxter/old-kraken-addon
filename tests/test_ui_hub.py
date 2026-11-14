@@ -9,6 +9,7 @@ lua.execute('''
 OldKraken = {name = 'OldKraken', UIStyle = {
     Colors = {
         brandGold = {0.88, 0.69, 0.32, 1},
+        panelEdge = {0.33, 0.26, 0.14, 0.68},
         text = {0.93, 0.94, 0.96},
         mutedText = {0.63, 0.67, 0.73},
     },
@@ -89,6 +90,8 @@ assert(hub.buttons.roster.label.textColor[1] == OldKraken.UIStyle.Colors.brandGo
 assert(hub.buttons.groups.label.textColor[1] == OldKraken.UIStyle.Colors.text[1])
 assert(hub.brandMark.texture.texture == OldKraken.UIStyle.EmblemPath())
 assert(hub.brandMark.width == 52 and hub.brandMark.height == 52)
+assert(hub.contentTitle.text == 'Ростер' and hub.contentTitle.textColor[1] == OldKraken.UIStyle.Colors.brandGold[1])
+assert(hub.contentRule.width == 884 and hub.contentRule.color[1] == OldKraken.UIStyle.Colors.panelEdge[1])
 assert(hub.buttons.roster.point[5] ~= hub.buttons.groups.point[5])
 assert(hub.buttons.groups.point[5] ~= hub.buttons.events.point[5])
 
@@ -101,6 +104,7 @@ assert(not hub.frame:IsShown() and not built.groups:IsShown())
 hub:Toggle('events')
 assert(built.events:IsShown() and hub.frame:IsShown())
 assert(not built.groups:IsShown() and hub.currentPage == 'events')
+assert(hub.contentTitle.text == 'Івенти')
 ''')
 lua.execute('''
 OldKraken.Communication = {RegisterHandler=function() end}
@@ -125,14 +129,15 @@ OldKraken.DB.workshop.guilds['Test Realm\\001Guild'] = scope
 OldKraken.Workshop:Show()
 local workshopFrame = OldKraken.UIHub.pages.workshop.frame
 assert(workshopFrame.page.text == '1 / 1')
+assert(workshopFrame.width == 900 and workshopFrame.height == 590)
 assert(not workshopFrame.previousPage:IsShown() and not workshopFrame.nextPage:IsShown())
-assert(workshopFrame.page.point[4] == 351 and workshopFrame.page.width == 64)
+assert(workshopFrame.page.point[4] == 418 and workshopFrame.page.width == 64)
 
 for i=2,13 do scope.records['Tester Realm'].list[i] = {id=171,rank=i,maximum=75} end
 OldKraken.Workshop:Show()
 assert(workshopFrame.page.text == '1 / 2')
 assert(workshopFrame.previousPage:IsShown() and workshopFrame.nextPage:IsShown())
-assert(workshopFrame.previousPage.point[4] == 295 and workshopFrame.nextPage.point[4] == 427)
+assert(workshopFrame.previousPage.point[4] == 362 and workshopFrame.nextPage.point[4] == 494)
 workshopFrame.nextPage.scripts.OnClick()
-assert(workshopFrame.page.text == '2 / 2')
+assert(workshopFrame.page.text == '2 / 2', 'next page did not advance: '..tostring(workshopFrame.page.text))
 ''')

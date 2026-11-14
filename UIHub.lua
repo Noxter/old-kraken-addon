@@ -91,6 +91,13 @@ local function createWindow()
     Hub.content = CreateFrame('Frame', nil, frame)
     Hub.content:SetSize(920, 600)
     Hub.content:SetPoint('TOPLEFT', frame, 'TOPLEFT', 205, -42)
+    Hub.contentTitle = Hub.content:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
+    Hub.contentTitle:SetPoint('TOPLEFT', Hub.content, 'TOPLEFT', 18, -7)
+    Hub.contentTitle:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3])
+    Hub.contentRule = Hub.content:CreateTexture(nil, 'ARTWORK')
+    Hub.contentRule:SetPoint('TOPLEFT', Hub.content, 'TOPLEFT', 18, -28)
+    Hub.contentRule:SetSize(884, 1)
+    Hub.contentRule:SetColorTexture(unpack(colors.panelEdge))
     Hub.frame = frame
     for _, page in ipairs(Hub.pageOrder) do createPageButton(page) end
     return frame
@@ -109,7 +116,8 @@ function Hub:ShowPage(key)
     end
 
     self.currentPage = key
-    if self.frame.TitleText then self.frame.TitleText:SetText('Old Kraken — ' .. page.title) end
+    if self.frame.TitleText then self.frame.TitleText:SetText('Old Kraken') end
+    self.contentTitle:SetText(page.title)
     for _, item in ipairs(self.pageOrder) do
         if item.frame then item.frame:SetShown(item == page) end
     end
