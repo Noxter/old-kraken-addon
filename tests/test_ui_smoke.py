@@ -14,10 +14,19 @@ OldKraken.UIStyle = {
 function StaticPopup_Show() end
 function UIDropDownMenu_SetWidth() end
 function UIDropDownMenu_JustifyText() end
-function UIDropDownMenu_Initialize() end
+function UIDropDownMenu_Initialize(frame, initialize) frame.dropdownInit = initialize end
 function UIDropDownMenu_CreateInfo() return {} end
-function UIDropDownMenu_AddButton() end
+dropdownItems = {}
+function UIDropDownMenu_AddButton(info) dropdownItems[#dropdownItems+1] = info end
 function UIDropDownMenu_SetText() end
+function selectDropdown(frame, value)
+    dropdownItems = {}
+    frame.dropdownInit(frame, 1)
+    for _, item in ipairs(dropdownItems) do
+        if item.value == value then item.func(); return end
+    end
+    error('Dropdown option not found: ' .. tostring(value))
+end
 function OldKraken:On(name, fn) self.listeners[name] = fn end
 function print(...) end
 function GetServerTime() return 12345 end
@@ -27,13 +36,18 @@ function methods:SetText(v) self.text = v end
 function methods:GetText() return self.text or '' end
 function methods:Show() self.shown = true end
 function methods:Hide() self.shown = false end
+function methods:SetShown(value) self.shown = value end
 function methods:IsShown() return self.shown end
 function methods:GetStringHeight() return 0 end
 function methods:SetScript(name, fn) self.scripts[name] = fn end
 function methods:CreateFontString() return CreateFrame() end
 function methods:CreateTexture() return CreateFrame() end
 local meta = {__index=function(_, k) if k == 'TitleText' then return nil end; return methods[k] or function() end end}
-function CreateFrame() return setmetatable({scripts={}}, meta) end
+function CreateFrame(_, name)
+    local frame = setmetatable({scripts={}}, meta)
+    if name then _G[name] = frame end
+    return frame
+end
 ''')
 for name in ['GroupFinder.lua', 'GroupFinderUI.lua']:
     lua.execute((root / name).read_text(encoding='utf-8'))
@@ -43,9 +57,65 @@ f:Initialize('Tester', function() return true end)
 function f:GroupAlertsEnabled() return true end
 function f:SetGroupAlertsEnabled() return true end
 f.active = true
-assert(f:Create('Test', 'quest', 'Description', 5, 1, 60, 'dps'))
+
+local function addGroup(title, category, dungeon, role, maxSize, minLevel, maxLevel)
+    local ok, id = f:Create(title, category, 'Description', maxSize, minLevel, maxLevel, role, dungeon)
+    assert(ok)
+    return f.groups[f.identity .. '\\001' .. id]
+end
+local tankGroup = addGroup('Tank needs healer', 'dungeon', 'rfc', 'tank', 5, 20, 30)
+local healerGroup = addGroup('Healer has no open slot', 'dungeon', 'rfc', 'healer', 5, 20, 30)
+healerGroup.members = {'Tester', 'Tankmate', 'DPSone', 'DPStwo'}
+healerGroup.memberRoles = {Tankmate='tank', DPSone='dps', DPStwo='dps'}
+local fullDungeon = addGroup('Full dungeon', 'dungeon', 'rfc', 'tank', 5, 20, 30)
+fullDungeon.members = {'Tester', 'Healer', 'DPSone', 'DPStwo', 'DPSThree'}
+fullDungeon.memberRoles = {Healer='healer', DPSone='dps', DPStwo='dps', DPSThree='dps'}
+addGroup('Other dungeon', 'dungeon', 'wc', 'tank', 5, 20, 30)
+addGroup('Higher level dungeon', 'dungeon', 'rfc', 'tank', 5, 40, 50)
+addGroup('Full quest', 'quest', '', 'dps', 1, 20, 30)
 f:Show()
 assert(OldKraken.listeners.GROUP_FINDER_CHANGED)
 OldKraken.listeners.GROUP_FINDER_CHANGED()
+
+local ui = OldKrakenGroupFinderFrame
+local function hasTitle(title)
+    for _, entry in ipairs(ui.visible) do if entry.group.title == title then return true end end
+    return false
+end
+local function selectTab(key)
+    for _, item in ipairs(ui.tabs) do
+        if item.key == key then item.button.scripts.OnClick() return end
+    end
+    error('Tab not found: ' .. key)
+end
+local function filtersShown(expected)
+    for _, control in ipairs(ui.filterControls) do assert(control:IsShown() == expected) end
+end
+
+filtersShown(true)
+selectTab('mine'); filtersShown(false)
+selectTab('applications'); filtersShown(false)
+selectTab('create'); filtersShown(false)
+selectTab('all'); filtersShown(true)
+
+selectDropdown(ui.roleFilter, 'healer')
+assert(hasTitle('Tank needs healer'))
+assert(not hasTitle('Healer has no open slot'))
+assert(not hasTitle('Full dungeon'))
+assert(not hasTitle('Full quest'))
+
+selectDropdown(ui.roleFilter, '')
+selectDropdown(ui.categoryFilter, 'dungeon')
+assert(#ui.visible == 5)
+selectDropdown(ui.dungeonFilter, 'rfc')
+assert(#ui.visible == 4)
+selectDropdown(ui.freeFilter, true)
+assert(#ui.visible == 3 and not hasTitle('Full dungeon'))
+ui.levelFilter:SetText('25')
+ui.levelFilter.scripts.OnTextChanged()
+assert(#ui.visible == 2)
+ui.searchFilter:SetText('Tank needs healer')
+ui.searchFilter.scripts.OnTextChanged()
+assert(#ui.visible == 1 and hasTitle('Tank needs healer'))
 ''')
 print('UI smoke checks passed')
