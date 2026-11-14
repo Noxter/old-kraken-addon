@@ -185,16 +185,7 @@ local function input(parent, label, x, y, width, initial)
 end
 
 local function invitePlayer(name)
-    if not C_PartyInfo or type(C_PartyInfo.InviteUnit) ~= 'function' then
-        print('|cffff5555Old Kraken|r: API запрошення недоступний. Запросіть ' .. name .. ' вручну.')
-        return
-    end
-    local ok, result = pcall(C_PartyInfo.InviteUnit, name)
-    if ok and result ~= false then
-        print('|cff2ec4b6Old Kraken|r: Спроба запросити ' .. name .. ' у паті. Перевірте повідомлення гри.')
-    else
-        print('|cffff5555Old Kraken|r: Не вдалося запросити ' .. name .. '. Запросіть гравця вручну.')
-    end
+    return OldKraken:InvitePlayer(name)
 end
 
 local function refreshRequests()

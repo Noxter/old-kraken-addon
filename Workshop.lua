@@ -180,7 +180,7 @@ local function button(parent,text,x,y,width,callback)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(text); b:SetScript('OnClick',callback); return b
 end
 render=function()
-    if not frame or not frame:IsShown() then return end
+    if not frame then return end
     local online=onlineIndex(); local list={}
     for name,record in pairs(records) do
         if usable(name,'string') and type(record)=='table' and type(record.list)=='table' then
@@ -194,8 +194,11 @@ render=function()
         end
     end
     table.sort(list,function(a,b) if a.skill.id~=b.skill.id then return a.skill.name<b.skill.name end; return a.name<b.name end)
-    offset=math.min(offset,math.max(0,math.ceil(#list/12)-1))
-    frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/12)))
+    local pageCount=math.max(1,math.ceil(#list/12))
+    offset=math.min(offset,pageCount-1)
+    frame.page:SetText((offset+1)..' / '..pageCount)
+    frame.previousPage:SetShown(pageCount>1)
+    frame.nextPage:SetShown(pageCount>1)
     frame.count:SetText('Записів: '..#list..' · дата — останнє отримане оновлення'..(scanState==false and ' · власні дані не отримано' or ''))
     frame.online:SetText(onlineOnly and 'Лише онлайн: так' or 'Лише онлайн: ні')
     for i,row in ipairs(rows) do
@@ -209,11 +212,20 @@ render=function()
         else row.entry=nil; row:Hide() end
     end
 end
-local function createWindow()
-    local f=CreateFrame('Frame','OldKrakenWorkshopFrame',UIParent,'BasicFrameTemplateWithInset')
-    table.insert(UISpecialFrames,'OldKrakenWorkshopFrame'); f:SetSize(780,520); f:SetPoint('CENTER'); f:SetClampedToScreen(true)
-    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
-    OldKraken.UIStyle.Window(f); if f.TitleText then f.TitleText:SetText('Old Kraken — Майстерня') end
+local function createWindow(parent)
+    local f
+    if parent then
+        f=CreateFrame('Frame','OldKrakenWorkshopFrame',parent)
+    else
+        f=CreateFrame('Frame','OldKrakenWorkshopFrame',UIParent,'BasicFrameTemplateWithInset')
+    end
+    if not parent then
+        table.insert(UISpecialFrames,'OldKrakenWorkshopFrame')
+        f:SetMovable(true); f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
+        OldKraken.UIStyle.Window(f)
+    end
+    f:SetSize(780,520); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
+    if f.TitleText then f.TitleText:SetText('Old Kraken — Майстерня') end
     local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); search:SetSize(200,22); search:SetPoint('TOPLEFT',f,'TOPLEFT',20,-45); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) query=lower(self:GetText() or ''); offset=0; render() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
@@ -235,18 +247,31 @@ local function createWindow()
         end)
         local font=rows[i]:GetFontString(); if font then font:ClearAllPoints(); font:SetJustifyH('LEFT'); font:SetPoint('LEFT',rows[i],'LEFT',8,0); font:SetPoint('RIGHT',rows[i],'RIGHT',-8,0) end
     end
-    button(f,'‹',20,-430,44,function() offset=math.max(0,offset-1); render() end)
-    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',76,-435)
-    button(f,'›',130,-430,44,function() offset=offset+1; render() end)
+    f.previousPage=button(f,'‹',295,-430,44,function() offset=math.max(0,offset-1); render() end)
+    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+    f.page:SetPoint('TOPLEFT',f,'TOPLEFT',351,-435); f.page:SetWidth(64); f.page:SetJustifyH('CENTER')
+    f.nextPage=button(f,'›',427,-430,44,function() offset=offset+1; render() end)
     button(f,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
     button(f,'Пошук рецептів',175,-472,155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
     local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',345,-478); note:SetText('Відкрийте професії, щоб зчитати рецепти.')
+    f:HookScript('OnShow',render)
     f:Hide(); return f
 end
 function Workshop:Show()
     connect(); if not active then print('Old Kraken: майстерня доступна після входу до гільдії.'); return end
-    if not frame then frame=createWindow() end
-    frame:Show(); render()
+    if OldKraken.UIHub then
+        OldKraken.UIHub:ShowPage('workshop')
+    else
+        if not frame then frame=createWindow() end
+        frame:Show()
+    end
+    render()
+end
+if OldKraken.UIHub then
+    OldKraken.UIHub:RegisterPage('workshop','Майстерня','04',function(parent)
+        if not frame then frame=createWindow(parent) end
+        return frame
+    end)
 end
 function Workshop:HasProfession(id)
     if not active or not identity then return false end

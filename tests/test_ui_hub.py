@@ -6,17 +6,28 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {UIStyle = {Window=function() end, Panel=function() end, Button=function() end}}
+OldKraken = {UIStyle = {Window=function() end, Panel=function() end, Button=function() end, Dropdown=function() end}}
 UIParent = {}
 UISpecialFrames = {}
+function UIDropDownMenu_SetWidth() end
+function UIDropDownMenu_SetText() end
+function UIDropDownMenu_Initialize() end
 local methods = {}
 function methods:SetSize(width, height) self.width, self.height = width, height end
 function methods:SetPoint(...) self.point = {...} end
+function methods:SetWidth(value) self.width = value end
+function methods:SetJustifyH(value) self.justifyH = value end
+function methods:ClearAllPoints() self.point = nil end
 function methods:SetText(value) self.text = value end
 function methods:SetTextColor(...) self.textColor = {...} end
 function methods:SetColorTexture(...) end
-function methods:SetShown(value) self.shown = value end
-function methods:Show() self.shown = true end
+function methods:SetShown(value) if value then self:Show() else self:Hide() end end
+function methods:Show()
+    if self.shown then return end
+    self.shown = true
+    if self.scripts.OnShow then self.scripts.OnShow(self) end
+    for _, callback in ipairs(self.hooks and self.hooks.OnShow or {}) do callback(self) end
+end
 function methods:Hide()
     self.shown = false
     if self.scripts.OnHide then self.scripts.OnHide(self) end
@@ -26,10 +37,8 @@ end
 function methods:IsShown() return self.shown == true end
 function methods:SetScript(name, callback) self.scripts[name] = callback end
 function methods:HookScript(name, callback)
-    local hooks = rawget(self, 'hooks') or {}
-    hooks[name] = hooks[name] or {}
-    table.insert(hooks[name], callback)
-    rawset(self, 'hooks', hooks)
+    self.hooks[name] = self.hooks[name] or {}
+    table.insert(self.hooks[name], callback)
 end
 function methods:CreateFontString() return CreateFrame() end
 function methods:CreateTexture() return CreateFrame() end
@@ -38,7 +47,7 @@ local meta = {__index=function(_, key)
     return methods[key] or function() end
 end}
 function CreateFrame(_, name, parent)
-    local frame = setmetatable({scripts = {}, parent = parent}, meta)
+    local frame = setmetatable({scripts = {}, hooks = {}, parent = parent, shown = false}, meta)
     if name then _G[name] = frame end
     return frame
 end
@@ -78,4 +87,38 @@ assert(not hub.frame:IsShown() and not built.groups:IsShown())
 hub:Toggle('events')
 assert(built.events:IsShown() and hub.frame:IsShown())
 assert(not built.groups:IsShown() and hub.currentPage == 'events')
+''')
+lua.execute('''
+OldKraken.Communication = {RegisterHandler=function() end}
+function OldKraken.Communication:SendProtocol() return true end
+OldKraken.GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end}
+function OldKraken:On() end
+''')
+lua.execute((root / 'Workshop.lua').read_text(encoding='utf-8'))
+lua.execute('''
+local workshop = OldKraken.UIHub.pages.workshop
+assert(workshop and workshop.title == 'Майстерня' and workshop.shortcut == '04')
+assert(OldKraken.UIHub.buttons.workshop and OldKraken.UIHub.buttons.workshop.point[5] == -286)
+
+function UnitName() return 'Tester', 'Realm' end
+function GetGuildInfo() return 'Guild' end
+function GetRealmName() return 'Test Realm' end
+function GetServerTime() return 2000000000 end
+function date() return '01.01.2033 00:00' end
+OldKraken.DB = {workshop={guilds={}}}
+local scope = {records={['Tester Realm']={timestamp=GetServerTime(),list={{id=171,rank=1,maximum=75}}}}}
+OldKraken.DB.workshop.guilds['Test Realm\\001Guild'] = scope
+OldKraken.Workshop:Show()
+local workshopFrame = OldKraken.UIHub.pages.workshop.frame
+assert(workshopFrame.page.text == '1 / 1')
+assert(not workshopFrame.previousPage:IsShown() and not workshopFrame.nextPage:IsShown())
+assert(workshopFrame.page.point[4] == 351 and workshopFrame.page.width == 64)
+
+for i=2,13 do scope.records['Tester Realm'].list[i] = {id=171,rank=i,maximum=75} end
+OldKraken.Workshop:Show()
+assert(workshopFrame.page.text == '1 / 2')
+assert(workshopFrame.previousPage:IsShown() and workshopFrame.nextPage:IsShown())
+assert(workshopFrame.previousPage.point[4] == 295 and workshopFrame.nextPage.point[4] == 427)
+workshopFrame.nextPage.scripts.OnClick()
+assert(workshopFrame.page.text == '2 / 2')
 ''')
