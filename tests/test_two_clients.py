@@ -63,7 +63,7 @@ def reload(client):
     client.execute('for _,f in ipairs(frames) do if f.events.PLAYER_LOGIN then f.handler(f,"PLAYER_LOGIN") end end')
 
 
-alice.execute("assert(OldKraken.GroupFinder:Create('Підземелля','dungeon','Тест',5)); OldKraken.GroupFinder:Changed()")
+alice.execute("assert(OldKraken.GroupFinder:Create('Підземелля','dungeon','Тест',5,1,60,'tank')); OldKraken.GroupFinder:Changed()")
 flush(alice, [])  # Simulate a lost initial announcement.
 bob.execute('assert(OldKraken.Communication:RequestSync())')
 flush(bob, [alice])
@@ -81,18 +81,18 @@ alice.execute('''
     assert(OldKraken.GroupFinder:Decide(group.id, 'Bob Other Realm', true))
 ''')
 flush(alice, [bob])
-bob.execute("assert(OldKraken.GroupFinder.pending['Alice Moon'..'\\001'..group.id] == 'accept')")
+bob.execute("assert(OldKraken.GroupFinder.pending['Alice Moon'..'\\001'..group.id] == nil)")
 alice.execute('assert(OldKraken.GroupFinder:Cancel(group.id))')
 flush(alice, [bob])
 bob.execute("assert(OldKraken.GroupFinder.groups['Alice Moon'..'\\001'..group.id].closed)")
 
 # Reject while the applicant is offline, drop the response, restart both peers,
 # and recover the versioned decision through a new synchronization request.
-alice.execute("assert(OldKraken.GroupFinder:Create('Second','quest','',5)); OldKraken.GroupFinder:Changed()")
+alice.execute("assert(OldKraken.GroupFinder:Create('Second','quest','',5,1,60,'dps')); OldKraken.GroupFinder:Changed()")
 flush(alice, [bob])
 bob.execute('''
   for _, g in pairs(OldKraken.GroupFinder.groups) do if g.title=='Second' then second=g end end
-  assert(second and OldKraken.GroupFinder:Apply(second.owner, second.id, ''))
+  assert(second and OldKraken.GroupFinder:Apply(second.owner, second.id, 'dps'))
   OldKraken.GroupFinder:Changed()
 ''')
 flush(bob, [alice])
