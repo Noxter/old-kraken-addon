@@ -8,6 +8,7 @@ lua.execute('''
 local model = OldKraken.GroupFinder
 local sent = {}
 model:Initialize('Alice-Realm', function(kind, payload) sent[#sent+1] = {kind,payload}; return true end)
+assert(model.Edit == nil)
 assert(model:Create('Печера', 'dungeon', 'Рівень 20+', 5, 1, 60, 'tank'))
 local group
 for _, g in pairs(model.groups) do group = g end
@@ -54,5 +55,10 @@ assert(not clone:ReceiveGroup('Alice-Realm', snapshot))
 now = 4000
 clone:Prune()
 assert(clone.groups['Alice-Realm' .. '\\001' .. group.id] == nil)
+assert(model:Create('Нова група', 'dungeon', 'Інше підземелля', 5, 25, 35, 'healer', 'wc'))
+local replacement
+for _, g in pairs(model.groups) do if g.title == 'Нова група' then replacement = g end end
+assert(group.closed and replacement and replacement.id ~= group.id)
+assert(replacement.dungeon == 'wc' and replacement.title == 'Нова група')
 ''')
 print('Group model checks passed')

@@ -56,6 +56,7 @@ local f = OldKraken.GroupFinder
 f:Initialize('Tester', function() return true end)
 function f:GroupAlertsEnabled() return true end
 function f:SetGroupAlertsEnabled() return true end
+function f:Changed() end
 f.active = true
 
 local function addGroup(title, category, dungeon, role, maxSize, minLevel, maxLevel)
@@ -117,5 +118,17 @@ assert(#ui.visible == 2)
 ui.searchFilter:SetText('Tank needs healer')
 ui.searchFilter.scripts.OnTextChanged()
 assert(#ui.visible == 1 and hasTitle('Tank needs healer'))
+
+selectTab('create')
+ui.titleBox:SetText('Created from form')
+ui.descriptionBox:SetText('Fresh listing')
+ui.maxBox:SetText('5')
+ui.minBox:SetText('20')
+ui.maxLevelBox:SetText('30')
+selectDropdown(ui.dungeonButton, 'rfc')
+ui.createButton.scripts.OnClick()
+local created
+for _, group in pairs(f.groups) do if group.title == 'Created from form' then created = group end end
+assert(created and created.dungeon == 'rfc' and created.description == 'Fresh listing')
 ''')
 print('UI smoke checks passed')

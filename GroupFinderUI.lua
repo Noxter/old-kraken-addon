@@ -3,7 +3,7 @@ local Finder = OldKraken.GroupFinder
 local window, selected, requestsWindow
 local groupAlert
 local tab = 'all'
-local offset, editing = 0, nil
+local offset = 0
 local requestOffset = 0
 local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 5, 3
 local category, role = 'dungeon', 'dps'
@@ -530,7 +530,7 @@ local function refresh()
         if tab == 'create' then box:Show(); box.label:Show() else box:Hide(); box.label:Hide() end
     end
     if tab == 'create' then
-        window.createButton:SetText(editing and 'Зберегти' or 'Створити')
+        window.createButton:SetText('Створити')
         window.maxBox.label:SetText(category == 'dungeon' and 'Місць (5)' or 'Місць')
         window.createButton:Show(); window.categoryButton:Show(); window.categoryLabel:Show()
     else window.createButton:Hide(); window.categoryButton:Hide(); window.categoryLabel:Hide() end
@@ -553,7 +553,7 @@ local function createWindow()
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
     f.tabs = {}
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
-        local b = button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; editing=nil; offset=0; requestOffset=0; refresh() end)
+        local b = button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; offset=0; requestOffset=0; refresh() end)
         f.tabs[#f.tabs + 1] = {key=item[2], button=b}
     end
     f.alertButton = button(f, 'Сповіщення', 700, -32, 175, function()
@@ -772,13 +772,8 @@ local function createWindow()
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
     f.createButton = button(f, 'Створити', 550, -455, 150, function()
-        local ok
-        if editing then
-            ok = Finder:Edit(editing, f.titleBox:GetText(), f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, category, dungeon)
-        else
-            ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
-        end
-        if ok then Finder:Changed(); editing=nil; tab='mine'; refresh()
+        local ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
+        if ok then Finder:Changed(); tab='mine'; refresh()
         else print('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.') end
     end)
     f.applyButton = button(f, 'Подати заявку', 550, -385, 140, function()
@@ -863,7 +858,7 @@ local function showAlert(message, kind, key)
             local alertKind = self.kind
             self:Hide()
             if target and Finder.groups[target] then
-                tab, selected, editing, offset, requestOffset = alertKind == 'decision' and 'applications' or 'mine', target, nil, 0, 0
+                tab, selected, offset, requestOffset = alertKind == 'decision' and 'applications' or 'mine', target, 0, 0
             end
             Finder:Show()
         end)

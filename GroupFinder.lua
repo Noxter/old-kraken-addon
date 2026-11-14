@@ -385,28 +385,6 @@ function Finder:Delete(id)
     return true
 end
 
-function Finder:Edit(id, title, description, maxSize, minLevel, maxLevel, role, category, dungeon)
-    local group = self.groups[self.identity .. '\001' .. id]
-    maxSize, minLevel, maxLevel = tonumber(maxSize), tonumber(minLevel), tonumber(maxLevel)
-    dungeon = dungeon or (group and group.dungeon) or ''
-    if category == 'dungeon' and (maxSize ~= 5 or not group or
-        not self:RoleAvailable({category='dungeon', maxSize=5, members=group.members, role=group.role, memberRoles=group.memberRoles}, role, self.identity)) then return false end
-    if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and dungeon ~= '') then return false end
-    if role == '' or not group or group.closed or not validText(title, 1, 100) or not validText(description, 0, 500)
-        or not maxSize or maxSize % 1 ~= 0 or maxSize < #group.members or maxSize > 200
-        or not minLevel or not maxLevel or minLevel % 1 ~= 0 or maxLevel % 1 ~= 0
-        or minLevel < 1 or maxLevel > 255 or minLevel > maxLevel or not roles[role] or not categories[category] then return false end
-    local old = {group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.revision, group.category, group.dungeon or ''}
-    group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.category, group.dungeon =
-        title, description, maxSize, minLevel, maxLevel, role, category, dungeon
-    group.revision = group.revision + 1
-    if not self.send('UPDATE', self:EncodeGroup(group)) then
-        group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.revision, group.category, group.dungeon = unpack(old)
-        return false
-    end
-    return true
-end
-
 function Finder:RemoveMember(id, member)
     local group = self.groups[self.identity .. '\001' .. id]
     if not group or group.closed then return false end
