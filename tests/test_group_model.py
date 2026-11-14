@@ -8,7 +8,7 @@ lua.execute('''
 local model = OldKraken.GroupFinder
 local sent = {}
 model:Initialize('Alice-Realm', function(kind, payload) sent[#sent+1] = {kind,payload}; return true end)
-assert(model:Create('Печера', 'dungeon', 'Рівень 20+', 5))
+assert(model:Create('Печера', 'dungeon', 'Рівень 20+', 5, 1, 60, 'tank'))
 local group
 for _, g in pairs(model.groups) do group = g end
 assert(group and group.owner == 'Alice-Realm')
@@ -29,7 +29,7 @@ assert(not model:ReceiveJoin('Eve-Realm', model._pack({'Alice-Realm', group.id, 
 assert(model:Decide(group.id, 'Bob-Realm', true))
 assert(#group.members == 2 and group.revision == 2)
 assert(clone:ReceiveGroup('Alice-Realm', model:EncodeGroup(group)))
-assert(clone.pending['Alice-Realm' .. '\\001' .. group.id] == 'accept')
+assert(clone.pending['Alice-Realm' .. '\\001' .. group.id] == nil)
 assert(not clone:ReceiveGroup('Mallory-Realm', model:EncodeGroup(group)))
 assert(not model:ReceiveJoin('Mallory-Realm', 'garbage'))
 local blocked, attempts = true, 0

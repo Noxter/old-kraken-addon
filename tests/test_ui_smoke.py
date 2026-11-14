@@ -4,7 +4,7 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {listeners = {}}; UIParent = {}; StaticPopupDialogs = {}
+OldKraken = {listeners = {}}; UIParent = {}; StaticPopupDialogs = {}; UISpecialFrames = {}
 OldKraken.UIStyle = {
     Window = function() end,
     Button = function() end,
@@ -43,7 +43,7 @@ f:Initialize('Tester', function() return true end)
 function f:GroupAlertsEnabled() return true end
 function f:SetGroupAlertsEnabled() return true end
 f.active = true
-assert(f:Create('Test', 'quest', 'Description', 5))
+assert(f:Create('Test', 'quest', 'Description', 5, 1, 60, 'dps'))
 f:Show()
 assert(OldKraken.listeners.GROUP_FINDER_CHANGED)
 OldKraken.listeners.GROUP_FINDER_CHANGED()

@@ -28,7 +28,7 @@ local f=OldKraken.GroupFinder
 -- Owned groups migrate; ambiguous short-name application data is discarded.
 local profile='CAMWOW EU4 Realm 5 PvE'..'\\001'..'Guild'..'\\001'..'Hok'
 local old=setmetatable({}, {__index=f}); old:Initialize('Hok', function() return true end)
-assert(old:Create('Old group','dungeon','',5))
+assert(old:Create('Old group','dungeon','',5,1,60,'tank'))
 local oldGroup; for _,g in pairs(old.groups) do oldGroup=g end
 oldGroup.members={'Hok','Noxter','Hok Moon'}
 OldKraken.DB.groupFinder[profile]={records={old:EncodeGroup(oldGroup)},pending={legacy='pending'}}
@@ -46,7 +46,7 @@ assert(f.groups['Hok Mon'..'\\001'..oldGroup.id].revision == forged)
 assert(OldKraken.DB.groupFinder[profile].legacyShortNames == nil)
 assert(next(f.pending) == nil)
 local other=setmetatable({}, {__index=f}); other:Initialize('Noxter Moon',function() return true end)
-assert(other:Create('Remote group','quest','',5))
+assert(other:Create('Remote group','quest','',5,1,60,'dps'))
 local group; for _,g in pairs(other.groups) do group=g end
 local payload=other:EncodeGroup(group)
 handlers.ANNOUNCE('Noxter Forged','1',payload)
@@ -55,7 +55,7 @@ handlers.ANNOUNCE('Noxter Moon','2',payload)
 assert(f.groups['Noxter Moon'..'\\001'..group.id])
 -- Two distinct characters with the same given name are not conflated.
 local twin=setmetatable({}, {__index=f}); twin:Initialize('Hok Moon',function() return true end)
-assert(twin:Create('Twin group','quest','',5))
+assert(twin:Create('Twin group','quest','',5,1,60,'dps'))
 local twinGroup; for _,g in pairs(twin.groups) do twinGroup=g end
 handlers.ANNOUNCE('Hok Moon','3',twin:EncodeGroup(twinGroup))
 assert(f.groups['Hok Moon'..'\\001'..twinGroup.id])
