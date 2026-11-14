@@ -47,7 +47,7 @@ end
 
 local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = true,
     UPDATE = true, QUERY = true, SYNC = true, BUMP = true,
-    CEVENT = true, CVNEW = true, CEVQUERY = true, CEVRSVP = true }
+    CEVENT = true, CVNEW = true, CVCANCEL = true, CEVQUERY = true, CEVRSVP = true }
 
 function Communication:RegisterHandler(kind, callback)
     if not VALID_TYPES[kind] or type(callback) ~= "function" or self.handlers[kind] then

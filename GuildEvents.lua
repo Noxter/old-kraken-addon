@@ -8,7 +8,7 @@ local statuses = {pending='Очікує', accepted='Прийнято', reserve='
 local statusCode = {pending='P',accepted='A',reserve='R',rejected='D'}
 local codeStatus = {P='pending',A='accepted',R='reserve',D='rejected'}
 local active, identity, profile, storage = false, nil, nil, nil
-local events, dirty, intents, newDirty = {}, {}, {}, {}
+local events, dirty, intents, newDirty, relayDirty = {}, {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
 local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
 local page = 1
@@ -42,8 +42,10 @@ local function character()
 end
 local function save()
     if not storage then return end
-    storage.owned, storage.intents, storage.sequence = {}, {}, sequence
-    for key, e in pairs(events) do if e.owner == identity then storage.owned[key] = e end end
+    storage.owned, storage.observed, storage.intents, storage.sequence = {}, {}, {}, sequence
+    for key, e in pairs(events) do
+        if e.owner == identity then storage.owned[key] = e else storage.observed[key] = e end
+    end
     for key, intent in pairs(intents) do storage.intents[key] = intent end
 end
 local function encode(e)
@@ -56,12 +58,12 @@ local function encode(e)
     f[#f+1]=table.concat(codes)
     return codec._pack(f)
 end
-local function decode(sender, payload)
+local function decode(sender, payload, isRelay)
     local f = codec._unpackFields(payload, 212)
     if not f or #f < 10 then return nil end
     local id, owner, rev, when, kind, size, cancelled, title, description, n = unpack(f,1,10)
     rev, when, size, n = tonumber(rev), tonumber(when), tonumber(size), tonumber(n)
-    if not validID(id) or not validText(owner,1,128) or sender ~= owner
+    if not validID(id) or not validText(owner,1,128) or (not isRelay and sender ~= owner)
         or not rev or rev % 1 ~= 0 or rev < 1 or rev > 2147483647
         or not when or when % 1 ~= 0 or when < GetServerTime()-172800 or when > GetServerTime()+31622400
         or not kinds[kind] or not size or size % 1 ~= 0 or size < 2 or size > 40
@@ -84,11 +86,21 @@ local function decode(sender, payload)
 end
 local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
 
-local function receiveEvent(sender, _, payload, isAnnouncement)
+local function receiveEvent(sender, _, payload, isAnnouncement, isRelay)
     if not active then return end
-    local e = decode(sender, payload); if not e then return end
+    local e = decode(sender, payload, isRelay); if not e then return end
     local key = eventKey(e.owner,e.id)
     local old = events[key]
+    if isRelay then
+        if not e.cancelled or not old or old.owner==identity or old.cancelled or e.rev<=old.rev
+            or old.when~=e.when or old.kind~=e.kind or old.title~=e.title
+            or old.description~=e.description or old.size~=e.size or old.activity~=e.activity then return end
+        e.relayed=true
+    elseif old and old.relayed then
+        -- A direct owner snapshot overrides a cancellation received from a peer.
+        if not e.cancelled then storage.cancelledSeen[key]=nil end
+        old=nil
+    end
     if old and old.rev > e.rev then return end
     if old and old.rev == e.rev then
         local intent = intents[key]
@@ -97,9 +109,12 @@ local function receiveEvent(sender, _, payload, isAnnouncement)
         end
         return
     end
-    if not old and count(events) >= 100 then return end
+    if not old and not events[key] and count(events) >= 100 then return end
     if e.owner == identity and old then e.versions = old.versions end
     events[key] = e
+    if not isRelay and e.owner~=identity then
+        if e.cancelled then storage.relays[key]=payload else storage.relays[key]=nil; relayDirty[key]=nil end
+    end
     local intent = intents[key]
     if intent and ((intent.role == 'leave' and not e.people[identity]) or (intent.role ~= 'leave' and e.people[identity] == intent.role and e.statuses[identity] ~= 'rejected') or e.cancelled) then intents[key] = nil end
     if e.cancelled and e.owner~=identity and e.people[identity] and e.statuses[identity]~='rejected' and not storage.cancelledSeen[key] then
@@ -115,6 +130,7 @@ local function receiveEvent(sender, _, payload, isAnnouncement)
 end
 comm:RegisterHandler('CEVENT', function(sender,id,payload) receiveEvent(sender,id,payload,false) end)
 comm:RegisterHandler('CVNEW', function(sender,id,payload) receiveEvent(sender,id,payload,true) end)
+comm:RegisterHandler('CVCANCEL', function(sender,id,payload) receiveEvent(sender,id,payload,false,true) end)
 
 local function updateSignup(sender, owner, id, role, version)
     local key = eventKey(owner,id)
@@ -150,6 +166,7 @@ comm:RegisterHandler('CEVQUERY', function(_, _, payload)
     if not active or payload ~= '' then return end
     local now = GetTime(); if now - lastQuery < 20 then return end; lastQuery = now
     for key,e in pairs(events) do if e.owner == identity then dirty[key]=true end end
+    for key in pairs(storage.relays) do relayDirty[key]=true end
 end)
 
 function Events:Create(title, description, when, kind, size, activity)
@@ -192,7 +209,7 @@ local function connect()
     local name, guild = character(), type(GetGuildInfo)=='function' and GetGuildInfo('player')
     local realm = type(GetRealmName)=='function' and GetRealmName() or ''
     if not name or not validText(guild,1,128) or type(realm)~='string' or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
-        active=false; events,dirty,intents,newDirty={}, {}, {}, {}; selected=nil
+        active=false; events,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}; selected=nil
         if window then window:Hide() end
         return
     end
@@ -205,8 +222,9 @@ local function connect()
     if type(root.guildCalendarV1[key])~='table' then active=false; return end
     active,identity,profile,storage=true,name,key,root.guildCalendarV1[key]
     if type(storage.cancelledSeen)~='table' then storage.cancelledSeen={} end
+    if type(storage.relays)~='table' then storage.relays={} end
     for k,expiry in pairs(storage.cancelledSeen) do if type(expiry)~='number' or expiry<GetServerTime() then storage.cancelledSeen[k]=nil end end
-    events,dirty,intents,newDirty={}, {}, {}, {}
+    events,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}
     sequence=type(storage.sequence)=='number' and storage.sequence or 0
     if type(storage.owned)=='table' then
         for k,e in pairs(storage.owned) do
@@ -216,6 +234,20 @@ local function connect()
                 if valid and k==eventKey(identity,valid.id) then valid.versions=type(e.versions)=='table' and e.versions or {}; events[k]=valid; dirty[k]=true end
             end
         end
+    end
+    if type(storage.observed)=='table' then
+        for k,e in pairs(storage.observed) do
+            if count(events)>=100 then break end
+            if type(e)=='table' and e.owner~=identity and validText(e.owner,1,128) and type(e.people)=='table' then
+                local ok,payload=pcall(encode,e)
+                local valid=ok and decode(e.owner,payload)
+                if valid and k==eventKey(valid.owner,valid.id) then valid.relayed=e.relayed==true; events[k]=valid end
+            end
+        end
+    end
+    for k,payload in pairs(storage.relays) do
+        local e=type(payload)=='string' and decode(nil,payload,true)
+        if not e or not e.cancelled or e.owner==identity or k~=eventKey(e.owner,e.id) then storage.relays[k]=nil end
     end
     if type(storage.intents)=='table' then
         for k,v in pairs(storage.intents) do
@@ -235,7 +267,7 @@ if C_Timer and C_Timer.NewTicker then
         if name~=identity or not guild or (type(GetRealmName)=='function' and (GetRealmName()..'\001'..guild..'\001'..name)~=profile) then active=false; connect(); return end
         local removed = false
         for key,e in pairs(events) do
-            if e.when < GetServerTime()-172800 then events[key],dirty[key],intents[key],newDirty[key]=nil,nil,nil,nil; removed=true end
+            if e.when < GetServerTime()-172800 then events[key],dirty[key],intents[key],newDirty[key],relayDirty[key],storage.relays[key]=nil,nil,nil,nil,nil,nil; removed=true end
         end
         if removed then save(); fire() end
         local now=GetTime()
@@ -252,6 +284,11 @@ if C_Timer and C_Timer.NewTicker then
             local created=e and tonumber(e.id:match('^(%d+)%-'))
             local announce=e and newDirty[key] and not e.cancelled and created and GetServerTime()-created<=120
             if not e or comm:SendProtocol(announce and 'CVNEW' or 'CEVENT',encode(e)) then dirty[key],newDirty[key]=nil,nil end
+        end
+        local relayKey=next(relayDirty)
+        if relayKey then
+            local payload=storage.relays[relayKey]
+            if not payload or comm:SendProtocol('CVCANCEL',payload) then relayDirty[relayKey]=nil end
         end
     end)
 end
