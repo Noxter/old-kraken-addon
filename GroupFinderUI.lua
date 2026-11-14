@@ -359,7 +359,12 @@ local function refresh()
     for _, item in ipairs(window.tabs) do
         if item.key == tab then item.button:LockHighlight() else item.button:UnlockHighlight() end
     end
-    window.listPage:SetText(#lines == 0 and '' or (math.floor(offset / CARDS_PER_PAGE) + 1) .. ' / ' .. math.ceil(#lines / CARDS_PER_PAGE))
+    local pageCount = math.ceil(#lines / CARDS_PER_PAGE)
+    local showPagination = tab ~= 'create' and pageCount > 1
+    window.listPage:SetText(showPagination and ((math.floor(offset / CARDS_PER_PAGE) + 1) .. ' / ' .. pageCount) or '')
+    window.listPage:SetShown(showPagination)
+    window.previousPageButton:SetShown(showPagination)
+    window.nextPageButton:SetShown(showPagination)
     for i, b in ipairs(window.rows) do
         local entry = lines[i + offset]
         if entry then
@@ -719,8 +724,8 @@ local function createWindow()
         remove:Hide()
         f.deleteButtons[i] = remove
     end
-    button(f, '‹', 18, -318, 50, function() offset=math.max(0, offset-CARDS_PER_PAGE); refresh() end)
-    button(f, '›', 110, -318, 50, function() if f.visible and offset+CARDS_PER_PAGE < #f.visible then offset=offset+CARDS_PER_PAGE end; refresh() end)
+    f.previousPageButton = button(f, '‹', 18, -318, 50, function() offset=math.max(0, offset-CARDS_PER_PAGE); refresh() end)
+    f.nextPageButton = button(f, '›', 110, -318, 50, function() if f.visible and offset+CARDS_PER_PAGE < #f.visible then offset=offset+CARDS_PER_PAGE end; refresh() end)
     f.listPage = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.listPage:SetPoint('TOPLEFT', f, 'TOPLEFT', 72, -323)
     f.detailsScroll = CreateFrame('ScrollFrame', nil, f, 'UIPanelScrollFrameTemplate')

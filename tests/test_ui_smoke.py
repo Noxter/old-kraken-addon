@@ -94,10 +94,13 @@ local function filtersShown(expected)
 end
 
 filtersShown(true)
+assert(ui.previousPageButton:IsShown() and ui.nextPageButton:IsShown() and ui.listPage:IsShown())
 selectTab('mine'); filtersShown(false)
 selectTab('applications'); filtersShown(false)
 selectTab('create'); filtersShown(false)
+assert(not ui.previousPageButton:IsShown() and not ui.nextPageButton:IsShown() and not ui.listPage:IsShown())
 selectTab('all'); filtersShown(true)
+assert(ui.previousPageButton:IsShown() and ui.nextPageButton:IsShown())
 
 selectDropdown(ui.roleFilter, 'healer')
 assert(hasTitle('Tank needs healer'))
@@ -118,6 +121,7 @@ assert(#ui.visible == 2)
 ui.searchFilter:SetText('Tank needs healer')
 ui.searchFilter.scripts.OnTextChanged()
 assert(#ui.visible == 1 and hasTitle('Tank needs healer'))
+assert(not ui.previousPageButton:IsShown() and not ui.nextPageButton:IsShown() and not ui.listPage:IsShown())
 
 selectTab('create')
 ui.titleBox:SetText('')
