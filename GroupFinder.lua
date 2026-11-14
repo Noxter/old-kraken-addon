@@ -248,7 +248,8 @@ function Finder:ReceiveGroup(sender, payload)
         category=category, description=description, maxSize=maxSize, minLevel=minLevel,
         maxLevel=maxLevel, role=role, members=members, partyObserved=observed, memberRoles=memberRoles, dungeon=dungeon, seenAt=GetTime() }
     if self.pending[key] == 'pending' then
-        if seen[self.identity] then self.pending[key] = 'accept'
+        if seen[self.identity] then
+            self.pending[key], self.pendingVersions[key], self.pendingRoles[key] = nil, nil, nil
         elseif closed == '1' then self.pending[key] = 'closed' end
     end
     return true
@@ -268,6 +269,7 @@ function Finder:Apply(owner, id, role)
     local group = self.groups[key]
     if not roles[role] or role == '' or not group or group.closed or owner == self.identity or #group.members >= group.maxSize
         or not self:RoleAvailable(group, role) then return false end
+    for _, member in ipairs(group.members) do if member == self.identity then return false end end
     self.requestSequence = math.max(self.requestSequence + 1, GetServerTime() * 1000)
     if not self.send('JOIN', pack({owner, id, role, 'apply', string.format('%.0f', self.requestSequence)})) then return false end
     self.pending[key] = 'pending'
