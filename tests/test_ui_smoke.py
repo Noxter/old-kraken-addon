@@ -31,12 +31,17 @@ function OldKraken:On(name, fn) self.listeners[name] = fn end
 function print(...) end
 function GetServerTime() return 12345 end
 function GetTime() return 1 end
+function date() return '14.11 20:00' end
+SOUNDKIT = {READY_CHECK = 123}
+alertSoundCalls = 0
+function PlaySound() alertSoundCalls = alertSoundCalls + 1 end
 local methods = {}
 function methods:SetText(v) self.text = v end
 function methods:GetText() return self.text or '' end
 function methods:SetSize(width, height) self.width = width; self.height = height end
 function methods:SetTexture(texture) self.texture = texture end
 function methods:SetTexCoord(...) self.texCoord = {...} end
+function methods:SetAlpha(value) self.alpha = value end
 function methods:Show() self.shown = true end
 function methods:Hide() self.shown = false end
 function methods:SetShown(value) self.shown = value end
@@ -59,7 +64,7 @@ function CreateFrame(_, name)
     return frame
 end
 ''')
-for name in ['GroupFinder.lua', 'GroupFinderUI.lua']:
+for name in ['ActivityCatalog.lua', 'GroupFinder.lua', 'GroupFinderUI.lua']:
     lua.execute((root / name).read_text(encoding='utf-8'))
 lua.execute('''
 local f = OldKraken.GroupFinder
@@ -200,7 +205,34 @@ assert(alert and alert.alertArt:IsShown() and alert.alertArt.texture == 131882,
 assert(alert.alertArt.width == alert.alertArt.height)
 assert(alert.alertArt.texCoord[2] - alert.alertArt.texCoord[1]
     == alert.alertArt.texCoord[4] - alert.alertArt.texCoord[3])
+assert(alert.alertCaption.text == 'НОВЕ ОГОЛОШЕННЯ')
+assert(alert.alertTitle.text:find(wcGroup.title, 1, true))
+assert(alert.alertSubtitle.text:find('Клік — відкрити групу', 1, true))
+assert(alert.groupKey == wcGroup.owner .. '\\001' .. wcGroup.id)
+alert.scripts.OnClick(alert, 'LeftButton')
+assert(not alert:IsShown() and ui.details.text:find(wcGroup.title, 1, true))
 OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(tankGroup, 'Another Applicant', 'healer')
 assert(not alert.alertArt:IsShown())
+assert(alert.alertCaption.text == 'НОВА ЗАЯВКА')
+assert(alert.alertSubtitle.text:find('Клік — мої оголошення', 1, true))
+alert.dragging = false
+alert.scripts.OnUpdate(alert, 8)
+assert(alert:IsShown() and alert.alpha == 1)
+alert.scripts.OnUpdate(alert, 0.5)
+assert(alert:IsShown() and alert.alpha == 0.5)
+alert.scripts.OnUpdate(alert, 0.5)
+assert(not alert:IsShown() and alert.alpha == 0)
+local guildEvents = {opened=nil}
+function guildEvents:AlertsEnabled() return true end
+function guildEvents:ShowEvent(key) self.opened = key end
+OldKraken.GuildEvents = guildEvents
+OldKraken.listeners.GUILD_EVENTS_NEW('raid-key', {title='Guild raid', owner='Tester', when=12345})
+assert(alert.alertCaption.text == 'ПОДІЯ ГІЛЬДІЇ')
+alert.scripts.OnClick(alert, 'RightButton')
+assert(guildEvents.opened == nil and not alert:IsShown())
+OldKraken.listeners.GUILD_EVENTS_NEW('raid-key', {title='Guild raid', owner='Tester', when=12345})
+alert.scripts.OnClick(alert, 'LeftButton')
+assert(guildEvents.opened == 'raid-key')
+assert(alertSoundCalls == 1)
 ''')
 print('UI smoke checks passed')

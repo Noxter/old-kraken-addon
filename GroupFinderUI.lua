@@ -2,6 +2,8 @@
 local Finder = OldKraken.GroupFinder
 local window, selected, requestsWindow
 local groupAlert
+local lastAlertSoundAt = -math.huge
+local ALERT_DURATION, ALERT_FADE_DURATION, ALERT_SOUND_INTERVAL = 9, 1, 60
 local tab = 'all'
 local offset = 0
 local requestOffset = 0
@@ -844,22 +846,57 @@ OldKraken:On('GROUP_FINDER_ALERT_SETTING', function()
     refresh()
 end)
 
-local function showAlert(message, kind, key, dungeonId)
+local alertCaptions = {
+    group='НОВЕ ОГОЛОШЕННЯ', request='НОВА ЗАЯВКА', decision='СТАН ЗАЯВКИ',
+    event='ПОДІЯ ГІЛЬДІЇ', event_signup='ЗАПИС НА ПОДІЮ',
+}
+local alertActions = {
+    group='Клік — відкрити групу', request='Клік — мої оголошення',
+    decision='Клік — переглянути заявку', event='Клік — відкрити подію',
+    event_signup='Клік — відкрити подію',
+}
+
+local function showAlert(title, subtitle, kind, key, dungeonId)
     local isEvent = kind == 'event' or kind == 'event_signup'
-    print('|cff2ec4b6Old Kraken|r: ' .. message .. (isEvent and '. /okr events' or '. /okr group'))
+    print('|cff2ec4b6Old Kraken|r: ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or '') .. (isEvent and '. /okr events' or '. /okr group'))
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         OldKraken.UIStyle.Button(groupAlert)
-        groupAlert:SetSize(560, 76)
+        groupAlert:SetSize(560, 100)
+        groupAlert.alertAccent = groupAlert:CreateTexture(nil, 'ARTWORK')
+        groupAlert.alertAccent:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 2, -2)
+        groupAlert.alertAccent:SetPoint('TOPRIGHT', groupAlert, 'TOPRIGHT', -2, -2)
+        groupAlert.alertAccent:SetHeight(2)
+        groupAlert.alertAccent:SetColorTexture(0.85, 0.5, 0.18, 0.9)
         groupAlert.alertArt = groupAlert:CreateTexture(nil, 'ARTWORK')
         groupAlert.alertArt:SetSize(60, 60)
         groupAlert.alertArt:SetPoint('LEFT', groupAlert, 'LEFT', 8, 0)
+        groupAlert.alertCaption = groupAlert:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+        groupAlert.alertCaption:SetTextColor(1, 0.78, 0.35)
+        groupAlert.alertCaption:SetHeight(14)
+        groupAlert.alertTitle = groupAlert:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
+        groupAlert.alertTitle:SetTextColor(0.94, 0.95, 0.96)
+        groupAlert.alertTitle:SetHeight(22)
+        groupAlert.alertTitle:SetWordWrap(false)
+        groupAlert.alertSubtitle = groupAlert:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        groupAlert.alertSubtitle:SetTextColor(0.72, 0.75, 0.79)
+        groupAlert.alertSubtitle:SetWordWrap(true)
+        groupAlert.alertCaption:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 82, -10)
+        groupAlert.alertTitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 82, -28)
+        groupAlert.alertTitle:SetPoint('RIGHT', groupAlert, 'RIGHT', -12, 0)
+        groupAlert.alertSubtitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 82, -51)
+        groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, 8)
+        groupAlert.alertCaption:SetJustifyH('LEFT')
+        groupAlert.alertTitle:SetJustifyH('LEFT')
+        groupAlert.alertSubtitle:SetJustifyH('LEFT')
+        groupAlert.alertSubtitle:SetJustifyV('TOP')
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
         groupAlert:SetFrameStrata('FULLSCREEN_DIALOG')
         groupAlert:SetFrameLevel(50)
         groupAlert:SetMovable(true)
         groupAlert:SetClampedToScreen(true)
         groupAlert:RegisterForDrag('LeftButton')
+        groupAlert:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
         groupAlert:SetScript('OnDragStart', function(self)
             self.dragging = true
             self:StartMoving()
@@ -867,7 +904,8 @@ local function showAlert(message, kind, key, dungeonId)
         groupAlert:SetScript('OnDragStop', function(self)
             self:StopMovingOrSizing()
             self.dragging = false
-            self.remaining = 10
+            self.remaining = ALERT_DURATION
+            self:SetAlpha(1)
             local x, y = self:GetCenter()
             local px, py = UIParent:GetCenter()
             local settings = OldKraken.DB and OldKraken.DB.settings
@@ -876,22 +914,30 @@ local function showAlert(message, kind, key, dungeonId)
                 settings.alertPositions[self.positionKind] = {x=x-px, y=y-py}
             end
         end)
-        groupAlert:SetScript('OnClick', function(self)
+        groupAlert:SetScript('OnClick', function(self, button)
             local target = self.groupKey
             local alertKind = self.kind
             self:Hide()
+            if button == 'RightButton' then return end
             if alertKind == 'event' or alertKind == 'event_signup' then
                 if OldKraken.GuildEvents then OldKraken.GuildEvents:ShowEvent(target) end
                 return
             end
             if target and Finder.groups[target] then
-                tab, selected, offset, requestOffset = alertKind == 'decision' and 'applications' or 'mine', target, 0, 0
+                local targetTab = alertKind == 'decision' and 'applications'
+                    or (alertKind == 'group' and 'all' or 'mine')
+                tab, selected, offset, requestOffset = targetTab, target, 0, 0
+            elseif alertKind == 'group' then
+                tab, selected, offset, requestOffset = 'all', nil, 0, 0
             end
             Finder:Show()
         end)
         groupAlert:SetScript('OnUpdate', function(self, elapsed)
             if self.dragging then return end
             self.remaining = (self.remaining or 0) - elapsed
+            if self.remaining <= ALERT_FADE_DURATION then
+                self:SetAlpha(math.max(0, self.remaining / ALERT_FADE_DURATION))
+            end
             if self.remaining <= 0 then self:Hide() end
         end)
     end
@@ -910,43 +956,52 @@ local function showAlert(message, kind, key, dungeonId)
     else
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
     end
-    groupAlert:SetText(message .. (isEvent and '\nКлік — відкрити подію · Перетягніть, щоб перемістити' or '\nКлік — відкрити пошук · Перетягніть, щоб перемістити'))
-    local alertText = groupAlert:GetFontString()
-    alertText:ClearAllPoints()
-    alertText:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', hasGroupArt and 78 or 12, -8)
-    alertText:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, 8)
-    alertText:SetJustifyH(hasGroupArt and 'LEFT' or 'CENTER')
-    alertText:SetJustifyV('MIDDLE')
-    groupAlert.remaining = 10
+    local textLeft = hasGroupArt and 82 or 18
+    groupAlert.alertCaption:ClearAllPoints()
+    groupAlert.alertTitle:ClearAllPoints()
+    groupAlert.alertSubtitle:ClearAllPoints()
+    groupAlert.alertCaption:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', textLeft, -10)
+    groupAlert.alertTitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', textLeft, -28)
+    groupAlert.alertTitle:SetPoint('RIGHT', groupAlert, 'RIGHT', -12, 0)
+    groupAlert.alertSubtitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', textLeft, -51)
+    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, 8)
+    groupAlert.alertCaption:SetText(alertCaptions[kind] or 'OLD KRAKEN')
+    groupAlert.alertTitle:SetText(title)
+    local hint = (alertActions[kind] or 'Клік — відкрити') .. ' · перетягніть, щоб перемістити'
+    groupAlert.alertSubtitle:SetText(subtitle ~= '' and (subtitle .. '\n' .. hint) or hint)
+    groupAlert.remaining = ALERT_DURATION
+    groupAlert:SetAlpha(1)
     groupAlert:Show()
-    if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK then
+    local now = type(GetTime) == 'function' and GetTime()
+    if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK
+        and type(now) == 'number' and now - lastAlertSoundAt >= ALERT_SOUND_INTERVAL then
+        lastAlertSoundAt = now
         pcall(PlaySound, SOUNDKIT.READY_CHECK)
     end
 end
 
 function Finder:PreviewAlert(kind)
     if kind == 'group' then
-        showAlert('Приклад: нове оголошення про набір\nПеретягніть банер у потрібне місце', 'group')
+        showAlert('Гравець збирає: Назва групи', 'Склад 2/5 · Вільно місць: 3', 'group')
     elseif kind == 'request' then
-        showAlert('Приклад: сповіщення про заявку\nПеретягніть банер у потрібне місце', 'request')
+        showAlert('Нова заявка від гравця', 'Танк · Назва групи', 'request')
     elseif kind == 'event' then
-        showAlert('Приклад: нова подія гільдії\nПеретягніть банер у потрібне місце', 'event')
+        showAlert('Назва події', 'Організатор · сьогодні о 20:00', 'event')
     end
 end
 
 OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
     if not OldKraken.GuildEvents or not OldKraken.GuildEvents:AlertsEnabled() then return end
-    local message='Нова подія: '..event.title..'\n'..event.owner..' · '..date('%d.%m.%Y %H:%M',event.when)
-    showAlert(message,'event',key)
+    local subtitle = event.owner .. ' · ' .. date('%d.%m.%Y %H:%M', event.when)
+    showAlert('Нова подія: ' .. event.title, subtitle, 'event', key)
 end)
 OldKraken:On('GUILD_EVENTS_NEW_SIGNUP', function(key, event, name, role)
     refreshPeople()
     local signupRole=role=='flex' and 'Учасник' or roleLabel(role)
-    local message='Новий запис: '..playerLabel(name)..' ('..signupRole..')\n'..event.title
-    showAlert(message,'event_signup',key)
+    showAlert('Новий запис: ' .. playerLabel(name), signupRole .. ' · ' .. event.title, 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_CANCELLED', function(key, event)
-    showAlert('Подію скасовано: '..event.title..'\nАвтор: '..event.owner,'event_signup',key)
+    showAlert('Подію скасовано', event.title .. ' · Автор: ' .. event.owner, 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
     if groupAlert and groupAlert.kind=='event' and not OldKraken.GuildEvents:AlertsEnabled() then groupAlert:Hide() end
@@ -956,38 +1011,31 @@ OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not Finder:GroupAlertsEnabled() then return end
     refreshPeople()
     local free = math.max(0, group.maxSize - #group.members)
-    local counts = {tank=0, healer=0, dps=0, flex=0, unknown=0}
     local actual = group.partyObserved and 1 or nil
     for i, name in ipairs(group.members) do
-        local memberRole = i == 1 and group.role or (group.memberRoles and group.memberRoles[name]) or ''
-        local key = counts[memberRole] ~= nil and memberRole or 'unknown'
-        counts[key] = counts[key] + 1
         if actual and i > 1 and group.partyObserved[name] then actual = actual + 1 end
     end
     local presence = actual and ('у групі ' .. actual .. ', резерв ' .. (#group.members - actual)) or 'стан групи невідомий'
-    local summary = 'У списку ' .. #group.members .. '/' .. group.maxSize .. ' (' .. presence .. ') · ' .. roleLabel('tank') .. ':' .. counts.tank .. ' ' .. roleLabel('healer') .. ':' .. counts.healer .. ' ' .. roleLabel('dps') .. ':' .. counts.dps
-    if counts.flex > 0 then summary = summary .. ' F:' .. counts.flex end
-    if counts.unknown > 0 then summary = summary .. ' не визначено:' .. counts.unknown end
+    local summary = 'Склад ' .. #group.members .. '/' .. group.maxSize .. ' · ' .. presence
     local needed = 'Вільно місць: ' .. free .. ' · склад гнучкий'
     if group.category == 'dungeon' and group.maxSize == 5 then
         local missing = {tank=0, healer=0, dps=0}
         for _, slot in ipairs(Finder:DungeonSlots(group)) do if not slot.member then missing[slot.role] = missing[slot.role] + 1 end end
         needed = 'Вільні ролі: ' .. roleLabel('tank') .. ' ' .. missing.tank .. ', ' .. roleLabel('healer') .. ' ' .. missing.healer .. ', ' .. roleLabel('dps') .. ' ' .. missing.dps
     end
-    local message = playerLabel(group.owner) .. ' збирає: ' .. group.title .. '\n' .. summary .. '\n' .. needed
-    showAlert(message, 'group', nil, group.dungeon)
+    local groupKey = group.owner .. '\001' .. group.id
+    showAlert(playerLabel(group.owner) .. ' збирає: ' .. group.title, summary .. ' · ' .. needed, 'group', groupKey, group.dungeon)
 end)
 
 OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
     refreshPeople()
-    local message = 'Нова заявка: ' .. playerLabel(name) .. ' (' .. roleLabel(role) .. ') — ' .. group.title
-    showAlert(message, 'request', group.owner .. '\001' .. group.id)
+    showAlert('Нова заявка від ' .. playerLabel(name), roleLabel(role) .. ' · ' .. group.title,
+        'request', group.owner .. '\001' .. group.id)
     showRequests()
 end)
 
 OldKraken:On('GROUP_FINDER_APPLICATION_STATUS', function(group, status)
     if not group or status ~= 'reject' then return end
     refreshPeople()
-    local message = playerLabel(group.owner) .. ' відхилив вашу заявку: ' .. group.title
-    showAlert(message, 'decision', group.owner .. '\001' .. group.id)
+    showAlert('Заявку відхилив ' .. playerLabel(group.owner), group.title, 'decision', group.owner .. '\001' .. group.id)
 end)
