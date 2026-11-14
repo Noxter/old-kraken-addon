@@ -4,11 +4,12 @@ OldKraken.WorkshopRecipes=Recipes
 local comm,codec=OldKraken.Communication,OldKraken.GroupFinder
 local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування',[185]='Кулінарія',[129]='Перша допомога',[186]='Гірництво'}
 local active,identity,profile,scope,people=false,nil,nil,nil,{}
+local pendingLearned,learnAttempts={},{}
 local scanPending,tradeOpen,sendQueue=false,false,{}
 local activeQuery,sequence,lastQuery,lastIncoming=nil,0,-60,{}
 local frame,rows,offset,resultSet=nil,{},0,{}
 local scanStatus='Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
-local render
+local render, matches
 local function usable(v,t) return not (type(issecretvalue)=='function' and issecretvalue(v)) and type(v)==t end
 local function integer(n,lo,hi) return usable(n,'number') and n==n and n%1==0 and n>=lo and n<=hi end
 local function safeText(s,lo,hi) return usable(s,'string') and #s>=lo and #s<=hi and not s:find('[%z\1-\31\127]') end
@@ -36,7 +37,7 @@ local function connect()
     local name=myName(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
     local realm=type(GetRealmName)=='function' and GetRealmName()
     if not name or not safeText(guild,1,128) or not usable(realm,'string') or not OldKraken.DB then
-        active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}
+        active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts={},{}
         if frame then frame:Hide() end; return
     end
     local k=realm..'\001'..guild
@@ -47,6 +48,9 @@ local function connect()
     scope=db.workshop.guilds[k]; if type(scope.recipes)~='table' then scope.recipes={} end
     active,identity,profile,people=true,name,k,scope.recipes
     if type(people[name])~='table' then people[name]={} end
+    if type(scope.pendingRecipes)~='table' then scope.pendingRecipes={} end
+    if type(scope.pendingRecipes[name])~='table' then scope.pendingRecipes[name]={} end
+    pendingLearned,learnAttempts=scope.pendingRecipes[name],{}
     activeQuery,sendQueue,lastIncoming,resultSet=nil,{}, {}, {}
     changed()
 end
@@ -95,6 +99,47 @@ local function playerHasProfession(profession)
     end
     return false
 end
+local function recordLearned(r)
+    local own=people[identity]; local previous=own[r.recipe]
+    if not previous and count(own)>=5000 then return false end
+    if r.product=='' and type(previous)=='table' and previous.item==r.item and safeText(previous.product,0,120) then r.product=previous.product end
+    own[r.recipe]=r
+    if pendingLearned[r.recipe] then
+        if #sendQueue<100 then
+            pendingLearned[r.recipe]=nil; learnAttempts[r.recipe]=nil
+            local payload=codec._pack({r.recipe,r.item,r.profession,r.seen,r.name,r.product})
+            sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
+        end
+    end
+    if activeQuery and matches and matches(r,activeQuery.query) then
+        local resultKey=identity..'\001'..r.recipe
+        if resultSet[resultKey] or count(resultSet)<500 then resultSet[resultKey]={owner=identity,record=r} end
+        changed()
+    end
+    return true
+end
+local function scanLearned(id)
+    if not active or not integer(id,1,100000000) or type(C_TradeSkillUI)~='table' then return false end
+    local api=C_TradeSkillUI
+    if type(api.GetRecipeInfo)~='function' then return false end
+    local ok,info=pcall(api.GetRecipeInfo,id)
+    if not ok or not usable(info,'table') or not usable(info.learned,'boolean') or not info.learned or not safeText(info.name,1,120) then return false end
+    local profession
+    if type(api.GetProfessionInfoByRecipeID)=='function' then
+        local success,data=pcall(api.GetProfessionInfoByRecipeID,id)
+        if success and usable(data,'table') then
+            if integer(data.parentProfessionID,1,1000000) and professionNames[data.parentProfessionID] then profession=data.parentProfessionID
+            elseif integer(data.professionID,1,1000000) and professionNames[data.professionID] then profession=data.professionID end
+        end
+    end
+    if not profession and type(api.GetTradeSkillLineForRecipe)=='function' then
+        local success,line=pcall(api.GetTradeSkillLineForRecipe,id)
+        if success and integer(line,1,1000000) and professionNames[line] then profession=line end
+    end
+    if not profession or not playerHasProfession(profession) then return false end
+    local item,product=outputInfo(api,id)
+    return recordLearned({recipe=id,item=item,profession=profession,seen=GetServerTime(),name=info.name,product=product})
+end
 local function scan()
     if not active or not tradeOpen or type(C_TradeSkillUI)~='table' then return end
     local api=C_TradeSkillUI
@@ -116,10 +161,9 @@ local function scan()
                 if info.learned and safeText(info.name,1,120) then
                     local item,product=outputInfo(api,id)
                     local previous=own[id]
-                    if product=='' and type(previous)=='table' and previous.item==item and safeText(previous.product,0,120) then product=previous.product end
                     if ownCount<5000 or previous then
                         if not previous then ownCount=ownCount+1 end
-                        own[id]={recipe=id,item=item,profession=profession,seen=seen,name=info.name,product=product}; touched=touched+1
+                        recordLearned({recipe=id,item=item,profession=profession,seen=seen,name=info.name,product=product}); touched=touched+1
                     end
                 elseif info.learned==false and type(own[id])=='table' and own[id].profession==profession then
                     own[id]=nil; ownCount=math.max(0,ownCount-1)
@@ -131,7 +175,7 @@ local function scan()
     if frame and frame:IsShown() then frame.status:SetText(scanStatus) end
     return true
 end
-local function matches(r,query)
+matches=function(r,query)
     if not validRecord(r) then return false end
     local item=query:match('^item:(%d+)$')
     if item then return r.item==tonumber(item) end
@@ -197,13 +241,36 @@ comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if resultSet[k] or count(resultSet)<500 then resultSet[k]={owner=sender,record=people[sender][r.recipe]} end
     changed()
 end)
+comm:RegisterHandler('WRLEARN',function(sender,_,payload)
+    if not active or not safeText(sender,1,128) or sender==identity then return end
+    local f=codec._unpackFields(payload,6); if not f or #f~=6 then return end
+    local r={recipe=tonumber(f[1]),item=tonumber(f[2]),profession=tonumber(f[3]),seen=tonumber(f[4]),name=f[5],product=f[6]}
+    if not validRecord(r) then return end
+    if type(people[sender])~='table' then if count(people)>=1000 then return end; people[sender]={} end
+    if not people[sender][r.recipe] and count(people[sender])>=5000 then return end
+    local old=people[sender][r.recipe]
+    if validRecord(old) and old.seen>=r.seen then return end
+    people[sender][r.recipe]=r
+    if activeQuery and GetTime()<=activeQuery.untilTime then
+        local k=sender..'\001'..r.recipe
+        if matches(r,activeQuery.query) and (resultSet[k] or count(resultSet)<500) then resultSet[k]={owner=sender,record=r}
+        elseif resultSet[k] then resultSet[k]=nil end
+    end
+    changed()
+end)
 
 local events=CreateFrame('Frame')
-for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','TRADE_SKILL_SHOW','TRADE_SKILL_LIST_UPDATE','TRADE_SKILL_DATA_SOURCE_CHANGED','TRADE_SKILL_CLOSE'}) do pcall(events.RegisterEvent,events,event) end
-events:SetScript('OnEvent',function(_,event)
+for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','TRADE_SKILL_SHOW','TRADE_SKILL_LIST_UPDATE','TRADE_SKILL_DATA_SOURCE_CHANGED','TRADE_SKILL_CLOSE','NEW_RECIPE_LEARNED'}) do pcall(events.RegisterEvent,events,event) end
+events:SetScript('OnEvent',function(_,event,recipeID)
     if event=='PLAYER_LOGIN' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect()
+    elseif event=='NEW_RECIPE_LEARNED' then
+        connect()
+        if active and integer(recipeID,1,100000000) and (pendingLearned[recipeID] or count(pendingLearned)<1000) then
+            pendingLearned[recipeID]=true; learnAttempts[recipeID]=0
+            if tradeOpen then scanPending=true end
+        end
     elseif event=='TRADE_SKILL_CLOSE' then tradeOpen=false; scanPending=false
-    elseif event=='TRADE_SKILL_SHOW' then tradeOpen=true; scanPending=true
+    elseif event=='TRADE_SKILL_SHOW' then tradeOpen=true; scanPending=true; learnAttempts={}
     elseif tradeOpen then scanPending=true end
 end)
 if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
@@ -216,8 +283,19 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
             if frame and frame:IsShown() then frame.status:SetText(scanStatus) end
         end
     end
+    for id in pairs(pendingLearned) do
+        if not integer(id,1,100000000) then pendingLearned[id]=nil
+        elseif (learnAttempts[id] or 0)<10 then
+            local ok,done=pcall(scanLearned,id)
+            if not ok or not done or pendingLearned[id] then
+                learnAttempts[id]=(learnAttempts[id] or 0)+1
+                if learnAttempts[id]==10 then print('Old Kraken: новий рецепт очікує даних гри. Відкрийте відповідну професію, щоб завершити оновлення.') end
+            end
+            break
+        end
+    end
     while #sendQueue>0 and sendQueue[1].expires<GetTime() do table.remove(sendQueue,1) end
-    if #sendQueue>0 and #comm.queue<=8 and comm:SendProtocol('WRRESULT',sendQueue[1].payload) then table.remove(sendQueue,1) end
+    if #sendQueue>0 and #comm.queue<=8 and comm:SendProtocol(sendQueue[1].kind or 'WRRESULT',sendQueue[1].payload) then table.remove(sendQueue,1) end
 end) end
 
 local function button(parent,label,x,y,width,callback)

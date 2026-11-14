@@ -48,7 +48,7 @@ end
 local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = true,
     UPDATE = true, QUERY = true, SYNC = true, BUMP = true,
     CEVENT = true, CVNEW = true, CVSTATE = true, CVCANCEL = true, CEVQUERY = true, CEVRSVP = true,
-    WKPROF = true, WKQUERY = true, WRQUERY = true, WRRESULT = true,
+    WKPROF = true, WKQUERY = true, WRQUERY = true, WRRESULT = true, WRLEARN = true,
     WORDER = true, WOREQ = true, WOERROR = true, WOQUERY = true }
 
 function Communication:RegisterHandler(kind, callback)
