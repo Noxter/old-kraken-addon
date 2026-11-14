@@ -945,6 +945,9 @@ OldKraken:On('GUILD_EVENTS_NEW_SIGNUP', function(key, event, name, role)
     local message='Новий запис: '..playerLabel(name)..' ('..signupRole..')\n'..event.title
     showAlert(message,'event_signup',key)
 end)
+OldKraken:On('GUILD_EVENTS_CANCELLED', function(key, event)
+    showAlert('Подію скасовано: '..event.title..'\nАвтор: '..event.owner,'event_signup',key)
+end)
 OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
     if groupAlert and groupAlert.kind=='event' and not OldKraken.GuildEvents:AlertsEnabled() then groupAlert:Hide() end
 end)

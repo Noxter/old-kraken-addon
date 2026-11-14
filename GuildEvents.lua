@@ -4,6 +4,9 @@ OldKraken.GuildEvents = Events
 local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
 local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
 local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}
+local statuses = {pending='Очікує', accepted='Прийнято', reserve='Резерв', rejected='Відхилено'}
+local statusCode = {pending='P',accepted='A',reserve='R',rejected='D'}
+local codeStatus = {P='pending',A='accepted',R='reserve',D='rejected'}
 local active, identity, profile, storage = false, nil, nil, nil
 local events, dirty, intents, newDirty = {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
@@ -27,6 +30,9 @@ end
 local function eventKey(owner, id) return owner .. '\001' .. id end
 local function validID(s) return validText(s, 1, 64) and s:match('^[%w%-]+$') ~= nil end
 local function count(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
+local function acceptedCount(e)
+    local n=0; for name in pairs(e.people) do if (e.statuses[name] or 'accepted')=='accepted' then n=n+1 end end; return n
+end
 local function character()
     if type(UnitName) ~= 'function' then return nil end
     local a,b = UnitName('player')
@@ -46,10 +52,12 @@ local function encode(e)
     local f = {e.id,e.owner,e.rev,e.when,e.kind,e.size,e.cancelled and '1' or '0',e.title,e.description,#names}
     for _, name in ipairs(names) do f[#f+1]=name; f[#f+1]=e.people[name] end
     f[#f+1]=e.activity or ''
+    local codes={}; for _,name in ipairs(names) do codes[#codes+1]=statusCode[(e.statuses or {})[name] or 'accepted'] end
+    f[#f+1]=table.concat(codes)
     return codec._pack(f)
 end
 local function decode(sender, payload)
-    local f = codec._unpackFields(payload, 91)
+    local f = codec._unpackFields(payload, 212)
     if not f or #f < 10 then return nil end
     local id, owner, rev, when, kind, size, cancelled, title, description, n = unpack(f,1,10)
     rev, when, size, n = tonumber(rev), tonumber(when), tonumber(size), tonumber(n)
@@ -58,16 +66,21 @@ local function decode(sender, payload)
         or not when or when % 1 ~= 0 or when < GetServerTime()-172800 or when > GetServerTime()+31622400
         or not kinds[kind] or not size or size % 1 ~= 0 or size < 2 or size > 40
         or (cancelled ~= '0' and cancelled ~= '1') or not validText(title,1,100)
-        or not validText(description,0,400) or not n or n % 1 ~= 0 or n < 0 or n > size or (#f ~= 10 + n*2 and #f ~= 11 + n*2) then return nil end
+        or not validText(description,0,400) or not n or n % 1 ~= 0 or n < 0 or n > 100 or (#f ~= 10 + n*2 and #f ~= 11 + n*2 and #f ~= 12 + n*2) then return nil end
     local activity=f[11+n*2] or ''
     if not validActivity(kind,activity) then return nil end
-    local people = {}
+    local codes=f[12+n*2]
+    if codes and (#codes~=n or codes:find('[^PARD]')) then return nil end
+    local people,personStatuses = {},{}
     for i=1,n do
         local name, role = f[9+i*2], f[10+i*2]
         if not validText(name,1,128) or not roles[role] or people[name] then return nil end
         people[name] = role
+        personStatuses[name]=codes and codeStatus[codes:sub(i,i)] or 'accepted'
     end
-    return {id=id,owner=owner,rev=rev,when=when,kind=kind,size=size,cancelled=cancelled=='1',title=title,description=description,people=people,activity=activity}
+    local e={id=id,owner=owner,rev=rev,when=when,kind=kind,size=size,cancelled=cancelled=='1',title=title,description=description,people=people,statuses=personStatuses,activity=activity}
+    if acceptedCount(e)>size then return nil end
+    return e
 end
 local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
 
@@ -79,7 +92,7 @@ local function receiveEvent(sender, _, payload, isAnnouncement)
     if old and old.rev > e.rev then return end
     if old and old.rev == e.rev then
         local intent = intents[key]
-        if intent and ((intent.role == 'leave' and not old.people[identity]) or old.people[identity] == intent.role or old.cancelled) then
+        if intent and ((intent.role == 'leave' and not old.people[identity]) or (intent.role ~= 'leave' and old.people[identity] == intent.role and old.statuses[identity] ~= 'rejected') or old.cancelled) then
             intents[key] = nil; save(); fire()
         end
         return
@@ -88,7 +101,11 @@ local function receiveEvent(sender, _, payload, isAnnouncement)
     if e.owner == identity and old then e.versions = old.versions end
     events[key] = e
     local intent = intents[key]
-    if intent and ((intent.role == 'leave' and not e.people[identity]) or e.people[identity] == intent.role or e.cancelled) then intents[key] = nil end
+    if intent and ((intent.role == 'leave' and not e.people[identity]) or (intent.role ~= 'leave' and e.people[identity] == intent.role and e.statuses[identity] ~= 'rejected') or e.cancelled) then intents[key] = nil end
+    if e.cancelled and e.owner~=identity and e.people[identity] and e.statuses[identity]~='rejected' and not storage.cancelledSeen[key] then
+        storage.cancelledSeen[key]=e.when+172800
+        OldKraken:Fire('GUILD_EVENTS_CANCELLED',key,e)
+    end
     save(); fire()
     if isAnnouncement and not old and e.owner~=identity and not e.cancelled then
         local created=tonumber(e.id:match('^(%d+)%-'))
@@ -107,16 +124,19 @@ local function updateSignup(sender, owner, id, role, version)
     e.versions = e.versions or {}
     if e.versions[sender] and e.versions[sender] >= version then dirty[key]=true; return end
     if not e.versions[sender] and count(e.versions) >= 200 then return end
-    if role ~= 'leave' and not e.people[sender] and count(e.people) >= e.size then return end
+    if role ~= 'leave' and not e.people[sender] and count(e.people) >= 100 then return end
     local previous = e.people[sender]
+    local previousStatus=e.statuses[sender]
     e.people[sender] = role ~= 'leave' and role or nil
+    e.statuses[sender] = role~='leave' and (sender==identity and 'accepted' or ((previousStatus and previousStatus~='rejected') and previousStatus or 'pending')) or nil
+    if sender==identity and e.statuses[sender]=='accepted' and acceptedCount(e)>e.size then e.people[sender],e.statuses[sender]=previous,previousStatus; return end
     e.rev = e.rev + 1
-    if #encode(e) > 2560 then e.people[sender] = previous; e.rev = e.rev - 1; return end
+    if #encode(e) > 2560 then e.people[sender],e.statuses[sender] = previous,previousStatus; e.rev = e.rev - 1; return end
     e.versions[sender] = version
     dirty[key] = true
     if sender == identity then intents[key] = nil end
     save(); fire()
-    if sender ~= identity and role ~= 'leave' and not previous then
+    if sender ~= identity and role ~= 'leave' and (not previous or previousStatus=='rejected') then
         OldKraken:Fire('GUILD_EVENTS_NEW_SIGNUP',key,e,sender,role)
     end
 end
@@ -141,7 +161,7 @@ function Events:Create(title, description, when, kind, size, activity)
         or not when or when <= GetServerTime() or when > GetServerTime()+31622400 or count(events)>=100 then return false end
     sequence=sequence+1
     local id=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
-    local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},versions={},activity=activity}
+    local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},statuses={},versions={},activity=activity}
     local key=eventKey(identity,id); events[key]=e; dirty[key]=true; newDirty[key]=true; save(); fire(); return true
 end
 function Events:Cancel(key)
@@ -150,11 +170,22 @@ function Events:Cancel(key)
 end
 function Events:Signup(key, role)
     local e=events[key]
-    if not active or not e or e.cancelled or (role~='leave' and not roles[role]) or (role~='leave' and not e.people[identity] and count(e.people)>=e.size) then return false end
+    if not active or not e or e.cancelled or (role~='leave' and not roles[role]) then return false end
+    if role~='leave' and e.owner==identity and e.statuses[identity]~='accepted' and acceptedCount(e)>=e.size then return false end
     sequence=math.max(sequence+1,GetServerTime()*1000)
     local intent={role=role,version=sequence}; intents[key]=intent
     if e.owner==identity then updateSignup(identity,e.owner,e.id,role,intent.version) end
     save(); nextRetry=0; fire(); return true
+end
+function Events:Decide(key, name, status)
+    local e=events[key]
+    if not active or not e or e.owner~=identity or e.cancelled or not e.people[name] or name==identity or not statuses[status] or status=='pending' then return false end
+    if status=='accepted' and e.statuses[name]~='accepted' and acceptedCount(e)>=e.size then return false end
+    if e.statuses[name]==status then return true end
+    local previous=e.statuses[name]
+    e.statuses[name]=status; e.rev=e.rev+1
+    if #encode(e)>2560 then e.statuses[name]=previous; e.rev=e.rev-1; return false end
+    dirty[key]=true; save(); fire(); return true
 end
 
 local function connect()
@@ -173,6 +204,8 @@ local function connect()
     if root.guildCalendarV1[key] == nil then root.guildCalendarV1[key]={} end
     if type(root.guildCalendarV1[key])~='table' then active=false; return end
     active,identity,profile,storage=true,name,key,root.guildCalendarV1[key]
+    if type(storage.cancelledSeen)~='table' then storage.cancelledSeen={} end
+    for k,expiry in pairs(storage.cancelledSeen) do if type(expiry)~='number' or expiry<GetServerTime() then storage.cancelledSeen[k]=nil end end
     events,dirty,intents,newDirty={}, {}, {}, {}
     sequence=type(storage.sequence)=='number' and storage.sequence or 0
     if type(storage.owned)=='table' then
@@ -346,23 +379,50 @@ local function refresh()
         local entry=list[(page-1)*8+i]
         if entry then
             local e=entry.event
-            row:SetText(date('%d.%m.%Y %H:%M',e.when)..'  ·  '..e.title..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..'  ·  '..count(e.people)..'/'..e.size)
+            row:SetText(date('%d.%m.%Y %H:%M',e.when)..'  ·  '..e.title..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..'  ·  '..acceptedCount(e)..'/'..e.size)
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row:UnlockHighlight(); row:Hide() end
     end
     local e=selected and events[selected]
+    for _,row in ipairs(window.signupRows) do row:Hide() end
     if e and not e.cancelled then
-        local names={}; for name,role in pairs(e.people) do names[#names+1]=(catalog.roleIcons[role] or '')..' '..name..' — '..(roles[role] or role) end; table.sort(names)
+        local names={}; for name in pairs(e.people) do names[#names+1]=name end; table.sort(names)
         local pending=intents[selected]
-        window.details:SetText(e.title..'\n'..kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · '..count(e.people)..'/'..e.size..'\n'..e.description..'\n\nУчасники:\n'..(#names>0 and table.concat(names,'\n') or 'Поки немає')..(pending and '\n\nОчікується підтвердження автора' or ''))
+        local lines={}
+        for _,name in ipairs(names) do
+            local role=e.people[name]
+            lines[#lines+1]=(catalog.roleIcons[role] or '')..' '..name..' — '..(roles[role] or role)..' · '..statuses[e.statuses[name]]
+        end
+        local own=e.owner==identity
+        window.details:SetText(e.title..'\n'..kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · прийнято '..acceptedCount(e)..'/'..e.size..'\n'..e.description..'\n\n'..(own and 'Заявки та учасники:' or 'Заявки та учасники:\n'..(#lines>0 and table.concat(lines,'\n') or 'Поки немає'))..(pending and '\n\nОчікується доставка автору' or ''))
+        local height=window.details:GetStringHeight()+8
+        if own then
+            for i,name in ipairs(names) do
+                local row=window.signupRows[i]
+                if not row then
+                    row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(340,58)
+                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetWidth(335); row.label:SetJustifyH('LEFT')
+                    row.accept=action(row,'Прийняти',0,-22,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end)
+                    row.reserve=action(row,'Резерв',100,-22,94,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end)
+                    row.reject=action(row,'Відхилити',200,-22,104,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end)
+                    window.signupRows[i]=row
+                end
+                row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*58)
+                local role=e.people[name]
+                row.label:SetText((catalog.roleIcons[role] or '')..' '..name..' · '..roles[role]..' · '..statuses[e.statuses[name]])
+                row.accept:SetShown(name~=identity); row.reserve:SetShown(name~=identity); row.reject:SetShown(name~=identity); row:Show()
+            end
+            height=height+#names*58
+        end
+        window.detailsContent:SetHeight(math.max(250,height+8))
         window.cancel:SetShown(e.owner==identity)
-        window.join:SetShown(not e.people[identity])
-        window.leave:SetShown(e.people[identity] ~= nil)
+        window.join:SetShown(not pending and (not e.people[identity] or e.statuses[identity]=='rejected'))
+        window.leave:SetShown((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected'))
     else
         window.details:SetText('Оберіть подію зі списку.'); window.cancel:Hide(); window.join:Hide(); window.leave:Hide()
+        window.detailsContent:SetHeight(250)
     end
-    window.detailsContent:SetHeight(math.max(250,window.details:GetStringHeight()+8))
 end
 local function createWindow()
     local f=CreateFrame('Frame','OldKrakenEventsFrame',UIParent,'BasicFrameTemplateWithInset')
@@ -380,7 +440,7 @@ local function createWindow()
     f.pageLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.pageLabel:SetPoint('TOPLEFT',f,'TOPLEFT',75,-315)
     action(f,'›',125,-310,45,function() page=page+1; refresh() end)
     local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450,-66); scroll:SetSize(350,250)
-    f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(350,250); scroll:SetScrollChild(f.detailsContent)
+    f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(350,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(350); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     selectMenu(f,'OldKrakenEventsRole',450,-325,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
     f.join=action(f,'Записатися',605,-325,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end)
