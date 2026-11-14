@@ -11,8 +11,8 @@ local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]
 local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.70,0.75,0.80},cancelled={1,0.42,0.38},expired={0.72,0.72,0.72}}
 local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
-local dirty,sequence,nextSync,lastQuery={},0,0,-60
-local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',171,'customer',86400,{}
+local dirty,sequence,nextSync,lastQuery,nextDisplay={},0,0,-60,0
+local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',0,'customer',86400,{}
 local statusFilter,professionFilter='all',0
 local searchQuery=''
 local chosenRecipe
@@ -54,7 +54,7 @@ local function decode(payload,sender)
     rev,created,due,prof,qty,reward,n=tonumber(rev),tonumber(created),tonumber(due),tonumber(prof),tonumber(qty),tonumber(reward),tonumber(n)
     local now=GetServerTime()
     if not nameOK(owner) or owner~=sender or not idOK(id) or not int(rev,1,2147483647) or not int(created,now-2592000,now+600)
-        or not int(due,created+1,created+604800) or not professionNames[prof] or not textOK(item,1,160) or not int(qty,1,200)
+        or not int(due,created+1,created+2592000) or not professionNames[prof] or not textOK(item,1,160) or not int(qty,1,200)
         or not int(reward,0,100000) or not materialNames[mats] or not textOK(note,0,180) or not statusNames[status]
         or (worker~='' and not nameOK(worker)) or not int(n,0,20) or #f<15+n then return nil end
     if (status=='assigned' or status=='delivered' or status=='done') and worker=='' then return nil end
@@ -80,6 +80,16 @@ local function persist()
 end
 local function get(k) return own[k] or observed[k] end
 local function fits(o) local ok,payload=pcall(encode,o); return ok and #payload<=2560 end
+local function displayStatus(o)
+    if (o.status=='open' or o.status=='assigned') and o.deadline<GetServerTime() then return 'expired' end
+    return o.status
+end
+local function canCraft(o)
+    if (o.itemID or 0)>0 or (o.recipeID or 0)>0 then
+        return OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0),false
+    end
+    return OldKraken.Workshop and OldKraken.Workshop:HasProfession(o.profession),true
+end
 
 local function connect()
     local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
@@ -137,15 +147,19 @@ local function intent(k,action)
 end
 local function ownerAction(k,action,actor)
     local o=own[k]; if not active or not o then return false end
-    local oldStatus,oldWorker=o.status,o.worker
+    local oldStatus,oldWorker,oldDeadline,oldCandidates=o.status,o.worker,o.deadline,o.candidates
     if action=='choose' then
         if o.status~='open' or not o.candidates[actor] or o.deadline<GetServerTime() then return false end
         o.status,o.worker='assigned',actor
     elseif action=='finish' then if o.status~='delivered' then return false end; o.status='done'
     elseif action=='cancel' then if o.status=='done' or o.status=='cancelled' then return false end; o.status='cancelled'
+    elseif action=='reopen' then
+        local now=GetServerTime()
+        if o.status~='assigned' or o.deadline>=now or now+86400>o.created+2592000 then return false end
+        o.status,o.worker,o.deadline,o.candidates='open',nil,now+86400,{}
     else return false end
     o.rev=o.rev+1
-    if not fits(o) then o.status,o.worker,o.rev=oldStatus,oldWorker,o.rev-1; return false end
+    if not fits(o) then o.status,o.worker,o.deadline,o.candidates,o.rev=oldStatus,oldWorker,oldDeadline,oldCandidates,o.rev-1; return false end
     dirty[k]=true; persist(); changed(); return true
 end
 
@@ -165,12 +179,13 @@ comm:RegisterHandler('WORDER',function(sender,_,payload)
     end
     if not previous and o.status=='open' and o.rev==1 and GetServerTime()-o.created<=120 then
         local settings=OldKraken.DB and OldKraken.DB.settings
-        if type(settings)=='table' and settings.workshopOrderAlerts~=false and OldKraken.WorkshopRecipes
-            and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0) then
-            notify('Нове замовлення: '..o.item,professionNames[o.profession]..' · '..o.owner,k)
+        local matches,manual=canCraft(o)
+        if type(settings)=='table' and settings.workshopOrderAlerts~=false and matches then
+            notify('Нове замовлення: '..o.item,professionNames[o.profession]..' · '..o.owner..(manual and ' · рецепт не підтверджено' or ''),k)
         end
     elseif previous and o.rev>previous.rev then
         if o.worker==identity and previous.worker~=identity and o.status=='assigned' then notify('Вас обрано майстром',o.item..' · '..o.owner,k)
+        elseif previous.worker==identity and previous.status=='assigned' and o.status=='open' then notify('Замовлення перевідкрито',o.item..' · '..o.owner,k)
         elseif previous.candidates[identity] and o.status=='assigned' and o.worker~=identity and previous.status=='open' then notify('Обрано іншого майстра',o.item..' · '..o.owner,k)
         elseif (previous.worker==identity or previous.candidates[identity]) and o.status=='cancelled' and previous.status~='cancelled' then notify('Замовлення скасовано',o.item..' · '..o.owner,k)
         elseif previous.worker==identity and o.status=='done' and previous.status~='done' then notify('Замовлення підтверджено',o.item..' · '..o.owner,k) end
@@ -224,6 +239,7 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     local expired=false; for k,o in pairs(own) do if o.created<GetServerTime()-2592000 then own[k],dirty[k]=nil,nil; expired=true end end
     for k,o in pairs(observed) do if o.created<GetServerTime()-2592000 then observed[k],intents[k]=nil,nil; expired=true end end
     if expired then persist(); changed() end
+    if now>=nextDisplay then nextDisplay=now+30; changed() end
     local k=next(dirty); if k then local o=own[k]; if not o or comm:SendProtocol('WORDER',encode(o)) then dirty[k]=nil end end
 end) end
 
@@ -266,9 +282,14 @@ StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_FINISH={
     timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
 }
+StaticPopupDialogs.OLDKRAKEN_ORDER_REOPEN={
+    text='Перевідкрити «%s» на 24 години? Поточного майстра і відгуки буде знято.', button1='Перевідкрити', button2='Назад',
+    timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
+}
 local cardActionDialogs={
     cancel='OLDKRAKEN_ORDER_CARD_CANCEL', withdraw='OLDKRAKEN_ORDER_CARD_WITHDRAW',
-    delivered='OLDKRAKEN_ORDER_CARD_DELIVERED', finish='OLDKRAKEN_ORDER_CARD_FINISH',
+    delivered='OLDKRAKEN_ORDER_CARD_DELIVERED', finish='OLDKRAKEN_ORDER_CARD_FINISH', reopen='OLDKRAKEN_ORDER_REOPEN',
 }
 local function confirmCardAction(k,action)
     local o=k and get(k)
@@ -278,7 +299,7 @@ local function confirmCardAction(k,action)
         local current=get(k)
         if not active or profile~=expectedProfile or identity~=expectedIdentity or not current or current.status~=expectedStatus then showError(); return end
         local ok
-        if action=='cancel' or action=='finish' then ok=ownerAction(k,action) else ok=intent(k,action) end
+        if action=='cancel' or action=='finish' or action=='reopen' then ok=ownerAction(k,action) else ok=intent(k,action) end
         if not ok then showError() end
     end
     local popup=StaticPopup_Show(cardActionDialogs[action],o.item,nil,accept)
@@ -304,9 +325,9 @@ refresh=function()
     if not window or not window:IsShown() then return end
     local list={}; local seen={}
     for _,source in ipairs({own,observed}) do for k,o in pairs(source) do
-        local status=o.status=='open' and o.deadline<GetServerTime() and 'expired' or o.status
+        local status=displayStatus(o)
         local available=view=='available' and o.owner~=identity and status=='open' and not o.candidates[identity] and not intents[k]
-            and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0)
+            and canCraft(o)
         if not seen[k] and (view=='all' or (view=='mine' and o.owner==identity) or (view=='work' and (o.worker==identity or o.candidates[identity])) or (view=='available' and available))
             and (statusFilter=='all' or statusFilter==status) and (professionFilter==0 or professionFilter==o.profession)
             and (searchQuery=='' or lower(o.item):find(searchQuery,1,true) or lower(o.owner):find(searchQuery,1,true)) then
@@ -323,12 +344,14 @@ refresh=function()
         local entry=list[offset*CARDS_PER_PAGE+i]
         if entry then
             local o=entry.order; row.entryKey=entry.key
-            local stateKey=o.status=='open' and o.deadline<GetServerTime() and 'expired' or o.status
+            local stateKey=displayStatus(o)
             row.order=o; row.icon:SetTexture(orderIcon(o))
             row.title:SetText(o.item)
             row.meta:SetText(professionNames[o.profession]..' · '..o.owner)
             row.reward:SetText(o.quantity..' шт. · '..o.reward..' зол. · до '..date('%d.%m %H:%M',o.deadline))
-            row.state:SetText(stateKey=='expired' and 'Термін минув' or statusNames[stateKey])
+            local statusText=stateKey=='expired' and (o.status=='assigned' and 'У роботі · прострочено' or 'Термін минув') or statusNames[stateKey]
+            if view=='available' and (o.itemID or 0)==0 and (o.recipeID or 0)==0 then statusText=statusText..' · лише професія' end
+            row.state:SetText(statusText)
             row.state:SetTextColor(unpack(statusColors[stateKey] or statusColors.expired))
             local canWithdraw=o.owner~=identity and not intents[entry.key]
                 and ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity))
@@ -371,11 +394,11 @@ refresh=function()
     local o=selected and get(selected)
     local pending=selected and intents[selected]
     if o then
-        local state=o.status=='open' and o.deadline<GetServerTime() and 'Термін минув' or statusNames[o.status]
+        local state=displayStatus(o)=='expired' and (o.status=='assigned' and 'У роботі · прострочено' or 'Термін минув') or statusNames[o.status]
         local hasRecipe=(o.itemID or 0)>0 or (o.recipeID or 0)>0
         local masters=hasRecipe and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:FindMasters(o.itemID or 0,o.recipeID or 0) or {}
         local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..')' end
-        local known=hasRecipe and ('\nВідомі майстри: '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\nМайстри: оберіть рецепт або посилання на предмет'
+        local known=hasRecipe and ('\nВідомі майстри: '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\nПошук за професією; знання рецепта не підтверджено.'
         window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
         window.detailsContent:SetHeight(math.max(132,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
@@ -384,6 +407,7 @@ refresh=function()
         window.delivered:SetShown(not isOwner and not pending and o.status=='assigned' and o.worker==identity)
         window.finish:SetShown(isOwner and o.status=='delivered')
         window.cancel:SetShown(isOwner and o.status~='done' and o.status~='cancelled')
+        window.reopen:SetShown(isOwner and o.status=='assigned' and o.deadline<GetServerTime() and GetServerTime()+86400<=o.created+2592000)
         window.masters:SetShown(hasRecipe)
         if isOwner and o.status=='open' then
             local names={}; for name in pairs(o.candidates) do names[#names+1]=name end; table.sort(names)
@@ -401,7 +425,7 @@ refresh=function()
             window.candidateContent:SetHeight(math.max(90,#names*30)); window.candidateTitle:Show(); window.candidateScroll:Show()
         else window.candidateTitle:Hide(); window.candidateScroll:Hide() end
     else
-        window.details:SetText('Оберіть замовлення зі списку.'); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
+        window.details:SetText('Оберіть замовлення зі списку.'); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.reopen:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
     end
 end
 local function createWindow()
@@ -508,6 +532,7 @@ local function createWindow()
     f.delivered=button(f,'Передав',630,-345,100,function() if not selected or not intent(selected,'delivered') then showError() end end)
     f.finish=button(f,'Отримано',495,-345,110,function() if not selected or not ownerAction(selected,'finish') then showError() end end)
     f.cancel=button(f,'Скасувати',610,-345,110,function() if not selected or not ownerAction(selected,'cancel') then showError() end end)
+    f.reopen=button(f,'Перевідкрити',495,-345,110,function() confirmCardAction(selected,'reopen') end)
     f.masters=button(f,'Майстри',735,-345,110,function()
         local o=selected and get(selected)
         if o and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:ShowMasters(o.itemID or 0,o.recipeID or 0) end
@@ -516,7 +541,8 @@ local function createWindow()
     f.item=input(f,'Предмет або посилання',18,-420,300,''); f.quantity=input(f,'Кількість',335,-420,65,'1'); f.reward=input(f,'Винагорода (зол.)',420,-420,120,'0')
     f.item:SetScript('OnTextChanged',function() chosenRecipe=nil end)
     f.note=input(f,'Коментар',18,-475,360,'')
-    local professionMenu=dropdown(f,'OldKrakenOrderProfession',400,-492,170,professionIDs,professionNames,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v end)
+    local professionChoices={[0]='Оберіть професію'}; for id,name in pairs(professionNames) do professionChoices[id]=name end
+    local professionMenu=dropdown(f,'OldKrakenOrderProfession',400,-492,170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v end)
     button(f,'Обрати рецепт',560,-438,160,function()
         if not OldKraken.WorkshopRecipes then showError(); return end
         OldKraken.WorkshopRecipes:Choose(function(r)
@@ -531,7 +557,8 @@ local function createWindow()
     dropdown(f,'OldKrakenOrderDeadline',18,-550,150,{3600,21600,86400,604800},deadlineNames,function() return deadline end,function(v) deadline=v end)
     local dueLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); dueLabel:SetPoint('TOPLEFT',f,'TOPLEFT',18,-533); dueLabel:SetText('Термін')
     button(f,'Опублікувати',650,-548,160,function()
-        if create(f.item:GetText(),f.quantity:GetText(),f.reward:GetText(),f.note:GetText(),chosenRecipe) then f.item:SetText(''); f.note:SetText(''); print('Old Kraken: замовлення збережено та поставлено в чергу.') else showError() end
+        if not professionNames[profession] then print('Old Kraken: оберіть професію або рецепт.'); return end
+        if create(f.item:GetText(),f.quantity:GetText(),f.reward:GetText(),f.note:GetText(),chosenRecipe) then f.item:SetText(''); f.note:SetText(''); profession=0; UIDropDownMenu_SetText(professionMenu,professionChoices[0]); print('Old Kraken: замовлення збережено та поставлено в чергу.') else showError() end
     end)
     local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-603); note:SetText('Передачу речі й оплату гравці виконують у грі самостійно.')
     f:Hide(); return f

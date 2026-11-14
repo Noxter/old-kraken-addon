@@ -59,10 +59,11 @@ local function scan()
             if success then
                 local id=integer(line,1,1000000)
                 local r,m=integer(rank,1,9999),integer(maximum,1,9999)
+                if not id or not r or not m then return nil end
                 if id and byID[id] and r and m and not found[id] then
                     found[id]=true; list[#list+1]={id=id,rank=r,maximum=m}
                 end
-            end
+            else return nil end
         end
     end
     if #list==0 then return nil end
@@ -128,9 +129,17 @@ local function updateOwn()
     local list=scan(); scanState=list~=nil
     if not list then changed(); return false end
     local previous=records[identity]
+    if type(previous)=='table' and type(previous.list)=='table' then
+        local found={}; for _,entry in ipairs(list) do found[entry.id]=true end
+        for _,entry in ipairs(previous.list) do
+            if type(entry)=='table' and byID[entry.id] and not found[entry.id] then
+                scanState=false; changed(); return false
+            end
+        end
+    end
     if type(previous)=='table' and type(previous.list)=='table' and not forceBroadcast then
         local ok,prior=pcall(encode,{timestamp=1,list=previous.list})
-        if ok and prior==encode({timestamp=1,list=list}) then return true end
+        if ok and prior==encode({timestamp=1,list=list}) and integer(previous.timestamp,1,GetServerTime()+600) and GetServerTime()-previous.timestamp<86400 then return true end
     end
     local previousTime=type(previous)=='table' and integer(previous.timestamp,1,GetServerTime()+600) or nil
     local snapshot={timestamp=math.max(GetServerTime(),(previousTime or 0)+1),list=list}
@@ -194,7 +203,8 @@ render=function()
         if entry then
             row.entry=entry
             local dateText=integer(entry.timestamp,1,GetServerTime()+600) and date('%d.%m.%Y %H:%M',entry.timestamp) or 'невідомо'
-            row:SetText(entry.skill.name..'  ·  '..entry.name..'  ·  '..tostring(entry.rank)..'/'..tostring(entry.maximum)..'  ·  '..(entry.online and 'у грі' or 'офлайн / невідомо')..'  ·  '..dateText)
+            local stale=not integer(entry.timestamp,1,GetServerTime()+600) or GetServerTime()-entry.timestamp>604800
+            row:SetText(entry.skill.name..'  ·  '..entry.name..'  ·  '..tostring(entry.rank)..'/'..tostring(entry.maximum)..'  ·  '..(entry.online and 'у грі' or 'офлайн / невідомо')..'  ·  '..dateText..(stale and ' · застаріло' or ''))
             row:Show()
         else row.entry=nil; row:Hide() end
     end
@@ -237,4 +247,11 @@ function Workshop:Show()
     connect(); if not active then print('Old Kraken: майстерня доступна після входу до гільдії.'); return end
     if not frame then frame=createWindow() end
     frame:Show(); render()
+end
+function Workshop:HasProfession(id)
+    if not active or not identity then return false end
+    local record=records[identity]
+    if type(record)~='table' or type(record.list)~='table' then return false end
+    for _,entry in ipairs(record.list) do if type(entry)=='table' and entry.id==id then return true end end
+    return false
 end

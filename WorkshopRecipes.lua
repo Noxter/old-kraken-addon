@@ -168,8 +168,6 @@ local function scan()
                         if not previous then ownCount=ownCount+1 end
                         recordLearned({recipe=id,item=item,profession=profession,seen=seen,name=info.name,product=product}); touched=touched+1
                     end
-                elseif info.learned==false and type(own[id])=='table' and own[id].profession==profession then
-                    own[id]=nil; ownCount=math.max(0,ownCount-1); recipeChanged=true
                 end
             end
         end
@@ -331,7 +329,7 @@ render=function()
         local entry=list[offset*12+i]
         if entry then
             local r=entry.record; row.entry=entry
-            row:SetText((r.product~='' and r.product or r.name)..' · '..entry.owner..' · '..professionNames[r.profession]..' · '..(online[entry.owner] and 'у грі' or 'офлайн / невідомо')..' · '..date('%d.%m.%Y',r.seen))
+            row:SetText((r.product~='' and r.product or r.name)..' · '..entry.owner..' · '..professionNames[r.profession]..' · '..(online[entry.owner] and 'у грі' or 'офлайн / невідомо')..' · '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or ''))
             row:Show()
         else row.entry=nil; row:Hide() end
     end
@@ -389,7 +387,7 @@ function Recipes:FindMasters(itemID,recipeID)
     for name,items in pairs(people) do
         if safeText(name,1,128) and type(items)=='table' then
             for _,r in pairs(items) do
-                if validRecord(r) and ((itemID>0 and r.item==itemID) or (itemID==0 and r.recipe==recipeID)) then
+                if validRecord(r) and ((itemID>0 and r.item==itemID) or (recipeID>0 and r.recipe==recipeID)) then
                     if not found[name] or r.seen>found[name] then found[name]=r.seen end
                 end
             end
@@ -403,7 +401,7 @@ function Recipes:Knows(itemID,recipeID)
     local own=people[identity]
     if type(own)~='table' then return false end
     for _,r in pairs(own) do
-        if validRecord(r) and ((itemID>0 and r.item==itemID) or (itemID==0 and r.recipe==recipeID)) then return true end
+        if validRecord(r) and ((itemID>0 and r.item==itemID) or (recipeID>0 and r.recipe==recipeID)) then return true end
     end
     return false
 end
