@@ -8,6 +8,8 @@ OldKraken._listeners = OldKraken._listeners or {}
 -- Shared dark theme for the addon's native controls.
 OldKraken.UIStyle = {}
 function OldKraken.UIStyle.Window(frame)
+    frame:SetFrameStrata('FULLSCREEN')
+    frame:SetToplevel(true)
     if frame.NineSlice then frame.NineSlice:Hide() end
     if frame.Bg then frame.Bg:Hide() end
     if frame.Inset then frame.Inset:Hide() end
