@@ -5,7 +5,7 @@ local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
 local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
 local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}
 local active, identity, profile, storage = false, nil, nil, nil
-local events, dirty, intents = {}, {}, {}
+local events, dirty, intents, newDirty = {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
 local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
 local page = 1
@@ -71,7 +71,7 @@ local function decode(sender, payload)
 end
 local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
 
-comm:RegisterHandler('CEVENT', function(sender, _, payload)
+local function receiveEvent(sender, _, payload, isAnnouncement)
     if not active then return end
     local e = decode(sender, payload); if not e then return end
     local key = eventKey(e.owner,e.id)
@@ -90,7 +90,14 @@ comm:RegisterHandler('CEVENT', function(sender, _, payload)
     local intent = intents[key]
     if intent and ((intent.role == 'leave' and not e.people[identity]) or e.people[identity] == intent.role or e.cancelled) then intents[key] = nil end
     save(); fire()
-end)
+    if isAnnouncement and not old and e.owner~=identity and not e.cancelled then
+        local created=tonumber(e.id:match('^(%d+)%-'))
+        local age=created and GetServerTime()-created
+        if age and age>=0 and age<=120 then OldKraken:Fire('GUILD_EVENTS_NEW',key,e) end
+    end
+end
+comm:RegisterHandler('CEVENT', function(sender,id,payload) receiveEvent(sender,id,payload,false) end)
+comm:RegisterHandler('CVNEW', function(sender,id,payload) receiveEvent(sender,id,payload,true) end)
 
 local function updateSignup(sender, owner, id, role, version)
     local key = eventKey(owner,id)
@@ -132,7 +139,7 @@ function Events:Create(title, description, when, kind, size, activity)
     sequence=sequence+1
     local id=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
     local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},versions={},activity=activity}
-    local key=eventKey(identity,id); events[key]=e; dirty[key]=true; save(); fire(); return true
+    local key=eventKey(identity,id); events[key]=e; dirty[key]=true; newDirty[key]=true; save(); fire(); return true
 end
 function Events:Cancel(key)
     local e=events[key]; if not active or not e or e.owner~=identity or e.cancelled then return false end
@@ -151,7 +158,7 @@ local function connect()
     local name, guild = character(), type(GetGuildInfo)=='function' and GetGuildInfo('player')
     local realm = type(GetRealmName)=='function' and GetRealmName() or ''
     if not name or not validText(guild,1,128) or type(realm)~='string' or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
-        active=false; events,dirty,intents={}, {}, {}; selected=nil
+        active=false; events,dirty,intents,newDirty={}, {}, {}, {}; selected=nil
         if window then window:Hide() end
         return
     end
@@ -163,7 +170,7 @@ local function connect()
     if root.guildCalendarV1[key] == nil then root.guildCalendarV1[key]={} end
     if type(root.guildCalendarV1[key])~='table' then active=false; return end
     active,identity,profile,storage=true,name,key,root.guildCalendarV1[key]
-    events,dirty,intents={}, {}, {}
+    events,dirty,intents,newDirty={}, {}, {}, {}
     sequence=type(storage.sequence)=='number' and storage.sequence or 0
     if type(storage.owned)=='table' then
         for k,e in pairs(storage.owned) do
@@ -192,7 +199,7 @@ if C_Timer and C_Timer.NewTicker then
         if name~=identity or not guild or (type(GetRealmName)=='function' and (GetRealmName()..'\001'..guild..'\001'..name)~=profile) then active=false; connect(); return end
         local removed = false
         for key,e in pairs(events) do
-            if e.when < GetServerTime()-172800 then events[key],dirty[key],intents[key]=nil,nil,nil; removed=true end
+            if e.when < GetServerTime()-172800 then events[key],dirty[key],intents[key],newDirty[key]=nil,nil,nil,nil; removed=true end
         end
         if removed then save(); fire() end
         local now=GetTime()
@@ -204,7 +211,12 @@ if C_Timer and C_Timer.NewTicker then
             end
         end
         local key=next(dirty)
-        if key then local e=events[key]; if not e or comm:SendProtocol('CEVENT',encode(e)) then dirty[key]=nil end end
+        if key then
+            local e=events[key]
+            local created=e and tonumber(e.id:match('^(%d+)%-'))
+            local announce=e and newDirty[key] and not e.cancelled and created and GetServerTime()-created<=120
+            if not e or comm:SendProtocol(announce and 'CVNEW' or 'CEVENT',encode(e)) then dirty[key],newDirty[key]=nil,nil end
+        end
     end)
 end
 
@@ -319,6 +331,7 @@ local function datePicker(parent)
 end
 local function refresh()
     if not window or not window:IsShown() then return end
+    window.alertButton:SetText(Events:AlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local list={}
     for key,e in pairs(events) do if not e.cancelled and e.when>=GetServerTime()-172800 then list[#list+1]={key=key,event=e} end end
     table.sort(list,function(a,b) if a.event.when~=b.event.when then return a.event.when<b.event.when end return a.key<b.key end)
@@ -353,6 +366,7 @@ local function createWindow()
     table.insert(UISpecialFrames,'OldKrakenEventsFrame'); f:SetSize(840,560); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true)
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); f:SetClampedToScreen(true)
     OldKraken.UIStyle.Window(f); if f.TitleText then f.TitleText:SetText('Old Kraken — Події гільдії') end
+    f.alertButton=action(f,'Сповіщення',630,-35,185,function() Events:SetAlertsEnabled(not Events:AlertsEnabled()); refresh() end)
     local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-38); note:SetText('Час подій показано за місцевим часом комп’ютера.')
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-72); f.empty:SetText('Найближчих подій немає.')
     for i=1,8 do
@@ -412,6 +426,21 @@ function Events:Show()
     if not active then print('Old Kraken: календар доступний після входу до гільдії.'); return end
     if not window then window=createWindow() end
     window:Show(); refresh()
+end
+
+function Events:ShowEvent(key)
+    if events[key] and not events[key].cancelled then selected=key end
+    self:Show()
+end
+function Events:AlertsEnabled()
+    local settings=OldKraken.DB and OldKraken.DB.settings
+    return type(settings)=='table' and settings.guildEventNotifications~=false
+end
+function Events:SetAlertsEnabled(enabled)
+    local settings=OldKraken.DB and OldKraken.DB.settings
+    if type(settings)~='table' then return false end
+    settings.guildEventNotifications=enabled and true or false
+    OldKraken:Fire('GUILD_EVENTS_ALERT_SETTING'); return true
 end
 
 OldKraken:On('GUILD_EVENTS_CHANGED',refresh)

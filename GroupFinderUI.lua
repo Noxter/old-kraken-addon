@@ -845,7 +845,7 @@ OldKraken:On('GROUP_FINDER_ALERT_SETTING', function()
 end)
 
 local function showAlert(message, kind, key, dungeonId)
-    print('|cff2ec4b6Old Kraken|r: ' .. message .. '. /okr group')
+    print('|cff2ec4b6Old Kraken|r: ' .. message .. (kind == 'event' and '. /okr events' or '. /okr group'))
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         OldKraken.UIStyle.Button(groupAlert)
@@ -879,6 +879,10 @@ local function showAlert(message, kind, key, dungeonId)
             local target = self.groupKey
             local alertKind = self.kind
             self:Hide()
+            if alertKind == 'event' then
+                if OldKraken.GuildEvents then OldKraken.GuildEvents:ShowEvent(target) end
+                return
+            end
             if target and Finder.groups[target] then
                 tab, selected, offset, requestOffset = alertKind == 'decision' and 'applications' or 'mine', target, 0, 0
             end
@@ -894,7 +898,7 @@ local function showAlert(message, kind, key, dungeonId)
     local hasGroupArt = kind == 'group'
     groupAlert.alertArt:SetShown(hasGroupArt)
     if hasGroupArt then setDungeonArt(groupAlert.alertArt, dungeonId) end
-    groupAlert.positionKind = kind == 'group' and 'group' or 'request'
+    groupAlert.positionKind = kind == 'event' and 'event' or (kind == 'group' and 'group' or 'request')
     local settings = OldKraken.DB and OldKraken.DB.settings
     local positions = type(settings) == 'table' and settings.alertPositions
     local pos = type(positions) == 'table' and positions[groupAlert.positionKind]
@@ -905,7 +909,7 @@ local function showAlert(message, kind, key, dungeonId)
     else
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
     end
-    groupAlert:SetText(message .. '\nКлік — відкрити пошук · Перетягніть, щоб перемістити')
+    groupAlert:SetText(message .. (kind == 'event' and '\nКлік — відкрити подію · Перетягніть, щоб перемістити' or '\nКлік — відкрити пошук · Перетягніть, щоб перемістити'))
     local alertText = groupAlert:GetFontString()
     alertText:ClearAllPoints()
     alertText:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', hasGroupArt and 78 or 12, -8)
@@ -924,8 +928,19 @@ function Finder:PreviewAlert(kind)
         showAlert('Приклад: нове оголошення про набір\nПеретягніть банер у потрібне місце', 'group')
     elseif kind == 'request' then
         showAlert('Приклад: сповіщення про заявку\nПеретягніть банер у потрібне місце', 'request')
+    elseif kind == 'event' then
+        showAlert('Приклад: нова подія гільдії\nПеретягніть банер у потрібне місце', 'event')
     end
 end
+
+OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
+    if not OldKraken.GuildEvents or not OldKraken.GuildEvents:AlertsEnabled() then return end
+    local message='Нова подія: '..event.title..'\n'..event.owner..' · '..date('%d.%m.%Y %H:%M',event.when)
+    showAlert(message,'event',key)
+end)
+OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
+    if groupAlert and groupAlert.kind=='event' and not OldKraken.GuildEvents:AlertsEnabled() then groupAlert:Hide() end
+end)
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not Finder:GroupAlertsEnabled() then return end
