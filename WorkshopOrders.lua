@@ -256,18 +256,32 @@ StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_WITHDRAW={
     timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
 }
+StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_DELIVERED={
+    text='Позначити замовлення «%s» як передане?', button1='Передав', button2='Назад',
+    timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
+}
+StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_FINISH={
+    text='Підтвердити отримання замовлення «%s»?', button1='Отримано', button2='Назад',
+    timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
+}
+local cardActionDialogs={
+    cancel='OLDKRAKEN_ORDER_CARD_CANCEL', withdraw='OLDKRAKEN_ORDER_CARD_WITHDRAW',
+    delivered='OLDKRAKEN_ORDER_CARD_DELIVERED', finish='OLDKRAKEN_ORDER_CARD_FINISH',
+}
 local function confirmCardAction(k,action)
     local o=k and get(k)
-    if not active or not o or (action~='cancel' and action~='withdraw') then showError(); return end
+    if not active or not o or not cardActionDialogs[action] then showError(); return end
     local expectedProfile,expectedIdentity,expectedStatus=profile,identity,o.status
     local function accept()
         local current=get(k)
         if not active or profile~=expectedProfile or identity~=expectedIdentity or not current or current.status~=expectedStatus then showError(); return end
         local ok
-        if action=='cancel' then ok=ownerAction(k,'cancel') else ok=intent(k,'withdraw') end
+        if action=='cancel' or action=='finish' then ok=ownerAction(k,action) else ok=intent(k,action) end
         if not ok then showError() end
     end
-    local popup=StaticPopup_Show(action=='cancel' and 'OLDKRAKEN_ORDER_CARD_CANCEL' or 'OLDKRAKEN_ORDER_CARD_WITHDRAW',o.item,nil,accept)
+    local popup=StaticPopup_Show(cardActionDialogs[action],o.item,nil,accept)
     if not popup then showError(); return end
     if not popup.oldKrakenRestoreHook then
         popup:HookScript('OnHide',function(self)
@@ -423,9 +437,9 @@ local function createWindow()
             local k=self:GetParent().entryKey; local o=k and get(k)
             if not o then showError(); return end
             if o.owner==identity and o.status=='delivered' then
-                if not ownerAction(k,'finish') then showError() end
+                confirmCardAction(k,'finish')
             elseif o.worker==identity and o.status=='assigned' then
-                if not intent(k,'delivered') then showError() end
+                confirmCardAction(k,'delivered')
             else showError() end
         end)
         card.withdraw=button(card,'Відмовитися',112,-84,99,function(self)
