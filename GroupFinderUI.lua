@@ -358,10 +358,13 @@ local function refresh()
                     local memberRole = fixed and fixed.memberRole or (member and (member == g.owner and g.role or (g.memberRoles and g.memberRoles[member]) or '')) or ''
                     slot.groupKey, slot.member, slot.memberRole, slot.requiredRole = entry.key, member, memberRole, fixed and fixed.role or nil
                     if member then
-                        slot.ring:Hide()
                         if roleCoords[memberRole] then
-                            setRoleIcon(slot.icon, memberRole); slot.icon:Show(); slot.text:Hide()
-                        else slot.icon:Hide(); slot.text:SetText(memberRole == 'flex' and 'F' or '—'); slot.text:Show() end
+                            slot.ring:Hide(); setRoleIcon(slot.icon, memberRole); slot.icon:Show(); slot.text:Hide()
+                        elseif memberRole == 'flex' then
+                            slot.ring:Hide(); slot.icon:Hide(); slot.text:SetText('F'); slot.text:Show()
+                        else
+                            slot.ring:Show(); slot.icon:Hide(); slot.text:SetText('?'); slot.text:Show()
+                        end
                     else
                         slot.ring:Show(); slot.icon:Hide(); slot.text:Hide()
                     end

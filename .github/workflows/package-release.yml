@@ -50,6 +50,7 @@ jobs:
             test -f "Media/Raids/$raid.tga" || { echo "Missing raid image: $raid"; exit 1; }
             cp "Media/Raids/$raid.tga" package/OldKraken/Media/Raids/
           done
+          cp Media/Raids/CREDITS.txt package/OldKraken/Media/Raids/
           cd package
           zip -r ../OldKraken.zip OldKraken
           unzip -l ../OldKraken.zip
