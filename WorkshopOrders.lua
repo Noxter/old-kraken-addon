@@ -7,10 +7,14 @@ local professionIDs={171,164,165,197,202,333,185,129,186}
 local materialNames={customer='Замовника',crafter='Майстра',mixed='Спільні'}
 local statusNames={open='Шукає майстра',assigned='У роботі',delivered='Передано',done='Виконано',cancelled='Скасовано'}
 local deadlineNames={[3600]='1 година',[21600]='6 годин',[86400]='Доба',[604800]='Тиждень'}
+local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]=136243,[333]=136244,[185]=133971,[129]=135966,[186]=136248}
+local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.70,0.75,0.80},cancelled={1,0.42,0.38},expired={0.72,0.72,0.72}}
+local CARDS_PER_PAGE=6
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
 local dirty,sequence,nextSync,lastQuery={},0,0,-60
 local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',171,'customer',86400,{}
 local statusFilter,professionFilter='all',0
+local searchQuery=''
 local chosenRecipe
 local refresh
 
@@ -20,6 +24,13 @@ local function key(owner,id) return owner..'\001'..id end
 local function nameOK(s) return textOK(s,1,128) end
 local function idOK(s) return textOK(s,1,64) and s:match('^[%w%-]+$')~=nil end
 local function size(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
+local function lower(text)
+    text=text:lower():gsub('\208[\144-\175]',function(pair)
+        local b=pair:byte(2); if b<=159 then return string.char(208,b+32) end; return string.char(209,b-32)
+    end)
+    local special={['\208\132']='\209\148',['\208\134']='\209\150',['\208\135']='\209\151',['\210\144']='\210\145'}
+    return (text:gsub('[\208\210][\128-\191]',special))
+end
 local function me()
     if type(UnitName)~='function' then return nil end
     local a,b=UnitName('player'); if not nameOK(a) then return nil end
@@ -235,6 +246,14 @@ local function dropdown(parent,name,x,y,width,values,labels,get,set)
     UIDropDownMenu_SetText(f,labels[get()]); return f
 end
 local function showError() print('Old Kraken: дію не виконано. Оновіть дані або перевірте стан замовлення.') end
+local function orderIcon(o)
+    local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
+    if (o.itemID or 0)>0 and type(getIcon)=='function' then
+        local ok,icon=pcall(getIcon,o.itemID)
+        if ok and not (type(issecretvalue)=='function' and issecretvalue(icon)) and (type(icon)=='number' or type(icon)=='string') then return icon end
+    end
+    return professionIcons[o.profession] or 134400
+end
 refresh=function()
     if not window or not window:IsShown() then return end
     local list={}; local seen={}
@@ -243,23 +262,31 @@ refresh=function()
         local available=view=='available' and o.owner~=identity and status=='open' and not o.candidates[identity] and not intents[k]
             and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0)
         if not seen[k] and (view=='all' or (view=='mine' and o.owner==identity) or (view=='work' and (o.worker==identity or o.candidates[identity])) or (view=='available' and available))
-            and (statusFilter=='all' or statusFilter==status) and (professionFilter==0 or professionFilter==o.profession) then
+            and (statusFilter=='all' or statusFilter==status) and (professionFilter==0 or professionFilter==o.profession)
+            and (searchQuery=='' or lower(o.item):find(searchQuery,1,true) or lower(o.owner):find(searchQuery,1,true)) then
             seen[k]=true; list[#list+1]={key=k,order=o}
         end
     end end
     table.sort(list,function(a,b) if a.order.created~=b.order.created then return a.order.created>b.order.created end return a.key<b.key end)
-    offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/8)-1)))
-    window.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/8)))
+    if selected and not seen[selected] then selected=nil end
+    offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/CARDS_PER_PAGE)-1)))
+    window.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/CARDS_PER_PAGE)))
+    window.empty:SetShown(#list==0)
     window.alerts:SetText((OldKraken.DB.settings.workshopOrderAlerts~=false) and 'Нові: увімк.' or 'Нові: вимк.')
     for i,row in ipairs(orderRows) do
-        local entry=list[offset*8+i]
+        local entry=list[offset*CARDS_PER_PAGE+i]
         if entry then
             local o=entry.order; row.entryKey=entry.key
-            local state=o.status=='open' and o.deadline<GetServerTime() and 'Термін минув' or statusNames[o.status]
-            row:SetText(o.item..' ×'..o.quantity..' · '..professionNames[o.profession]..' · '..state)
+            local stateKey=o.status=='open' and o.deadline<GetServerTime() and 'expired' or o.status
+            row.order=o; row.icon:SetTexture(orderIcon(o))
+            row.title:SetText(o.item)
+            row.meta:SetText(professionNames[o.profession]..' · '..o.owner)
+            row.reward:SetText(o.quantity..' шт. · '..o.reward..' зол. · до '..date('%d.%m %H:%M',o.deadline))
+            row.state:SetText(stateKey=='expired' and 'Термін минув' or statusNames[stateKey])
+            row.state:SetTextColor(unpack(statusColors[stateKey] or statusColors.expired))
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
-        else row.entryKey=nil; row:UnlockHighlight(); row:Hide() end
+        else row.entryKey=nil; row.order=nil; row:UnlockHighlight(); row:Hide() end
     end
     for _,row in ipairs(window.candidates) do row:Hide() end
     local o=selected and get(selected)
@@ -312,10 +339,36 @@ local function createWindow()
     local professionLabels={[0]='Усі професії'}; local filterIDs={0}
     for _,id in ipairs(professionIDs) do professionLabels[id]=professionNames[id]; filterIDs[#filterIDs+1]=id end
     dropdown(f,'OldKrakenOrdersFilterProfession',675,-42,185,filterIDs,professionLabels,function() return professionFilter end,function(v) professionFilter=v; offset=0; refresh() end)
-    for i=1,8 do orderRows[i]=button(f,'',18,-80-(i-1)*32,450,function(self) if self.entryKey then selected=self.entryKey; refresh() end end) end
+    f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-88); f.empty:SetWidth(430); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Замовлень не знайдено. Змініть фільтри або створіть замовлення.')
+    for i=1,CARDS_PER_PAGE do
+        local col=(i-1)%2; local line=math.floor((i-1)/2)
+        local card=button(f,'',18+col*229,-80-line*82,219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
+        card:SetHeight(78)
+        card.icon=card:CreateTexture(nil,'ARTWORK'); card.icon:SetPoint('TOPLEFT',card,'TOPLEFT',7,-8); card.icon:SetSize(34,34)
+        local function label(template,y)
+            local text=card:CreateFontString(nil,'OVERLAY',template); text:SetPoint('TOPLEFT',card,'TOPLEFT',48,y); text:SetPoint('RIGHT',card,'RIGHT',-6,0); text:SetJustifyH('LEFT'); text:SetWordWrap(false); return text
+        end
+        card.title=label('GameFontNormal',-6); card.meta=label('GameFontHighlightSmall',-25)
+        card.reward=label('GameFontHighlightSmall',-42); card.state=label('GameFontNormalSmall',-59)
+        card:SetScript('OnEnter',function(self)
+            local o=self.order; if not o or not GameTooltip then return end
+            GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(o.item)
+            GameTooltip:AddLine('Замовник: '..o.owner,1,1,1,true)
+            GameTooltip:AddLine('Професія: '..professionNames[o.profession],1,1,1,true)
+            GameTooltip:AddLine('Кількість: '..o.quantity..' · Винагорода: '..o.reward..' зол.',1,1,1,true)
+            GameTooltip:AddLine('Термін: '..date('%d.%m.%Y %H:%M',o.deadline),1,1,1,true)
+            GameTooltip:AddLine('Натисніть, щоб переглянути деталі',0.6,0.9,1,true); GameTooltip:Show()
+        end)
+        card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        orderRows[i]=card
+    end
     button(f,'‹',18,-342,44,function() offset=offset-1; refresh() end)
     f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-348)
     button(f,'›',130,-342,44,function() offset=offset+1; refresh() end)
+    local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,-349); searchLabel:SetText('Пошук')
+    local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); search:SetPoint('TOPLEFT',f,'TOPLEFT',265,-344); search:SetSize(195,22); search:SetAutoFocus(false)
+    search:SetScript('OnTextChanged',function(self) searchQuery=lower(self:GetText() or ''); offset=0; refresh() end)
+    search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,-80); detailsScroll:SetSize(340,132)
     f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(330,132); detailsScroll:SetScrollChild(f.detailsContent)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(330); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
