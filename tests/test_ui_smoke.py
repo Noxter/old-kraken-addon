@@ -4,7 +4,8 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {}; UIParent = {}
+OldKraken = {}; UIParent = {}; StaticPopupDialogs = {}
+function StaticPopup_Show() end
 function OldKraken:On(name, fn) self.listener = fn end
 function print(...) end
 function GetServerTime() return 12345 end
