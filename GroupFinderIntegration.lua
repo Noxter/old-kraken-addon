@@ -319,7 +319,7 @@ frame:SetScript('OnEvent', function(_, event)
         for entry, value in pairs(storage.pending) do
             if count >= 100 then break end
             if type(entry) == 'string' and #entry <= 193 and
-                (value == 'pending' or value == 'reject' or value == 'closed' or value == 'retry') then
+                (value == 'pending' or value == 'accept' or value == 'reject' or value == 'closed' or value == 'retry') then
                 finder.pending[entry] = value; count = count + 1
             end
         end

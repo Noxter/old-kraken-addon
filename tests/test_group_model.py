@@ -26,7 +26,9 @@ assert(not clone:ReceiveGroup('Alice-Realm', snapshot))
 now = 100
 assert(not clone:ReceiveGroup('Alice-Realm', snapshot))
 assert(clone.groups['Alice-Realm' .. '\\001' .. group.id].seenAt == 100)
-clone.pending['Alice-Realm' .. '\\001' .. group.id] = 'pending'
+local applicationKey = 'Alice-Realm' .. '\\001' .. group.id
+clone.pending[applicationKey] = 'pending'
+clone.pendingVersions[applicationKey], clone.pendingRoles[applicationKey] = 1234567890001, 'healer'
 assert(model:ReceiveJoin('Bob-Realm', model._pack({'Alice-Realm', group.id, 'healer', 'apply', '1234567890001'})))
 assert(model:ReceiveJoin('Eve-Realm', model._pack({'Alice-Realm', group.id, '', 'withdraw', '1234567890002'})))
 assert(not model:ReceiveJoin('Eve-Realm', model._pack({'Alice-Realm', group.id, '', 'apply', '1234567890001'})))
@@ -35,7 +37,10 @@ assert(#group.members == 2 and group.revision == 2)
 assert(not model:RoleAvailable(group, 'healer'))
 assert(model:RoleAvailable(group, 'dps'))
 assert(clone:ReceiveGroup('Alice-Realm', model:EncodeGroup(group)))
-assert(clone.pending['Alice-Realm' .. '\\001' .. group.id] == nil)
+assert(clone.pending[applicationKey] == 'accept')
+assert(clone.pendingVersions[applicationKey] == nil and clone.pendingRoles[applicationKey] == nil)
+assert(clone:DismissApplication('Alice-Realm', group.id))
+assert(clone.pending[applicationKey] == nil)
 assert(not clone:ReceiveGroup('Mallory-Realm', model:EncodeGroup(group)))
 assert(not model:ReceiveJoin('Mallory-Realm', 'garbage'))
 local blocked, attempts = true, 0

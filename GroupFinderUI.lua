@@ -512,7 +512,8 @@ local function refresh()
     local alreadyMember = false
     if g then for _, name in ipairs(g.members) do if name == Finder.identity then alreadyMember = true; break end end end
     window.applyButton:SetShown(isOther and not alreadyMember and pending ~= 'pending')
-    window.withdrawButton:SetShown(isOther and pending == 'pending')
+    window.applicationActionButton:SetText(pending == 'pending' and 'Відкликати' or 'Прибрати заявку')
+    window.applicationActionButton:SetShown(tab == 'applications' and g and g.owner ~= Finder.identity and pending ~= nil)
     window.cancelButton:SetShown(canManage)
     window.bumpButton:SetShown(canManage)
     window.roleButton:SetShown(tab == 'create' or (isOther and not alreadyMember))
@@ -699,7 +700,13 @@ local function createWindow()
             end
         end)
         remove:SetScript('OnEnter', function(self)
-            if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(tab == 'applications' and 'Видалити або відкликати заявку' or 'Видалити групу'); GameTooltip:Show() end
+            if GameTooltip then
+                local entry = f.visible and f.visible[index + offset]
+                local status = entry and tab == 'applications' and Finder.pending[entry.key]
+                local label = status == 'pending' and 'Відкликати заявку'
+                    or (status and 'Прибрати заявку зі списку' or 'Видалити групу')
+                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(label); GameTooltip:Show()
+            end
         end)
         remove:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
         remove:Hide()
@@ -781,9 +788,12 @@ local function createWindow()
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
         elseif g then print('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.') end
     end)
-    f.withdrawButton = button(f, 'Відкликати', 700, -385, 140, function()
+    f.applicationActionButton = button(f, 'Відкликати', 700, -385, 140, function()
         local g=selected and Finder.groups[selected]
-        if g and Finder:Withdraw(g.owner, g.id) then Finder:Changed(); refresh() end
+        if not g or g.owner == Finder.identity or not Finder.pending[selected] then return end
+        if Finder:DismissApplication(g.owner, g.id) then
+            Finder:Changed(); selected=nil; refresh()
+        else print('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.') end
     end)
     f.cancelButton = button(f, 'Закрити набір', 550, -415, 140, function()
         local g=selected and Finder.groups[selected]
