@@ -284,10 +284,14 @@ refresh=function()
             row.reward:SetText(o.quantity..' шт. · '..o.reward..' зол. · до '..date('%d.%m %H:%M',o.deadline))
             row.state:SetText(stateKey=='expired' and 'Термін минув' or statusNames[stateKey])
             row.state:SetTextColor(unpack(statusColors[stateKey] or statusColors.expired))
+            local canWithdraw=o.owner~=identity and not intents[entry.key]
+                and ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity))
+            row.withdraw:SetShown(canWithdraw and true or false)
             if o.owner~=identity and stateKey=='open' then
                 row.offer:Show()
+                row.offer:SetWidth(canWithdraw and 99 or 203)
                 if intents[entry.key] then row.offer:SetText('Очікується відповідь'); row.offer:Disable()
-                elseif o.candidates[identity] then row.offer:SetText('Ви відгукнулися'); row.offer:Disable()
+                elseif o.candidates[identity] then row.offer:SetText('Відгук є'); row.offer:Disable()
                 else row.offer:SetText('Запропонувати допомогу'); row.offer:Enable() end
             else row.offer:Hide() end
             if o.owner==identity and o.status=='open' then
@@ -295,18 +299,24 @@ refresh=function()
                 row.applicants:SetText(#applicants>0 and ('Відгуки: '..applicants[1]..(#applicants>1 and (' +'..(#applicants-1)) or '')) or 'Відгуків ще немає')
                 row.applicants:Show()
                 if #applicants>0 then
-                    row.choose:SetText(stateKey=='expired' and 'Термін минув' or ('Обрати виконавця ('..#applicants..')'))
+                    row.choose:SetText(stateKey=='expired' and 'Термін минув' or ('Обрати ('..#applicants..')'))
                     if stateKey=='expired' then row.choose:Disable() else row.choose:Enable() end
                     row.choose:Show()
                 else row.choose:Hide() end
             else row.applicants:Hide(); row.choose:Hide() end
             if o.worker==identity and o.owner~=identity and o.status=='assigned' then
                 row.progress:SetText(intents[entry.key] and 'Очікується відповідь' or 'Передав')
+                row.progress:SetWidth(canWithdraw and 99 or 203)
                 if intents[entry.key] then row.progress:Disable() else row.progress:Enable() end
                 row.progress:Show()
             elseif o.owner==identity and o.status=='delivered' then
-                row.progress:SetText('Отримано'); row.progress:Enable(); row.progress:Show()
+                row.progress:SetWidth(99); row.progress:SetText('Отримано'); row.progress:Enable(); row.progress:Show()
             else row.progress:Hide() end
+            if o.owner==identity and o.status~='done' and o.status~='cancelled' then
+                row.cancel:ClearAllPoints()
+                row.cancel:SetPoint('TOPLEFT',row,'TOPLEFT',112,o.status=='open' and -94 or -84)
+                row.cancel:SetHeight(o.status=='open' and 19 or 24); row.cancel:Show()
+            else row.cancel:Hide() end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row.entryKey=nil; row.order=nil; row:UnlockHighlight(); row:Hide() end
@@ -386,6 +396,14 @@ local function createWindow()
                 if not intent(k,'delivered') then showError() end
             else showError() end
         end)
+        card.withdraw=button(card,'Відмовитися',112,-84,99,function(self)
+            local k=self:GetParent().entryKey
+            if not k or not intent(k,'withdraw') then showError() end
+        end)
+        card.cancel=button(card,'Скасувати',112,-84,99,function(self)
+            local k=self:GetParent().entryKey
+            if not k or not ownerAction(k,'cancel') then showError() end
+        end)
         card.applicants=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
         card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,-76); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
         card.menu=CreateFrame('Frame','OldKrakenOrderCardMenu'..i,card,'UIDropDownMenuTemplate')
@@ -399,7 +417,7 @@ local function createWindow()
                 UIDropDownMenu_AddButton(item,level)
             end
         end,'MENU')
-        card.choose=button(card,'Обрати виконавця',8,-94,203,function(self)
+        card.choose=button(card,'Обрати',8,-94,99,function(self)
             local parent=self:GetParent(); parent.menu.orderKey=parent.entryKey
             if not parent.menu.orderKey then return end
             ToggleDropDownMenu(1,nil,parent.menu,self,0,0)
