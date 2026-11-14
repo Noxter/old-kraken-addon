@@ -4,7 +4,7 @@ from lupa.lua51 import LuaRuntime
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken = {}; UIParent = {}; StaticPopupDialogs = {}
+OldKraken = {listeners = {}}; UIParent = {}; StaticPopupDialogs = {}
 OldKraken.UIStyle = {
     Window = function() end,
     Button = function() end,
@@ -18,7 +18,7 @@ function UIDropDownMenu_Initialize() end
 function UIDropDownMenu_CreateInfo() return {} end
 function UIDropDownMenu_AddButton() end
 function UIDropDownMenu_SetText() end
-function OldKraken:On(name, fn) self.listener = fn end
+function OldKraken:On(name, fn) self.listeners[name] = fn end
 function print(...) end
 function GetServerTime() return 12345 end
 function GetTime() return 1 end
@@ -45,7 +45,7 @@ function f:SetGroupAlertsEnabled() return true end
 f.active = true
 assert(f:Create('Test', 'quest', 'Description', 5))
 f:Show()
-assert(OldKraken.listener)
-OldKraken.listener()
+assert(OldKraken.listeners.GROUP_FINDER_CHANGED)
+OldKraken.listeners.GROUP_FINDER_CHANGED()
 ''')
 print('UI smoke checks passed')
