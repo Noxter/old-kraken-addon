@@ -294,4 +294,23 @@ function Events:Show()
     if not window then window=createWindow() end
     window:Show(); refresh()
 end
+
+-- Read-only diagnostics; never opens or changes a calendar event.
+function Events:PrintCalendarDiagnostics()
+    local version, build, _, interface = GetBuildInfo()
+    print('Old Kraken: календар API; клієнт '..tostring(version)..', збірка '..tostring(build)..', interface '..tostring(interface))
+    for _, name in ipairs({'CreateGuildSignUpEvent','EventSetDate','EventSetTime','EventSetTitle','EventSetDescription','AddEvent','CanAddEvent','OpenCalendar'}) do
+        print('Old Kraken: C_Calendar.'..name..': '..(C_Calendar and type(C_Calendar[name]) == 'function' and 'доступний' or 'недоступний'))
+    end
+    for _, name in ipairs({'GetCurrentCalendarTime','GetCalendarTimeFromEpoch','GetServerTimeLocal'}) do
+        print('Old Kraken: C_DateAndTime.'..name..': '..(C_DateAndTime and type(C_DateAndTime[name]) == 'function' and 'доступний' or 'недоступний'))
+    end
+    if C_DateAndTime and type(C_DateAndTime.GetCurrentCalendarTime) == 'function' then
+        local ok, value = pcall(C_DateAndTime.GetCurrentCalendarTime)
+        if ok and type(value) == 'table' then
+            print('Old Kraken: час календаря сервера: '..tostring(value.monthDay)..'.'..tostring(value.month)..'.'..tostring(value.year)..' '..tostring(value.hour)..':'..tostring(value.minute))
+        end
+    end
+    if type(date) == 'function' then print('Old Kraken: місцевий час: '..date('%d.%m.%Y %H:%M')) end
+end
 OldKraken:On('GUILD_EVENTS_CHANGED',refresh)
