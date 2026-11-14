@@ -32,6 +32,7 @@ local dropdownCount = 0
 local function dropdown(parent, x, y, width, options, selectedValue, onSelect)
     dropdownCount = dropdownCount + 1
     local frame = CreateFrame('Frame', 'OldKrakenFinderSelect' .. dropdownCount, parent, 'UIDropDownMenuTemplate')
+    OldKraken.UIStyle.Dropdown(frame)
     frame:SetPoint('TOPLEFT', parent, 'TOPLEFT', x - 16, y + 3)
     UIDropDownMenu_SetWidth(frame, width - 34)
     UIDropDownMenu_JustifyText(frame, 'LEFT')

@@ -199,6 +199,7 @@ local function CreateRosterWindow()
     frame.searchBox = searchBox
 
     local statusDropdown = CreateFrame("Frame", "OldKrakenRosterStatusDropdown", frame, "UIDropDownMenuTemplate")
+    OldKraken.UIStyle.Dropdown(statusDropdown)
     statusDropdown:SetPoint("LEFT", searchBox, "RIGHT", -6, -2)
     UIDropDownMenu_SetWidth(statusDropdown, 125)
     UIDropDownMenu_JustifyText(statusDropdown, "LEFT")
@@ -215,6 +216,7 @@ local function CreateRosterWindow()
     frame.statusDropdown = statusDropdown
 
     local classDropdown = CreateFrame("Frame", "OldKrakenClassDropdown", frame, "UIDropDownMenuTemplate")
+    OldKraken.UIStyle.Dropdown(classDropdown)
     classDropdown:SetPoint("LEFT", statusDropdown, "RIGHT", -8, 0)
     UIDropDownMenu_SetWidth(classDropdown, 150)
     UIDropDownMenu_JustifyText(classDropdown, "LEFT")
@@ -287,7 +289,7 @@ local function CreateRow(index, parent)
     if index % 2 == 0 then
         local stripe = row:CreateTexture(nil, "BACKGROUND")
         stripe:SetAllPoints(row)
-        stripe:SetColorTexture(0.18, 0.55, 0.53, 0.10)
+        stripe:SetColorTexture(1, 1, 1, 0.035)
     end
 
     local columns = {

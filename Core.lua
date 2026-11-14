@@ -5,29 +5,59 @@ OldKraken.name = ADDON_NAME
 OldKraken.version = "0.4.0-alpha.2-syncfix"
 OldKraken._listeners = OldKraken._listeners or {}
 
--- Shared styling keeps the native controls and their interaction behavior.
+-- Shared dark theme for the addon's native controls.
 OldKraken.UIStyle = {}
 function OldKraken.UIStyle.Window(frame)
+    if frame.NineSlice then frame.NineSlice:Hide() end
+    if frame.Bg then frame.Bg:Hide() end
+    if frame.Inset then frame.Inset:Hide() end
+    local background = frame:CreateTexture(nil, 'BACKGROUND', nil, -8)
+    background:SetAllPoints(frame)
+    background:SetColorTexture(0.055, 0.060, 0.070, 0.98)
+    local header = frame:CreateTexture(nil, 'BACKGROUND', nil, -7)
+    header:SetPoint('TOPLEFT', frame, 'TOPLEFT', 0, 0)
+    header:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, 0)
+    header:SetHeight(28)
+    header:SetColorTexture(0.11, 0.12, 0.13, 1)
     local accent = frame:CreateTexture(nil, 'ARTWORK')
-    accent:SetColorTexture(0.18, 0.77, 0.71, 0.95)
-    accent:SetPoint('TOPLEFT', frame, 'TOPLEFT', 12, -27)
-    accent:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -12, -27)
-    accent:SetHeight(2)
-    if frame.TitleText then frame.TitleText:SetTextColor(0.45, 0.91, 0.86) end
+    accent:SetColorTexture(0.0, 0.57, 0.93, 0.95)
+    accent:SetPoint('TOPLEFT', frame, 'TOPLEFT', 0, -27)
+    accent:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, -27)
+    accent:SetHeight(1)
+    if frame.TitleText then frame.TitleText:SetTextColor(0.94, 0.95, 0.96) end
 end
 
 function OldKraken.UIStyle.Button(button)
-    local normal, pushed, highlight = button:GetNormalTexture(), button:GetPushedTexture(), button:GetHighlightTexture()
-    if normal then normal:SetVertexColor(0.56, 0.79, 0.77) end
-    if pushed then pushed:SetVertexColor(0.38, 0.69, 0.66) end
-    if highlight then highlight:SetVertexColor(0.35, 0.95, 0.85, 0.7) end
+    if button.NineSlice then button.NineSlice:Hide() end
+    for _, part in ipairs({'Left', 'Middle', 'Right'}) do
+        if button[part] then button[part]:Hide() end
+    end
+    local normal, pushed = button:GetNormalTexture(), button:GetPushedTexture()
+    if normal then normal:SetAlpha(0) end
+    if pushed then pushed:SetAlpha(0) end
+    local fill = button:CreateTexture(nil, 'BACKGROUND')
+    fill:SetAllPoints(button)
+    fill:SetColorTexture(0.14, 0.15, 0.17, 1)
+    local highlight = button:CreateTexture(nil, 'HIGHLIGHT')
+    highlight:SetAllPoints(button)
+    highlight:SetColorTexture(0.0, 0.57, 0.93, 0.32)
+    button:SetHighlightTexture(highlight)
+end
+
+function OldKraken.UIStyle.Dropdown(frame)
+    local name = frame:GetName()
+    if not name then return end
+    for _, part in ipairs({'Left', 'Middle', 'Right'}) do
+        local texture = _G[name .. part]
+        if texture and texture.SetVertexColor then texture:SetVertexColor(0.48, 0.53, 0.57) end
+    end
 end
 
 function OldKraken.UIStyle.Panel(frame, x, y, width, height)
     local panel = frame:CreateTexture(nil, 'BACKGROUND', nil, 1)
     panel:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y)
     panel:SetSize(width, height)
-    panel:SetColorTexture(0.035, 0.10, 0.11, 0.55)
+    panel:SetColorTexture(0.12, 0.13, 0.14, 0.90)
 end
 
 function OldKraken:On(eventName, callback)
