@@ -48,6 +48,7 @@ OldKraken:On('INITIALIZED', function(db)
     button:SetHighlightTexture('Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight')
     local menu = CreateFrame('Frame', 'OldKrakenMinimapMenu', UIParent)
     menu:SetSize(205, 64); menu:SetFrameStrata('FULLSCREEN_DIALOG'); menu:EnableMouse(true); menu:Hide()
+    table.insert(UISpecialFrames, 'OldKrakenMinimapMenu')
     local menuBackground = menu:CreateTexture(nil, 'BACKGROUND')
     menuBackground:SetAllPoints(); menuBackground:SetColorTexture(0.055, 0.06, 0.07, 0.98)
     local function menuButton(label, y, command)
@@ -63,10 +64,6 @@ OldKraken:On('INITIALIZED', function(db)
     end
     menuButton('Відкрити (/okr)', -6, '')
     menuButton('Пошук групи (/okr group)', -34, 'group')
-    menu:SetScript('OnUpdate', function(self)
-        if (IsMouseButtonDown('LeftButton') or IsMouseButtonDown('RightButton'))
-            and not MouseIsOver(self) and not MouseIsOver(button) then self:Hide() end
-    end)
     button:SetScript('OnClick', function(_, mouseButton)
         if mouseButton == 'RightButton' then
             if menu:IsShown() then menu:Hide(); return end
