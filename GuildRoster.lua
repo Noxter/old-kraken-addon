@@ -467,6 +467,10 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
+    if OldKraken.GroupFinderAPI and OldKraken.GroupFinderAPI:HandleCommand(command) then
+        return
+    end
+
     if command == 'group status' then
         if OldKraken.GroupFinder then OldKraken.GroupFinder:PrintSyncStatus() end
         return
