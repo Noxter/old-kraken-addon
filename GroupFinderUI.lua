@@ -58,6 +58,20 @@ local roleCoords = {
     tank={0,67/256,67/256,134/256}, healer={67/256,134/256,0,67/256},
     dps={67/256,134/256,67/256,134/256},
 }
+local roleAtlases = {
+    tank='groupfinder-icon-role-large-tank', healer='groupfinder-icon-role-large-heal',
+    dps='groupfinder-icon-role-large-dps',
+}
+
+local function setRoleIcon(texture, role)
+    local atlas = roleAtlases[role]
+    if atlas and type(texture.SetAtlas) == 'function' then
+        local ok = pcall(texture.SetAtlas, texture, atlas, false)
+        if ok then return end
+    end
+    texture:SetTexture('Interface\\LFGFrame\\UI-LFG-ICON-ROLES')
+    texture:SetTexCoord(unpack(roleCoords[role]))
+end
 local categories = {'dungeon', 'quest', 'world', 'raid', 'pvp', 'other'}
 local categoryLabels = {dungeon='Підземелля', quest='Квести', world='Відкритий світ', raid='Рейд', pvp='PvP', other='Інше'}
 local roles = {'tank', 'healer', 'dps', 'flex'}
@@ -322,16 +336,12 @@ local function refresh()
                     local memberRole = fixed and fixed.memberRole or (member and (member == g.owner and g.role or (g.memberRoles and g.memberRoles[member]) or '')) or ''
                     slot.groupKey, slot.member, slot.memberRole, slot.requiredRole = entry.key, member, memberRole, fixed and fixed.role or nil
                     if member then
-                        local color = memberRole == 'tank' and {0.4,0.7,1} or memberRole == 'healer' and {0.4,0.85,0.55} or memberRole == 'dps' and {1,0.48,0.43} or {0.65,0.65,0.65}
-                        slot.ring:SetVertexColor(color[1], color[2], color[3], 0.95)
+                        slot.ring:Hide()
                         if roleCoords[memberRole] then
-                            slot.icon:SetTexCoord(unpack(roleCoords[memberRole])); slot.icon:Show(); slot.text:Hide()
+                            setRoleIcon(slot.icon, memberRole); slot.icon:Show(); slot.text:Hide()
                         else slot.icon:Hide(); slot.text:SetText(memberRole == 'flex' and 'F' or '—'); slot.text:Show() end
                     else
-                        local color = fixed and (fixed.role == 'tank' and {0.4,0.7,1} or fixed.role == 'healer' and {0.4,0.85,0.55} or {1,0.48,0.43}) or {0.38,0.44,0.47}
-                        slot.ring:SetVertexColor(color[1], color[2], color[3], 0.65)
-                        if fixed then slot.icon:SetTexCoord(unpack(roleCoords[fixed.role])); slot.icon:Show(); slot.text:Hide()
-                        else slot.icon:Hide(); slot.text:SetText('+'); slot.text:Show() end
+                        slot.ring:Show(); slot.icon:Hide(); slot.text:Hide()
                     end
                     slot:Show()
                 else slot:Hide() end
@@ -543,9 +553,14 @@ local function createWindow()
             local slot = CreateFrame('Button', nil, card)
             slot:SetSize(25, 25); slot:SetPoint('TOPRIGHT', card, 'TOPRIGHT', -8 - (5-slotIndex)*28, -7)
             slot.ring = slot:CreateTexture(nil, 'ARTWORK')
-            slot.ring:SetAllPoints(); slot.ring:SetTexture('Interface\\CHARACTERFRAME\\TempPortraitAlphaMask')
+            slot.ring:SetPoint('CENTER'); slot.ring:SetSize(15, 15)
+            local ok = type(slot.ring.SetAtlas) == 'function' and pcall(slot.ring.SetAtlas, slot.ring, 'groupfinder-icon-emptyslot', false)
+            if not ok then
+                slot.ring:SetTexture('Interface\\CHARACTERFRAME\\TempPortraitAlphaMask')
+                slot.ring:SetVertexColor(0.18, 0.18, 0.18, 0.9)
+            end
             slot.icon = slot:CreateTexture(nil, 'OVERLAY')
-            slot.icon:SetPoint('CENTER'); slot.icon:SetSize(17, 17); slot.icon:SetTexture('Interface\\LFGFrame\\UI-LFG-ICON-ROLES')
+            slot.icon:SetPoint('CENTER'); slot.icon:SetSize(22, 22)
             slot.text = slot:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall'); slot.text:SetPoint('CENTER'); slot.text:SetTextColor(1, 1, 1)
             slot:SetScript('OnEnter', function(self)
                 GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
