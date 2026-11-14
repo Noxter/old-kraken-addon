@@ -248,7 +248,7 @@ local function createWindow(parent)
             tab.activeBar:SetSize(tab==f.professionTab and 106 or 116,2)
             tab.activeBar:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
         end
-        f.newOrder=button(f,'Нове замовлення',720,-38,150,function()
+        f.newOrder=button(f.ordersView or f,'Нове замовлення',720,-38,150,function()
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:OpenCreateForm() end
         end,'primary')
         f.newOrder:Hide()

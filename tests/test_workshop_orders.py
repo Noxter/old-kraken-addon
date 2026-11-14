@@ -320,6 +320,7 @@ def test_embedded_orders():
         assert(workshop.ordersTab.activeBar:IsShown() and not workshop.professionTab.activeBar:IsShown())
         assert(not OldKrakenWorkshopOrdersFrame, 'embedded orders created a separate window')
         assert(workshop.newOrder:IsShown())
+        assert(workshop.newOrder.parent==workshop.ordersView, 'new-order button is not attached to the orders panel')
         assert(workshop.newOrder.variant=='primary', 'new-order action is not styled as primary')
         workshop.professionTab.scripts.OnClick(workshop.professionTab)
         assert(workshop.professionView:IsShown() and not workshop.ordersView:IsShown())
