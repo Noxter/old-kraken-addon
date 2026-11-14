@@ -755,10 +755,15 @@ local function createWindow()
     f.minBox = input(f, 'Мін. рівень', 105, -385, 80, '1')
     f.maxLevelBox = input(f, 'Макс. рівень', 205, -385, 80, '60')
     f.createFields = {f.titleBox, f.descriptionBox, f.maxBox, f.minBox, f.maxLevelBox}
+    local autoDungeonTitle
     f.categoryButton = dropdown(f, 305, -408, 140, choices(categories, categoryLabels),
         function() return category end, function(value)
             category=value
-            if category ~= 'dungeon' then dungeon=''; UIDropDownMenu_SetText(f.dungeonButton, dungeonLabels['']) end
+            if category ~= 'dungeon' then
+                if autoDungeonTitle and f.titleBox:GetText() == autoDungeonTitle then f.titleBox:SetText('') end
+                autoDungeonTitle=nil
+                dungeon=''; UIDropDownMenu_SetText(f.dungeonButton, dungeonLabels[''])
+            end
             if category == 'dungeon' then
                 f.maxBox:SetText('5')
                 if role == 'flex' or role == '' then role='dps'; UIDropDownMenu_SetText(f.roleButton, roleLabel(role)) end
@@ -775,13 +780,20 @@ local function createWindow()
     f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -313); f.roleLabel:SetText('Роль')
     f.dungeonButton = dropdown(f, 460, -408, 260, dungeonOptions,
         function() return dungeon end, function(value)
+            local title = f.titleBox:GetText()
+            local replaceTitle = title == '' or (autoDungeonTitle and title == autoDungeonTitle)
             dungeon=value
+            if replaceTitle then
+                autoDungeonTitle = value ~= '' and dungeonLabels[value] or nil
+                f.titleBox:SetText(autoDungeonTitle or '')
+            else
+                autoDungeonTitle=nil
+            end
             local recommended = dungeonLevels[value]
             if recommended then
                 f.minBox:SetText(tostring(recommended.min))
                 f.maxLevelBox:SetText(tostring(recommended.max))
             end
-            if value ~= '' and f.titleBox:GetText() == '' then f.titleBox:SetText(dungeonLabels[value]) end
         end)
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
