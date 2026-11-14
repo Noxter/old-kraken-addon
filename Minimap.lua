@@ -46,52 +46,16 @@ OldKraken:On('INITIALIZED', function(db)
     border:SetTexture('Interface\\Minimap\\MiniMap-TrackingBorder')
     border:SetSize(54, 54); border:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
     button:SetHighlightTexture('Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight')
-    local dismiss = CreateFrame('Button', nil, UIParent)
-    dismiss:SetAllPoints(UIParent); dismiss:SetFrameStrata('FULLSCREEN_DIALOG'); dismiss:SetFrameLevel(1)
-    dismiss:RegisterForClicks('LeftButtonUp', 'RightButtonUp'); dismiss:Hide()
-    local menu = CreateFrame('Frame', 'OldKrakenMinimapMenu', UIParent)
-    menu:SetSize(205, 64); menu:SetFrameStrata('FULLSCREEN_DIALOG'); menu:SetFrameLevel(20); menu:EnableMouse(true); menu:Hide()
-    dismiss:SetScript('OnClick', function() menu:Hide() end)
-    menu:SetScript('OnShow', function() dismiss:Show() end)
-    menu:SetScript('OnHide', function() dismiss:Hide() end)
-    table.insert(UISpecialFrames, 'OldKrakenMinimapMenu')
-    local menuBackground = menu:CreateTexture(nil, 'BACKGROUND')
-    menuBackground:SetAllPoints(); menuBackground:SetColorTexture(0.055, 0.06, 0.07, 0.98)
-    local function menuButton(label, y, command)
-        local item = CreateFrame('Button', nil, menu, 'UIPanelButtonTemplate')
-        item:SetPoint('TOPLEFT', menu, 'TOPLEFT', 6, y); item:SetSize(193, 24)
-        item:SetText(label); OldKraken.UIStyle.Button(item)
-        item:SetScript('OnClick', function()
-            menu:Hide()
-            if SlashCmdList and type(SlashCmdList.OLDKRAKEN) == 'function' then
-                SlashCmdList.OLDKRAKEN(command)
-            end
-        end)
-    end
-    menuButton('Відкрити (/okr)', -6, '')
-    menuButton('Пошук групи (/okr group)', -34, 'group')
     button:SetScript('OnClick', function(_, mouseButton)
-        if mouseButton == 'RightButton' then
-            if menu:IsShown() then menu:Hide(); return end
-            GameTooltip:Hide()
-            menu:ClearAllPoints()
-            local x = button:GetCenter()
-            if x and x < UIParent:GetWidth() / 2 then
-                menu:SetPoint('TOPLEFT', button, 'TOPRIGHT', 6, 0)
-            else
-                menu:SetPoint('TOPRIGHT', button, 'TOPLEFT', -6, 0)
-            end
-            menu:Show()
-        else
-            menu:Hide()
-            if SlashCmdList and type(SlashCmdList.OLDKRAKEN) == 'function' then SlashCmdList.OLDKRAKEN('') end
+        if SlashCmdList and type(SlashCmdList.OLDKRAKEN) == 'function' then
+            SlashCmdList.OLDKRAKEN(mouseButton == 'RightButton' and 'group' or '')
         end
     end)
     button:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_LEFT')
         GameTooltip:SetText('Old Kraken', 0.3, 0.72, 1)
-        GameTooltip:AddLine('Ліва кнопка: /okr', 1, 1, 1)
-        GameTooltip:AddLine('Права кнопка: меню', 1, 1, 1)
+        GameTooltip:AddLine('Ліва кнопка: ростер', 1, 1, 1)
+        GameTooltip:AddLine('Права кнопка: пошук груп', 1, 1, 1)
         GameTooltip:AddLine('Перетягніть, щоб перемістити', 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
