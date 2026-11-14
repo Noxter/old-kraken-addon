@@ -51,7 +51,14 @@ local activityArt = {
     st=131872, brd=131824, dm=131835, blackmaw=7963784, lbrs=131825,
     scholo=131868, strat=131871, shapers=7963783,
 }
+local raidArt = {barrowdeeps='BarrowDeeps', hyjalsummit='HyjalSummit', onyxia='Onyxia'}
 function OldKraken.ActivityCatalog.SetArtwork(texture, activity)
+    local raid=raidArt[activity]
+    if raid then
+        texture:SetTexture('Interface\\AddOns\\'..OldKraken.name..'\\Media\\Raids\\'..raid..'.tga')
+        texture:SetTexCoord(0,1,0,1)
+        return
+    end
     local art=activityArt[activity] or 7963779
     texture:SetTexture(art)
     if art>=7000000 then texture:SetTexCoord(0.22,0.78,0.22,0.78)
