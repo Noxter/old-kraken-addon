@@ -57,9 +57,11 @@ function Finder:Initialize(identity, send)
     self.requestSequence = GetServerTime() * 1000
 end
 
-function Finder:Create(title, category, description, maxSize, minLevel, maxLevel, role)
+function Finder:Create(title, category, description, maxSize, minLevel, maxLevel, role, dungeon)
     maxSize = tonumber(maxSize)
     minLevel, maxLevel, role = tonumber(minLevel or 1), tonumber(maxLevel or 60), role or ''
+    dungeon = dungeon or ''
+    if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and dungeon ~= '') then return false, 'invalid' end
     if not validText(title, 1, 100) or not categories[category]
         or not validText(description, 0, 500) or not maxSize or maxSize % 1 ~= 0
         or maxSize < 1 or maxSize > 200 or not minLevel or not maxLevel
@@ -70,7 +72,7 @@ function Finder:Create(title, category, description, maxSize, minLevel, maxLevel
     local id = tostring(GetServerTime()) .. '-' .. tostring(math.random(100000, 999999)) .. '-' .. self.sequence
     local group = { id=id, owner=self.identity, title=title, category=category,
         description=description, maxSize=maxSize, minLevel=minLevel, maxLevel=maxLevel, role=role,
-        revision=1, closed=false, members={self.identity}, seenAt=GetTime() }
+        revision=1, closed=false, members={self.identity}, dungeon=dungeon, seenAt=GetTime() }
     local payload = self:EncodeGroup(group)
     if not self.send('ANNOUNCE', payload) then return false, 'queue' end
     self.groups[self.identity .. '\001' .. id] = group
@@ -91,6 +93,7 @@ function Finder:EncodeGroup(group)
     else
         fields[#fields + 1] = '?'
     end
+    fields[#fields + 1] = group.dungeon or ''
     return pack(fields)
 end
 
@@ -150,7 +153,7 @@ function Finder:SyncPartyMembers(party)
 end
 
 function Finder:ReceiveGroup(sender, payload)
-    local f = unpackFields(payload, 213)
+    local f = unpackFields(payload, 214)
     if not f or #f < 12 then return false end
     local id, owner, rev, closed, title, category, description, maxSize, count = unpack(f, 1, 9)
     rev, maxSize, count = tonumber(rev), tonumber(maxSize), tonumber(count)
@@ -163,7 +166,7 @@ function Finder:ReceiveGroup(sender, payload)
         or not minLevel or not maxLevel or minLevel % 1 ~= 0 or maxLevel % 1 ~= 0
         or minLevel < 1 or maxLevel > 255 or minLevel > maxLevel or not roles[role]
         or not count or count % 1 ~= 0 or count < 1 or count > maxSize
-        or (#f ~= 12 + count and #f ~= 13 + count) then return false end
+        or (#f ~= 12 + count and #f ~= 13 + count and #f ~= 14 + count) then return false end
     local members, seen = {}, {}
     for i=1,count do
         local name = f[12+i]
@@ -172,6 +175,8 @@ function Finder:ReceiveGroup(sender, payload)
     end
     if members[1] ~= owner then return false end
     local states = f[13 + count]
+    local dungeon = f[14 + count] or ''
+    if #dungeon > 32 or (dungeon ~= '' and (not validID(dungeon) or category ~= 'dungeon')) then return false end
     local observed
     if states and states ~= '?' then
         if #states ~= count or states:sub(1, 1) ~= 'A' or states:sub(2):find('[^PR]') then return false end
@@ -187,7 +192,7 @@ function Finder:ReceiveGroup(sender, payload)
     if not existing and countGroups(self.groups) >= MAX_GROUPS then return false end
     self.groups[key] = { id=id, owner=owner, revision=rev, closed=closed=='1', title=title,
         category=category, description=description, maxSize=maxSize, minLevel=minLevel,
-        maxLevel=maxLevel, role=role, members=members, partyObserved=observed, seenAt=GetTime() }
+        maxLevel=maxLevel, role=role, members=members, partyObserved=observed, dungeon=dungeon, seenAt=GetTime() }
     if self.pending[key] == 'pending' then
         if seen[self.identity] then self.pending[key] = 'accept'
         elseif closed == '1' then self.pending[key] = 'closed' end
@@ -309,19 +314,21 @@ function Finder:Delete(id)
     return true
 end
 
-function Finder:Edit(id, title, description, maxSize, minLevel, maxLevel, role, category)
+function Finder:Edit(id, title, description, maxSize, minLevel, maxLevel, role, category, dungeon)
     local group = self.groups[self.identity .. '\001' .. id]
     maxSize, minLevel, maxLevel = tonumber(maxSize), tonumber(minLevel), tonumber(maxLevel)
+    dungeon = dungeon or (group and group.dungeon) or ''
+    if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and dungeon ~= '') then return false end
     if not group or group.closed or not validText(title, 1, 100) or not validText(description, 0, 500)
         or not maxSize or maxSize % 1 ~= 0 or maxSize < #group.members or maxSize > 200
         or not minLevel or not maxLevel or minLevel % 1 ~= 0 or maxLevel % 1 ~= 0
         or minLevel < 1 or maxLevel > 255 or minLevel > maxLevel or not roles[role] or not categories[category] then return false end
-    local old = {group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.revision, group.category}
-    group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.category =
-        title, description, maxSize, minLevel, maxLevel, role, category
+    local old = {group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.revision, group.category, group.dungeon or ''}
+    group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.category, group.dungeon =
+        title, description, maxSize, minLevel, maxLevel, role, category, dungeon
     group.revision = group.revision + 1
     if not self.send('UPDATE', self:EncodeGroup(group)) then
-        group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.revision, group.category = unpack(old)
+        group.title, group.description, group.maxSize, group.minLevel, group.maxLevel, group.role, group.revision, group.category, group.dungeon = unpack(old)
         return false
     end
     return true
