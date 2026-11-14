@@ -13,6 +13,11 @@ OldKraken = {
     Communication = {},
     GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end},
 }
+StaticPopupDialogs={}
+function StaticPopup_Show(_,_,_,callback)
+    popup={callback=callback,HookScript=function() end,GetFrameStrata=function() return 'DIALOG' end,SetFrameStrata=function() end}
+    return popup
+end
 function OldKraken:On(name, callback)
     self._listeners[name] = self._listeners[name] or {}
     table.insert(self._listeners[name], callback)
@@ -113,4 +118,11 @@ assert(firstFrame.previousPage:IsShown() and firstFrame.nextPage:IsShown(), 'mul
 assert(firstFrame.previousPage.point[4] == 138 and firstFrame.nextPage.point[4] == 263, 'multi-page controls are not centered')
 firstFrame.nextPage.scripts.OnClick()
 assert(firstFrame.pageLabel.text == '2 / 2', 'next page button did not advance')
+local before=#firstFrame.visible
+local delete=firstFrame.eventRows[1].delete
+assert(delete:IsShown(), 'owner delete button is hidden')
+delete.scripts.OnClick(delete)
+assert(#firstFrame.visible==before, 'delete happened without confirmation')
+popup.callback()
+assert(#firstFrame.visible==before-1, 'confirmed deletion did not remove event')
 ''')

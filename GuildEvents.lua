@@ -14,6 +14,11 @@ local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', '
 local page = 1
 local catalog = OldKraken.ActivityCatalog
 local activityLabels = {['']='Не вибрано'}
+StaticPopupDialogs.OLDKRAKEN_EVENT_DELETE={
+    text='Видалити подію «%s»? Учасники отримають сповіщення про скасування.', button1='Видалити', button2='Назад',
+    timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
+}
 for _,options in ipairs({catalog.dungeon,catalog.raid}) do
     for _,entry in ipairs(options) do if entry.value~='' then activityLabels[entry.value]=entry.label end end
 end
@@ -432,8 +437,8 @@ local function refresh()
             local e=entry.event
             row:SetText(date('%d.%m.%Y %H:%M',e.when)..'  ·  '..e.title..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..'  ·  '..acceptedCount(e)..'/'..e.size)
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
-            row:Show()
-        else row:UnlockHighlight(); row:Hide() end
+            row:Show(); row.delete:SetShown(e.owner==identity)
+        else row:UnlockHighlight(); row.delete:Hide(); row:Hide() end
     end
     local e=selected and events[selected]
     for _,row in ipairs(window.signupRows) do row:Hide() end
@@ -493,9 +498,36 @@ local function createWindow(parent)
     f.alertButton=action(f,'Сповіщення',630,-35,185,function() Events:SetAlertsEnabled(not Events:AlertsEnabled()); refresh() end)
     local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-38); note:SetText('Час подій показано за місцевим часом комп’ютера.')
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-72); f.empty:SetText('Найближчих подій немає.')
+    f.eventRows=rows
     for i=1,8 do
         local index=i
-        rows[i]=action(f,'',18,-65-(i-1)*30,410,function() local entry=f.visible and f.visible[(page-1)*8+index]; if entry then selected=entry.key; refresh() end end)
+        rows[i]=action(f,'',18,-65-(i-1)*30,383,function() local entry=f.visible and f.visible[(page-1)*8+index]; if entry then selected=entry.key; refresh() end end)
+        local remove=CreateFrame('Button',nil,rows[i]); rows[i].delete=remove
+        remove:SetSize(24,23); remove:SetPoint('LEFT',rows[i],'RIGHT',3,0)
+        local function trashPiece(x,y,width,height)
+            local texture=remove:CreateTexture(nil,'ARTWORK'); texture:SetColorTexture(0.9,0.32,0.3,1)
+            texture:SetSize(width,height); texture:SetPoint('TOPLEFT',remove,'TOPLEFT',x,-y)
+        end
+        trashPiece(6,6,12,2); trashPiece(9,4,6,2); trashPiece(7,9,2,9); trashPiece(15,9,2,9); trashPiece(7,17,10,2)
+        remove:SetScript('OnClick',function()
+            local entry=f.visible and f.visible[(page-1)*8+index]; local e=entry and events[entry.key]
+            if not active or not e or e.owner~=identity or e.cancelled then return end
+            local key,expectedProfile,expectedIdentity=entry.key,profile,identity
+            local popup=StaticPopup_Show('OLDKRAKEN_EVENT_DELETE',e.title,nil,function()
+                if not active or profile~=expectedProfile or identity~=expectedIdentity or not Events:Cancel(key) then print('Old Kraken: не вдалося видалити подію.'); return end
+                if selected==key then selected=nil; refresh() end
+            end)
+            if not popup then print('Old Kraken: не вдалося відкрити підтвердження видалення.'); return end
+            if not popup.oldKrakenRestoreHook then
+                popup:HookScript('OnHide',function(self) if self.oldKrakenStrata then self:SetFrameStrata(self.oldKrakenStrata); self.oldKrakenStrata=nil end end)
+                popup.oldKrakenRestoreHook=true
+            end
+            if not popup.oldKrakenStrata then popup.oldKrakenStrata=popup:GetFrameStrata() end
+            popup:SetFrameStrata('FULLSCREEN_DIALOG')
+        end)
+        remove:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити подію'); GameTooltip:Show() end end)
+        remove:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        remove:Hide()
     end
     f.previousPage=action(f,'‹',138,-310,45,function() page=page-1; refresh() end)
     f.pageLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')

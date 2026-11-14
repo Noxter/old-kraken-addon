@@ -5,7 +5,7 @@ local comm,codec=OldKraken.Communication,OldKraken.GroupFinder
 local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування',[185]='Кулінарія',[129]='Перша допомога',[186]='Гірництво'}
 local professionIDs={171,164,165,197,202,333,185,129,186}
 local materialNames={customer='Замовника',crafter='Майстра',mixed='Спільні'}
-local statusNames={open='Шукає майстра',assigned='У роботі',delivered='Передано',done='Виконано',cancelled='Скасовано'}
+local statusNames={open='Шукає майстра',assigned='У роботі',delivered='Передано',done='Виконано',cancelled='Скасовано',deleted='Видалено'}
 local deadlineNames={[3600]='1 година',[21600]='6 годин',[86400]='Доба',[604800]='Тиждень'}
 local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]=136243,[333]=136244,[185]=133971,[129]=135966,[186]=136248}
 local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.70,0.75,0.80},cancelled={1,0.42,0.38},expired={0.72,0.72,0.72}}
@@ -162,7 +162,8 @@ local function ownerAction(k,action,actor)
         if o.status~='open' or not o.candidates[actor] or o.deadline<GetServerTime() then return false end
         o.status,o.worker='assigned',actor
     elseif action=='finish' then if o.status~='delivered' then return false end; o.status='done'
-    elseif action=='cancel' then if o.status=='done' or o.status=='cancelled' then return false end; o.status='cancelled'
+    elseif action=='cancel' then if o.status=='done' or o.status=='cancelled' or o.status=='deleted' then return false end; o.status='cancelled'
+    elseif action=='delete' then if o.status=='deleted' then return false end; o.status='deleted'
     elseif action=='reopen' then
         local now=GetServerTime()
         if o.status~='assigned' or o.deadline>=now or now+86400>o.created+2592000 then return false end
@@ -200,7 +201,7 @@ local function receiveOrder(sender,payload,isRelay)
     if not isRelay then scope.orderRelays[k]=payload end
     observed[k]=o
     local pending=intents[k]
-    if not isRelay and pending and (o.acks[identity] or 0)>=pending.version then
+    if not isRelay and pending and ((o.acks[identity] or 0)>=pending.version or o.status=='deleted') then
         local applied=(pending.action=='offer' and o.candidates[identity]) or (pending.action=='withdraw' and not o.candidates[identity] and o.worker~=identity) or (pending.action=='delivered' and o.status=='delivered' and o.worker==identity)
         intents[k]=nil
         if not applied then notify('Дію щодо замовлення не виконано',o.item..' · стан змінився',k) end
@@ -215,7 +216,7 @@ local function receiveOrder(sender,payload,isRelay)
         if o.worker==identity and previous.worker~=identity and o.status=='assigned' then notify('Вас обрано майстром',o.item..' · '..o.owner,k)
         elseif previous.worker==identity and previous.status=='assigned' and o.status=='open' then notify('Замовлення перевідкрито',o.item..' · '..o.owner,k)
         elseif previous.candidates[identity] and o.status=='assigned' and o.worker~=identity and previous.status=='open' then notify('Обрано іншого майстра',o.item..' · '..o.owner,k)
-        elseif (previous.worker==identity or previous.candidates[identity]) and o.status=='cancelled' and previous.status~='cancelled' then notify('Замовлення скасовано',o.item..' · '..o.owner,k)
+        elseif (previous.worker==identity or previous.candidates[identity]) and (o.status=='cancelled' or o.status=='deleted') and previous.status~='cancelled' and previous.status~='done' and previous.status~='deleted' then notify('Замовлення скасовано',o.item..' · '..o.owner,k)
         elseif previous.worker==identity and o.status=='done' and previous.status~='done' then notify('Замовлення підтверджено',o.item..' · '..o.owner,k) end
     end
     persist(); changed()
@@ -324,9 +325,14 @@ StaticPopupDialogs.OLDKRAKEN_ORDER_REOPEN={
     timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
 }
+StaticPopupDialogs.OLDKRAKEN_ORDER_DELETE={
+    text='Видалити замовлення «%s»? Його буде прибрано зі списку гільдії.', button1='Видалити', button2='Назад',
+    timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
+}
 local cardActionDialogs={
     cancel='OLDKRAKEN_ORDER_CARD_CANCEL', withdraw='OLDKRAKEN_ORDER_CARD_WITHDRAW',
-    delivered='OLDKRAKEN_ORDER_CARD_DELIVERED', finish='OLDKRAKEN_ORDER_CARD_FINISH', reopen='OLDKRAKEN_ORDER_REOPEN',
+    delivered='OLDKRAKEN_ORDER_CARD_DELIVERED', finish='OLDKRAKEN_ORDER_CARD_FINISH', reopen='OLDKRAKEN_ORDER_REOPEN', delete='OLDKRAKEN_ORDER_DELETE',
 }
 local function confirmCardAction(k,action)
     local o=k and get(k)
@@ -336,7 +342,7 @@ local function confirmCardAction(k,action)
         local current=get(k)
         if not active or profile~=expectedProfile or identity~=expectedIdentity or not current or current.status~=expectedStatus then showError(); return end
         local ok
-        if action=='cancel' or action=='finish' or action=='reopen' then ok=ownerAction(k,action) else ok=intent(k,action) end
+        if action=='cancel' or action=='finish' or action=='reopen' or action=='delete' then ok=ownerAction(k,action) else ok=intent(k,action) end
         if not ok then showError() end
     end
     local popup=StaticPopup_Show(cardActionDialogs[action],o.item,nil,accept)
@@ -365,7 +371,7 @@ refresh=function()
         local status=displayStatus(o)
         local available=view=='available' and o.owner~=identity and status=='open' and not o.candidates[identity] and not intents[k]
             and canCraft(o)
-        if not seen[k] and (view=='all' or (view=='mine' and o.owner==identity) or (view=='work' and (o.worker==identity or o.candidates[identity])) or (view=='available' and available))
+        if o.status~='deleted' and not seen[k] and (view=='all' or (view=='mine' and o.owner==identity) or (view=='work' and (o.worker==identity or o.candidates[identity])) or (view=='available' and available))
             and (statusFilter=='all' or statusFilter==status) and (professionFilter==0 or professionFilter==o.profession)
             and (searchQuery=='' or lower(o.item):find(searchQuery,1,true) or lower(o.owner):find(searchQuery,1,true)) then
             seen[k]=true; list[#list+1]={key=k,order=o}
@@ -381,6 +387,7 @@ refresh=function()
         local entry=list[offset*CARDS_PER_PAGE+i]
         if entry then
             local o=entry.order; row.entryKey=entry.key
+            row.delete:SetShown(o.owner==identity)
             local stateKey=displayStatus(o)
             row.order=o; row.icon:SetTexture(orderIcon(o))
             row.title:SetText(o.item)
@@ -425,7 +432,7 @@ refresh=function()
             else row.cancel:Hide() end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
-        else row.entryKey=nil; row.order=nil; row:UnlockHighlight(); row:Hide() end
+        else row.entryKey=nil; row.order=nil; row.delete:Hide(); row:UnlockHighlight(); row:Hide() end
     end
     for _,row in ipairs(window.candidates) do row:Hide() end
     local o=selected and get(selected)
@@ -480,6 +487,7 @@ local function createWindow()
     for _,id in ipairs(professionIDs) do professionLabels[id]=professionNames[id]; filterIDs[#filterIDs+1]=id end
     dropdown(f,'OldKrakenOrdersFilterProfession',675,-42,185,filterIDs,professionLabels,function() return professionFilter end,function(v) professionFilter=v; offset=0; refresh() end)
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-88); f.empty:SetWidth(430); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Замовлень не знайдено. Змініть фільтри або створіть замовлення.')
+    f.orderRows=orderRows
     for i=1,CARDS_PER_PAGE do
         local col=(i-1)%2; local line=math.floor((i-1)/2)
         local card=button(f,'',18+col*229,-80-line*124,219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
@@ -489,6 +497,17 @@ local function createWindow()
             local text=card:CreateFontString(nil,'OVERLAY',template); text:SetPoint('TOPLEFT',card,'TOPLEFT',48,y); text:SetPoint('RIGHT',card,'RIGHT',-6,0); text:SetJustifyH('LEFT'); text:SetWordWrap(false); return text
         end
         card.title=label('GameFontNormal',-6); card.meta=label('GameFontHighlightSmall',-25)
+        card.title:ClearAllPoints(); card.title:SetPoint('TOPLEFT',card,'TOPLEFT',48,-6); card.title:SetPoint('RIGHT',card,'RIGHT',-28,0)
+        card.delete=CreateFrame('Button',nil,card); card.delete:SetSize(24,23); card.delete:SetPoint('TOPRIGHT',card,'TOPRIGHT',-3,-2)
+        local function trashPiece(x,y,width,height)
+            local texture=card.delete:CreateTexture(nil,'ARTWORK'); texture:SetColorTexture(0.9,0.32,0.3,1)
+            texture:SetSize(width,height); texture:SetPoint('TOPLEFT',card.delete,'TOPLEFT',x,-y)
+        end
+        trashPiece(6,6,12,2); trashPiece(9,4,6,2); trashPiece(7,9,2,9); trashPiece(15,9,2,9); trashPiece(7,17,10,2)
+        card.delete:SetScript('OnClick',function(self) confirmCardAction(self:GetParent().entryKey,'delete') end)
+        card.delete:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити замовлення'); GameTooltip:Show() end end)
+        card.delete:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        card.delete:Hide()
         card.reward=label('GameFontHighlightSmall',-42); card.state=label('GameFontNormalSmall',-59)
         card.offer=button(card,'Запропонувати допомогу',8,-84,203,function(self)
             local k=self:GetParent().entryKey

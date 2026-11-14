@@ -81,7 +81,7 @@ def tick(lua):
 
 def restart(lua):
     lua.execute('''
-        saved=OldKraken.DB; OldKraken={DB=saved,UIStyle={Button=function() end,Window=function() end,Dropdown=function() end}}
+        saved=OldKraken.DB; OldKraken={DB=saved,UIStyle={Button=function() end,Window=function() end,Dropdown=function() end,Input=function() end}}
         function OldKraken:On() end; function OldKraken:Fire(...) notices[#notices+1]={...} end
         OldKraken.Communication={queue={}}; function OldKraken.Communication:RegisterHandler(kind,fn) handlers[kind]=fn end
         function OldKraken.Communication:SendProtocol(kind,payload) outgoing[#outgoing+1]={kind,payload}; return true end
@@ -155,7 +155,7 @@ def test_orders():
     ''')
     tick(alice); flush(alice, bob)
     alice.execute('''
-        saved=OldKraken.DB; OldKraken={DB=saved,UIStyle={Button=function() end,Window=function() end,Dropdown=function() end}}
+        saved=OldKraken.DB; OldKraken={DB=saved,UIStyle={Button=function() end,Window=function() end,Dropdown=function() end,Input=function() end}}
         function OldKraken:On() end; function OldKraken:Fire() end
         OldKraken.Communication={queue={}}; function OldKraken.Communication:RegisterHandler(kind,fn) handlers[kind]=fn end
         function OldKraken.Communication:SendProtocol(kind,payload) outgoing[#outgoing+1]={kind,payload}; return true end
@@ -223,6 +223,7 @@ def test_order_relay_and_owner_authority():
         assert(order and order.item=='Relay potion' and order.relayed and order.ownerRev==0)
         assert(not s.orderRelays[orderKey])
         OldKraken.WorkshopOrders:Show(orderKey); assert(OldKrakenWorkshopOrdersFrame.details.text:find('через гільдію'))
+        for _,row in ipairs(OldKrakenWorkshopOrdersFrame.orderRows) do if row.entryKey==orderKey then assert(not row.delete:IsShown()) end end
         click('Запропонувати допомогу')
         assert(s.orderIntents['Carol Mon'][orderKey])
     ''')
@@ -270,6 +271,21 @@ def test_order_relay_and_owner_authority():
     bob.execute('clock=clock+40')
     flush(dave,bob); tick(bob); flush(bob,dave)
     dave.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o; for _,v in pairs(s.orderObserved) do o=v end; assert(o and o.status=='cancelled' and o.relayed)")
+    alice.execute('''
+        OldKraken.WorkshopOrders:Show(orderKey)
+        local card; for _,row in ipairs(OldKrakenWorkshopOrdersFrame.orderRows) do if row.entryKey==orderKey then card=row end end
+        assert(card and card.delete:IsShown()); card.delete.scripts.OnClick(card.delete)
+        assert(order.status=='cancelled'); popup.callback()
+        assert(order.status=='deleted' and not card:IsShown())
+    ''')
+    tick(alice); flush(alice,bob)
+    bob.execute("assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved[orderKey].status=='deleted'); OldKraken.WorkshopOrders:Show(); for _,row in ipairs(OldKrakenWorkshopOrdersFrame.orderRows) do assert(row.entryKey~=orderKey) end")
+    restart(alice); restart(bob)
+    alice.execute("assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Alice Mon'][orderKey].status=='deleted')")
+    bob.execute("assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved[orderKey].status=='deleted')")
+    bob.execute('clock=clock+40'); dave.execute("OldKraken.Communication:SendProtocol('WOQUERY','')")
+    flush(dave,bob); tick(bob); flush(bob,dave)
+    dave.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o; for _,v in pairs(s.orderObserved) do o=v end; assert(o and o.status=='deleted')")
 
 
 if __name__ == '__main__':
