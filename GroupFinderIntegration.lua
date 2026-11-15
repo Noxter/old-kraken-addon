@@ -454,7 +454,7 @@ frame:SetScript('OnEvent', function(_, event)
             if now >= nextBroadcast then finder:OnQuery(); nextBroadcast = now + 300 end
             if now >= nextRetry and finder:RetryPending() then nextRetry = now + 180 end
             finder:SyncStep()
-            finder:Prune()
+            if finder:Prune() then saveOwned() end
         end)
     end
 end)
