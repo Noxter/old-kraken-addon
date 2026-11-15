@@ -46,13 +46,15 @@ def test_recipe_picker_cancel_returns_to_order_form_without_losing_draft():
         assert(OldKraken.WorkshopOrders:OpenCreateForm())
         assert(w.currentView=='orderCreate')
 
-        local form=OldKraken.UIHub.pages.workshop.frame.createForm
+        local workshop=OldKraken.UIHub.pages.workshop.frame
+        local orderPanel=workshop.ordersView
+        local form=orderPanel.createForm
         form.item:SetText('Elixir of Test')
         form.quantity:SetText('3')
         form.reward:SetText('17')
         form.note:SetText('Keep these values')
         selectOption(OldKrakenOrderProfession,171)
-        selectOption(OldKraken.UIHub.pages.workshop.frame.deadlineMenu,21600)
+        selectOption(orderPanel.deadlineMenu,21600)
 
         local saved=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderDrafts['Picker Mon']
         assert(saved and saved.item=='Elixir of Test' and saved.quantity=='3')
