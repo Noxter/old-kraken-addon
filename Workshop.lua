@@ -18,12 +18,11 @@ local professionArt={
     [186]={136248,'Mining'}, [182]={136246,'Herbalism'}, [393]={134366,'Skinning'},
     [185]={133971,'Cooking'}, [129]={135966,'FirstAid'}, [356]={136245,'Fishing'},
 }
-local PAGE_SIZE=12
 local active, identity, profile, store, records = false, nil, nil, nil, {}
 local nativeProfessions={}
 local pending, queryPending, forceBroadcast, lastReply, nextScan = false, false, false, -60, 0
 local scanState
-local frame, rows, offset, filterID, query, onlineOnly = nil, {}, 0, 0, '', false
+local frame
 local render
 
 local function usable(value, wanted)
@@ -47,16 +46,6 @@ local function changed()
     if render then render() end
     if type(OldKraken.Fire)=='function' then OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED') end
 end
-local function lower(text)
-    text=text:lower():gsub('\208[\144-\175]',function(pair)
-        local b=pair:byte(2)
-        if b<=159 then return string.char(208,b+32) end
-        return string.char(209,b-32)
-    end)
-    local special={['\208\132']='\209\148',['\208\134']='\209\150',['\208\135']='\209\151',['\210\144']='\210\145'}
-    return (text:gsub('[\208\210][\128-\191]',special))
-end
-
 -- Avoid treating an unavailable or temporarily empty API as proof of no skills.
 local function scan()
     if type(GetProfessions)~='function' or type(GetProfessionInfo)~='function' then return nil end
@@ -173,6 +162,30 @@ function Workshop:ProfessionInfo(id)
     local entry=byID[id]; local art=professionArt[id]
     return entry and entry.name or 'Невідома професія', art and art[1] or 134400
 end
+function Workshop:GetProfessionMasters(id)
+    if not active or not byID[id] then return {} end
+    local found={}
+    for name,record in pairs(records) do
+        if usable(name,'string') and usable(record,'table') and usable(record.list,'table') then
+            for _,p in ipairs(record.list) do
+                if usable(p,'table') and p.id==id then
+                    found[name]={name=name,rank=integer(p.rank,1,9999),maximum=integer(p.maximum,1,9999),timestamp=record.timestamp}
+                    break
+                end
+            end
+        end
+    end
+    for name,list in pairs(nativeProfessions) do
+        if usable(name,'string') and usable(list,'table') and not found[name] then
+            for _,p in ipairs(list) do
+                if usable(p,'table') and p.id==id then found[name]={name=name,native=true}; break end
+            end
+        end
+    end
+    local result={}; for _,entry in pairs(found) do result[#result+1]=entry end
+    table.sort(result,function(a,b) return a.name<b.name end)
+    return result
+end
 
 local function updateOwn()
     local list=scan(); scanState=list~=nil
@@ -213,57 +226,17 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then
     end)
 end
 
-local function onlineIndex()
-    local online={}
-    if type(GetNumGuildMembers)~='function' or type(GetGuildRosterInfo)~='function' then return online end
-    local ok,total=pcall(GetNumGuildMembers)
-    if not ok or not integer(total,0,10000) then return online end
-    for i=1,total do
-        local success,name,_,_,_,_,_,_,_,isOnline=pcall(GetGuildRosterInfo,i)
-        if success and usable(name,'string') and usable(isOnline,'boolean') then online[name]=isOnline end
-    end
-    return online
-end
 local function button(parent,text,x,y,width,callback,variant)
     local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(text); b:SetScript('OnClick',callback); return b
 end
 render=function()
     if not frame then return end
-    local online=onlineIndex(); local list={}
-    for name,record in pairs(records) do
-        if usable(name,'string') and type(record)=='table' and type(record.list)=='table' then
-            for _,p in ipairs(record.list) do
-                local skill=type(p)=='table' and byID[p.id]
-                if skill and (filterID==0 or p.id==filterID) and (not onlineOnly or online[name] or name==identity)
-                    and (query=='' or lower(name):find(query,1,true) or lower(skill.name):find(query,1,true)) then
-                    list[#list+1]={name=name,skill=skill,rank=p.rank,maximum=p.maximum,timestamp=record.timestamp,online=online[name] or name==identity}
-                end
-            end
-        end
-    end
-    table.sort(list,function(a,b) if a.skill.id~=b.skill.id then return a.skill.name<b.skill.name end; return a.name<b.name end)
-    local pageCount=math.max(1,math.ceil(#list/PAGE_SIZE))
-    offset=math.min(offset,pageCount-1)
-    frame.page:SetText((offset+1)..' / '..pageCount)
-    frame.previousPage:SetShown(pageCount>1)
-    frame.nextPage:SetShown(pageCount>1)
-    frame.count:SetText('Записів: '..#list..' · дата — останнє отримане оновлення'..(scanState==false and ' · власні дані не отримано' or ''))
-    frame.online:SetText(onlineOnly and 'Лише онлайн: так' or 'Лише онлайн: ні')
+    frame.heading:SetText(scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути рецепти та майстрів.')
     local summaries=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:GetProfessionSummaries() or {}
     for _,card in ipairs(frame.professionCards) do
         local summary=summaries[card.profession]
         card.detail:SetText(summary and (summary.recipes..' рецептів · '..summary.members..' майстрів') or 'Немає збережених рецептів')
-    end
-    for i,row in ipairs(rows) do
-        local entry=list[offset*PAGE_SIZE+i]
-        if entry then
-            row.entry=entry
-            local dateText=integer(entry.timestamp,1,GetServerTime()+600) and date('%d.%m.%Y %H:%M',entry.timestamp) or 'невідомо'
-            local stale=not integer(entry.timestamp,1,GetServerTime()+600) or GetServerTime()-entry.timestamp>604800
-            row:SetText(entry.skill.name..'  ·  '..entry.name..'  ·  '..tostring(entry.rank)..'/'..tostring(entry.maximum)..'  ·  '..(entry.online and 'у грі' or 'офлайн / невідомо')..'  ·  '..dateText..(stale and ' · застаріло' or ''))
-            row:Show()
-        else row.entry=nil; row:Hide() end
     end
 end
 local function createWindow(parent)
@@ -307,21 +280,8 @@ local function createWindow(parent)
         end,'primary')
         f.newOrder:Hide()
     end
-    local search=CreateFrame('EditBox',nil,content,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
-    search:SetSize(200,22); search:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-45)); search:SetAutoFocus(false)
-    search:SetScript('OnTextChanged',function(self) query=lower(self:GetText() or ''); offset=0; render() end)
-    search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
-    local drop=CreateFrame('Frame','OldKrakenWorkshopProfession',content,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(drop)
-    drop:SetPoint('TOPLEFT',content,'TOPLEFT',220,y(-40)); UIDropDownMenu_SetWidth(drop,160)
-    UIDropDownMenu_Initialize(drop,function(_,level)
-        local all=UIDropDownMenu_CreateInfo(); all.text='Усі професії'; all.checked=filterID==0; all.func=function() filterID=0; offset=0; UIDropDownMenu_SetText(drop,'Усі професії'); render() end; UIDropDownMenu_AddButton(all,level)
-        for _,p in ipairs(professions) do local entry=p; local item=UIDropDownMenu_CreateInfo(); item.text=entry.name; item.checked=filterID==entry.id
-            item.func=function() filterID=entry.id; offset=0; UIDropDownMenu_SetText(drop,entry.name); render() end; UIDropDownMenu_AddButton(item,level) end
-    end)
-    UIDropDownMenu_SetText(drop,'Усі професії')
-    f.online=button(content,'Лише онлайн: ні',430,y(-43),145,function() onlineOnly=not onlineOnly; offset=0; render() end)
     button(content,'Оновити',590,y(-43),120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
-    f.count=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-78))
+    f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-52))
     f.professionCards={}
     for i,p in ipairs(professions) do
         local entry=p; local col=(i-1)%3; local line=math.floor((i-1)/3)
@@ -344,26 +304,11 @@ local function createWindow(parent)
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         f.professionCards[i]=card
     end
-    local listScroll=CreateFrame('ScrollFrame','OldKrakenWorkshopRosterScroll',content,'UIPanelScrollFrameTemplate')
-    listScroll:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-294)); listScroll:SetSize(725,128)
-    local listContent=CreateFrame('Frame',nil,listScroll); listContent:SetSize(700,PAGE_SIZE*26); listScroll:SetScrollChild(listContent)
-    f.listScroll=listScroll
-    for i=1,PAGE_SIZE do
-        rows[i]=button(listContent,'',0,-(i-1)*26,700,function(self)
-            local entry=self.entry
-            if entry and entry.online and entry.name~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(entry.name) end
-        end)
-        local font=rows[i]:GetFontString(); if font then font:ClearAllPoints(); font:SetJustifyH('LEFT'); font:SetPoint('LEFT',rows[i],'LEFT',8,0); font:SetPoint('RIGHT',rows[i],'RIGHT',-8,0) end
-    end
-    f.previousPage=button(content,'‹',embedded and 362 or 295,y(-430),44,function() offset=math.max(0,offset-1); listScroll:SetVerticalScroll(0); render() end)
-    f.page=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-    f.page:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 418 or 351,y(-435)); f.page:SetWidth(64); f.page:SetJustifyH('CENTER')
-    f.nextPage=button(content,'›',embedded and 494 or 427,y(-430),44,function() offset=offset+1; listScroll:SetVerticalScroll(0); render() end)
     if not embedded then
         button(content,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
     end
-    button(content,'Пошук рецептів',embedded and 20 or 175,y(-472),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
-    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',345,y(-478)); note:SetText('Відкрийте професії, щоб зчитати рецепти.')
+    button(content,'Пошук рецептів',embedded and 20 or 175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
+    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',200,y(-321)); note:SetText('Відкрийте професії, щоб зчитати рецепти.')
     content:HookScript('OnShow',render)
     f:Hide(); return f
 end

@@ -10,6 +10,7 @@ local scanPending,tradeOpen,sendQueue=false,false,{}
 local activeQuery,sequence,lastQuery,lastIncoming=nil,0,-60,{}
 local frame,rows,offset,resultSet=nil,{},0,{}
 local selectRecipe,selectedEntry,viewOwner
+local professionContext, selectedMaster, tab, mastersOnline = nil, nil, 'recipes', false
 local recipeChanged=false
 local scanStatus='Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
 local render, matches
@@ -433,9 +434,66 @@ end
 render=function()
     if not frame or not frame:IsShown() then return end
     local online=onlineIndex(); local list={}; local grouped={}
-    local byRecipe=not selectRecipe and not viewOwner and activeQuery and activeQuery.query:match('^prof:%d+$')
+    local mastersView=professionContext and tab=='masters' and not selectRecipe
+    local filter=professionContext and lower((frame.query:GetText() or ''):match('^%s*(.-)%s*$')) or ''
+    if not mastersView then filter=filter:match('item:(%d+)') or filter end
+    if frame.TitleText then frame.TitleText:SetText(professionContext and ('Old Kraken — '..professionNames[professionContext]) or 'Old Kraken — Пошук рецептів') end
+    frame.searchLabel:SetText(mastersView and 'Пошук майстра за ім’ям' or 'Пошук рецепта або предмета')
+    if professionContext then
+        frame.status:SetText(viewOwner and ('Рецепти майстра: '..viewOwner..' · дані можуть бути неповними.') or 'Дані можуть бути неповними або застарілими.')
+    end
+    frame.recipeTab:SetShown(professionContext~=nil and not selectRecipe)
+    frame.masterTab:SetShown(professionContext~=nil and not selectRecipe)
+    frame.recipeTab.activeBar:SetShown(professionContext~=nil and tab=='recipes' and not selectRecipe)
+    frame.masterTab.activeBar:SetShown(professionContext~=nil and tab=='masters' and not selectRecipe)
+    frame.masterRecipes:SetShown(mastersView and selectedMaster~=nil)
+    frame.onlineOnly:SetShown(mastersView and true or false)
+    if mastersView then
+        frame.onlineOnly:SetText(mastersOnline and 'Лише онлайн: так' or 'Лише онлайн: ні')
+        local masters=OldKraken.Workshop and OldKraken.Workshop:GetProfessionMasters(professionContext) or {}
+        for _,entry in ipairs(masters) do
+            if (not viewOwner or entry.name==viewOwner) and (not mastersOnline or entry.name==identity or online[entry.name]==true)
+                and (filter=='' or lower(entry.name):find(filter,1,true)) then list[#list+1]=entry end
+        end
+        table.sort(list,function(a,b)
+            local aOnline=a.name==identity or online[a.name]==true; local bOnline=b.name==identity or online[b.name]==true
+            if aOnline~=bOnline then return aOnline end
+            return a.name<b.name
+        end)
+        offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/12)-1)))
+        frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/12)))
+        frame.count:SetText('Майстрів: '..#list..' · рівень і дата за останніми доступними даними')
+        local _,icon=OldKraken.Workshop:ProfessionInfo(professionContext)
+        for i,row in ipairs(rows) do
+            local entry=list[offset*12+i]
+            if entry then
+                row.entry=entry; row.icon:SetTexture(icon); row.name:SetText(entry.name)
+                local level=entry.rank and entry.maximum and (entry.rank..'/'..entry.maximum) or 'рівень невідомий'
+                local state=(entry.name==identity or online[entry.name]==true) and 'онлайн' or (online[entry.name]==false and 'офлайн' or 'статус невідомий')
+                local stale=integer(entry.timestamp,1,GetServerTime()+600) and GetServerTime()-entry.timestamp>604800
+                row.meta:SetText(level..' · '..state..(entry.native and ' · ігровий API' or '')..(stale and ' · застаріло' or ''))
+                if selectedMaster and selectedMaster.name==entry.name then row:LockHighlight() else row:UnlockHighlight() end
+                row:Show()
+            else row.entry=nil; row:UnlockHighlight(); row:Hide() end
+        end
+        frame.detailIcon:SetShown(selectedMaster~=nil); frame.order:Hide()
+        frame.whisper:SetShown(selectedMaster~=nil and selectedMaster.name~=identity and online[selectedMaster.name]==true)
+        if selectedMaster then
+            frame.detailIcon:SetTexture(icon); frame.detailTitle:SetText(selectedMaster.name)
+            local level=selectedMaster.rank and selectedMaster.maximum and (selectedMaster.rank..'/'..selectedMaster.maximum) or 'невідомий'
+            local state=(selectedMaster.name==identity or online[selectedMaster.name]==true) and 'онлайн' or (online[selectedMaster.name]==false and 'офлайн' or 'невідомо')
+            local updated=integer(selectedMaster.timestamp,1,GetServerTime()+600) and date('%d.%m.%Y %H:%M',selectedMaster.timestamp) or 'невідомо'
+            frame.detailInfo:SetText(professionNames[professionContext]..'\nРівень: '..level..'\nСтатус: '..state..'\nОновлено: '..updated)
+            frame.detailReagents:SetText(selectedMaster.native and 'Професія отримана з ігрового API; рівень і рецепти не підтверджені.' or 'Дані можуть бути застарілими. Рецепти доступні, якщо майстер їх зчитав.')
+        else
+            frame.detailTitle:SetText('Оберіть майстра'); frame.detailInfo:SetText('Тут показані власники професії, зокрема без зчитаних рецептів.'); frame.detailReagents:SetText('')
+        end
+        return
+    end
+    local byRecipe=not selectRecipe and not viewOwner and (professionContext or (activeQuery and activeQuery.query:match('^prof:%d+$')))
     for _,entry in pairs(resultSet) do
-        if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) then
+        if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
+            and (filter=='' or lower(entry.record.name):find(filter,1,true) or lower(entry.record.product):find(filter,1,true) or tostring(entry.record.item):find(filter,1,true)) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
                 if not old or (online[entry.owner] and not online[old.owner]) or ((online[entry.owner] and true or false)==(online[old.owner] and true or false) and entry.record.seen>old.record.seen) then grouped[id]=entry end
@@ -478,15 +536,33 @@ local function createWindow()
     table.insert(UISpecialFrames,'OldKrakenWorkshopRecipesFrame'); f:SetSize(820,520); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); OldKraken.UIStyle.Window(f)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук рецептів') end
+    local function changeTab(nextTab)
+        tab=nextTab; viewOwner=nil
+        selectedEntry=nil; selectedMaster=nil; offset=0; f.query:SetText(''); render()
+    end
+    f.recipeTab=button(f,'Рецепти',20,-38,120,function() changeTab('recipes') end)
+    f.masterTab=button(f,'Майстри',148,-38,120,function() changeTab('masters') end)
+    for _,item in ipairs({f.recipeTab,f.masterTab}) do
+        item.activeBar=item:CreateTexture(nil,'ARTWORK'); item.activeBar:SetPoint('BOTTOMLEFT',item,'BOTTOMLEFT',2,1); item.activeBar:SetSize(116,2)
+        item.activeBar:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
+    end
     f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(f.query)
-    f.query:SetSize(350,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-48); f.query:SetAutoFocus(false)
+    f.query:SetSize(350,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-80); f.query:SetAutoFocus(false)
+    f.searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',505,-55)
+    f.query:SetScript('OnTextChanged',function() if professionContext then selectedEntry=nil; selectedMaster=nil; offset=0; render() end end)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
-    f.query:SetScript('OnEnterPressed',function(self) selectedEntry=nil; viewOwner=nil; if search(self:GetText() or '') then self:ClearFocus() end end)
-    button(f,'Знайти',385,-48,105,function() selectedEntry=nil; viewOwner=nil; search(f.query:GetText() or '') end,'primary')
-    f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-78)
+    local function submitSearch()
+        if professionContext then offset=0; render(); f.query:ClearFocus(); return end
+        selectedEntry=nil; viewOwner=nil; if search(f.query:GetText() or '') then f.query:ClearFocus() end
+    end
+    f.query:SetScript('OnEnterPressed',submitSearch)
+    button(f,'Знайти',385,-80,105,submitSearch,'primary')
+    f.onlineOnly=button(f,'Лише онлайн: ні',505,-80,160,function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end)
+    f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-110)
     for i=1,12 do
-        rows[i]=button(f,'',20,-102-(i-1)*26,465,function(self)
-            if self.entry and selectRecipe then
+        rows[i]=button(f,'',20,-134-(i-1)*26,465,function(self)
+            if self.entry and professionContext and tab=='masters' and not selectRecipe then selectedMaster=self.entry; render()
+            elseif self.entry and selectRecipe then
                 local callback=selectRecipe; selectRecipe=nil; f:Hide(); callback(self.entry.record)
             elseif self.entry then selectedEntry=self.entry; render() end
         end)
@@ -494,16 +570,23 @@ local function createWindow()
         rows[i].name=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); rows[i].name:SetPoint('TOPLEFT',rows[i],'TOPLEFT',29,-1); rows[i].name:SetWidth(425); rows[i].name:SetJustifyH('LEFT'); rows[i].name:SetWordWrap(false)
         rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); rows[i].meta:SetPoint('BOTTOMLEFT',rows[i],'BOTTOMLEFT',29,1); rows[i].meta:SetWidth(425); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false)
     end
-    f.detailIcon=f:CreateTexture(nil,'ARTWORK'); f.detailIcon:SetSize(46,46); f.detailIcon:SetPoint('TOPLEFT',f,'TOPLEFT',505,-104)
-    f.detailTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.detailTitle:SetPoint('TOPLEFT',f,'TOPLEFT',560,-107); f.detailTitle:SetWidth(230); f.detailTitle:SetJustifyH('LEFT'); f.detailTitle:SetWordWrap(true)
-    f.detailInfo=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailInfo:SetPoint('TOPLEFT',f,'TOPLEFT',505,-160); f.detailInfo:SetWidth(280); f.detailInfo:SetJustifyH('LEFT'); f.detailInfo:SetJustifyV('TOP')
-    f.detailReagents=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailReagents:SetPoint('TOPLEFT',f,'TOPLEFT',505,-315); f.detailReagents:SetWidth(280); f.detailReagents:SetJustifyH('LEFT'); f.detailReagents:SetJustifyV('TOP')
-    f.whisper=button(f,'Шепнути',505,-442,110,function() if selectedEntry and selectedEntry.owner~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(selectedEntry.owner) end end)
-    f.order=button(f,'Замовити',625,-442,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
-    button(f,'‹',20,-425,44,function() offset=offset-1; render() end)
-    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-430)
-    button(f,'›',130,-425,44,function() offset=offset+1; render() end)
-    f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-465); f.status:SetWidth(465); f.status:SetJustifyH('LEFT')
+    f.detailIcon=f:CreateTexture(nil,'ARTWORK'); f.detailIcon:SetSize(46,46); f.detailIcon:SetPoint('TOPLEFT',f,'TOPLEFT',505,-136)
+    f.detailTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.detailTitle:SetPoint('TOPLEFT',f,'TOPLEFT',560,-139); f.detailTitle:SetWidth(230); f.detailTitle:SetJustifyH('LEFT'); f.detailTitle:SetWordWrap(true)
+    f.detailInfo=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailInfo:SetPoint('TOPLEFT',f,'TOPLEFT',505,-192); f.detailInfo:SetWidth(280); f.detailInfo:SetJustifyH('LEFT'); f.detailInfo:SetJustifyV('TOP')
+    f.detailReagents=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailReagents:SetPoint('TOPLEFT',f,'TOPLEFT',505,-347); f.detailReagents:SetWidth(280); f.detailReagents:SetJustifyH('LEFT'); f.detailReagents:SetJustifyV('TOP')
+    f.whisper=button(f,'Шепнути',505,-474,110,function()
+        local name=professionContext and tab=='masters' and selectedMaster and selectedMaster.name or (selectedEntry and selectedEntry.owner)
+        if name and name~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(name) end
+    end)
+    f.order=button(f,'Замовити',625,-474,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
+    f.masterRecipes=button(f,'Рецепти майстра',625,-474,170,function()
+        if not selectedMaster then return end
+        viewOwner=selectedMaster.name; tab='recipes'; selectedEntry=nil; selectedMaster=nil; offset=0; f.query:SetText(''); render()
+    end)
+    button(f,'‹',20,-457,44,function() offset=offset-1; render() end)
+    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-462)
+    button(f,'›',130,-457,44,function() offset=offset+1; render() end)
+    f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-497); f.status:SetWidth(465); f.status:SetJustifyH('LEFT')
     f.status:SetText(scanStatus)
     f:SetScript('OnHide',function() selectRecipe=nil end)
     f:Hide(); return f
@@ -511,6 +594,7 @@ end
 function Recipes:Show()
     connect(); if not active then print('Old Kraken: пошук рецептів доступний членам гільдії.'); return end
     if not frame then frame=createWindow() end
+    professionContext,selectedMaster,tab,viewOwner,selectRecipe=nil,nil,'recipes',nil,nil
     frame:Show(); render()
 end
 function Recipes:ExportSnapshot()
@@ -561,7 +645,8 @@ end
 function Recipes:ShowProfession(profession)
     if not professionNames[profession] then return end
     self:Show(); if not active or not frame then return end
-    selectRecipe=nil; selectedEntry=nil; viewOwner=nil
+    selectRecipe=nil; selectedEntry=nil; viewOwner=nil; professionContext=profession; selectedMaster=nil; tab='recipes'; mastersOnline=false
+    if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     frame.query:SetText('')
     frame.status:SetText(professionNames[profession]..': збережені рецепти та відповіді онлайн-майстрів; список може бути неповним.')
     search('prof:'..profession); frame:Raise(); render()
@@ -622,3 +707,4 @@ function Recipes:ShowMasters(itemID,recipeID)
     frame.query:SetText(query); frame.status:SetText('Відомі майстри; дата показує останнє зчитування рецепта.')
     search(query); frame:Raise()
 end
+OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function() if professionContext and tab=='masters' then render() end end)
