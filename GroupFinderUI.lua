@@ -8,7 +8,7 @@ local ALERT_DURATION, ALERT_FADE_DURATION, ALERT_SOUND_INTERVAL = 9, 1, 60
 local tab = 'all'
 local offset = 0
 local requestOffset = 0
-local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 3, 3
+local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 2, 3
 local category, role = 'dungeon', 'dps'
 local filterCategory, filterRole, filterFree = 'all', '', false
 local dungeon, filterDungeon = '', ''
@@ -207,11 +207,12 @@ local function refreshRequests()
         local entry = entries[requestOffset + i]
         row.entry = entry
         if entry then
-            row.name:SetText(playerLabel(entry.name) .. ' · ' .. roleLabel(entry.role))
+            row.name:SetText(playerLabel(entry.name))
+            row.roleStatus:SetText(roleLabel(entry.role or '') .. ' |cff9ba9bc·|r |cffffc36bОчікує|r')
             row.group:SetText(entry.title)
-            row.name:Show(); row.group:Show(); row.hover:Show(); row.accept:Show(); row.reject:Show()
+            row.name:Show(); row.roleStatus:Show(); row.group:Show(); row.hover:Show(); row.accept:Show(); row.reject:Show()
         else
-            row.name:Hide(); row.group:Hide(); row.hover:Hide(); row.accept:Hide(); row.reject:Hide()
+            row.name:Hide(); row.roleStatus:Hide(); row.group:Hide(); row.hover:Hide(); row.accept:Hide(); row.reject:Hide()
         end
     end
     local showPagination = #entries > REQUESTS_PER_PAGE
@@ -237,19 +238,23 @@ local function showRequests()
         f.rows = {}
         for i=1, REQUESTS_PER_PAGE do
             local row = {}
-            local y = -22 - (i - 1) * 40
+            local y = -22 - (i - 1) * 55
             row.name = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
             row.name:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y); row.name:SetSize(150, 18)
             row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
+            row.roleStatus = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+            row.roleStatus:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y - 18); row.roleStatus:SetSize(150, 16)
+            row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
             row.group = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-            row.group:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y - 18); row.group:SetSize(150, 16)
+            row.group:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y - 34); row.group:SetSize(150, 15)
             row.group:SetJustifyH('LEFT'); row.group:SetWordWrap(false)
             row.hover = CreateFrame('Frame', nil, f)
-            row.hover:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y); row.hover:SetSize(150, 36); row.hover:EnableMouse(true)
+            row.hover:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y); row.hover:SetSize(150, 49); row.hover:EnableMouse(true)
             row.hover:SetScript('OnEnter', function(self)
                 if not row.entry then return end
                 GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
                 GameTooltip:SetText(playerLabel(row.entry.name) .. ' · ' .. roleLabel(row.entry.role))
+                GameTooltip:AddLine('|cffffc36bОчікує|r', 1, 1, 1)
                 GameTooltip:AddLine(row.entry.title, 1, 1, 1, true); GameTooltip:Show()
             end)
             row.hover:SetScript('OnLeave', function() GameTooltip:Hide() end)
@@ -264,8 +269,8 @@ local function showRequests()
                     refreshRequests()
                 else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
             end
-            row.accept = button(f, 'Прийняти', 150, y - 3, 70, function() decide(true) end, nil, 'primary')
-            row.reject = button(f, 'Відхилити', 225, y - 3, 70, function() decide(false) end)
+            row.accept = button(f, 'Прийняти', 150, y - 10, 70, function() decide(true) end, nil, 'primary')
+            row.reject = button(f, 'Відхилити', 225, y - 10, 70, function() decide(false) end)
             row.accept:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Прийняти заявку'); GameTooltip:Show() end end)
             row.reject:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Відхилити заявку'); GameTooltip:Show() end end)
             row.accept:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
