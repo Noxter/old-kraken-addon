@@ -339,14 +339,26 @@ local function refresh()
             local kind = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category] or g.category
             catalog.SetArtwork(b.art, g.dungeon)
             b.title:SetText(g.title == kind and g.title or (g.title .. '  ·  ' .. kind))
-            b.meta:SetText(string.format('%s  ·  рівень %d–%d  ·  %d/%d', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize))
+            local present, reserved = {}, 0
+            if g.partyObserved then
+                for memberIndex = 2, #g.members do
+                    local name = g.members[memberIndex]
+                    if g.partyObserved[name] then present[#present + 1] = name else reserved = reserved + 1 end
+                end
+            end
+            b.meta:SetText(string.format('%s  ·  %d–%d  ·  місць %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (' · резерв ' .. reserved) or ''))
             local badge = tab == 'applications' and applicationBadges[status]
             if badge then
                 b.status:SetText(badge.text); b.status:SetTextColor(unpack(badge.color)); b.status:Show(); b.statusBackground:Show()
             else b.status:Hide(); b.statusBackground:Hide() end
             local preview = {}
-            for memberIndex = 1, math.min(#g.members, 3) do preview[#preview + 1] = playerLabel(g.members[memberIndex]) end
-            b.members:SetText('Склад: ' .. table.concat(preview, ', ') .. (#g.members > 3 and ('  +' .. (#g.members - 3)) or ''))
+            if g.partyObserved and #present > 0 then
+                preview[1] = playerLabel(g.owner)
+                for memberIndex = 1, math.min(#present, 2) do preview[#preview + 1] = playerLabel(present[memberIndex]) end
+                b.members:SetText('У паті: ' .. table.concat(preview, ', ') .. (#present > 2 and ('  +' .. (#present - 2)) or ''))
+            else
+                b.members:SetText(g.partyObserved and 'Автор поки без паті' or 'Склад паті не підтверджено')
+            end
             local fixedSlots = g.category == 'dungeon' and g.maxSize == 5 and Finder:DungeonSlots(g) or nil
             for slotIndex, slot in ipairs(b.slots) do
                 if slotIndex <= math.min(5, g.maxSize) then
@@ -358,8 +370,9 @@ local function refresh()
                     local memberRole = fixed and fixed.memberRole or (member and (member == g.owner and g.role or (g.memberRoles and g.memberRoles[member]) or '')) or ''
                     slot.groupKey, slot.member, slot.memberRole, slot.requiredRole = entry.key, member, memberRole, fixed and fixed.role or nil
                     if member then
+                        local isReserved = member ~= g.owner and g.partyObserved and not g.partyObserved[member]
                         if roleCoords[memberRole] then
-                            slot.ring:Hide(); setRoleIcon(slot.icon, memberRole); slot.icon:Show(); slot.text:Hide()
+                            slot.ring:Hide(); setRoleIcon(slot.icon, memberRole); slot.icon:SetAlpha(isReserved and 0.45 or 1); slot.icon:Show(); slot.text:Hide()
                         elseif memberRole == 'flex' then
                             slot.ring:Hide(); slot.icon:Hide(); slot.text:SetText('F'); slot.text:Show()
                         else
@@ -397,7 +410,9 @@ local function refresh()
             if not row then
                 row = {}
                 row.name = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-                row.name:SetWidth(155); row.name:SetHeight(22); row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
+                row.name:SetWidth(155); row.name:SetHeight(20); row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
+                row.state = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+                row.state:SetWidth(155); row.state:SetHeight(16); row.state:SetJustifyH('LEFT'); row.state:SetWordWrap(false)
                 row.hover = CreateFrame('Frame', nil, window.detailsContent)
                 row.hover:SetSize(155, 22); row.hover:EnableMouse(true)
                 row.hover:SetScript('OnEnter', function(self)
@@ -472,21 +487,22 @@ local function refresh()
             local name = members[i]
             local state = i == 1 and 'автор' or
                 (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у групі' or 'резерв'))
-            row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 24)
+            row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 40)
             local memberRole=i==1 and g.role or (g.memberRoles and g.memberRoles[name])
-            row.name:SetText((catalog.roleIcons[memberRole] or '') .. ' ' .. playerLabel(name) .. ' (' .. state .. ')'); row.name:Show()
+            row.name:SetText((catalog.roleIcons[memberRole] or '') .. ' ' .. playerLabel(name)); row.name:Show()
+            row.state:ClearAllPoints(); row.state:SetPoint('TOPLEFT', row.name, 'BOTTOMLEFT', 0, 0); row.state:SetText(state); row.state:Show()
             row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. ' (' .. state .. ')'; row.hover:Show()
-            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (i - 1) * 24)
+            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (i - 1) * 40)
             row.invite.memberName = name
             if canManage and i > 1 and g.partyObserved and not g.partyObserved[name] then row.invite:Show() else row.invite:Hide() end
-            row.remove:ClearAllPoints(); row.remove:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 265, -top - (i - 1) * 24)
+            row.remove:ClearAllPoints(); row.remove:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 265, -top - (i - 1) * 40)
             row.remove.memberName = name
             if canManage and i > 1 then row.remove:Show() else row.remove:Hide() end
         elseif row then
-            row.name:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
+            row.name:Hide(); row.state:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
         end
     end
-    window.detailsContent:SetHeight(math.max(210, top + #members * 24 + 4))
+    window.detailsContent:SetHeight(math.max(210, top + #members * 40 + 4))
     local isOther = tab ~= 'create' and g and g.owner ~= Finder.identity and not g.closed
     local pending = selected and Finder.pending[selected]
     local alreadyMember = false
@@ -622,6 +638,10 @@ local function createWindow(parent)
                 if self.member then
                     GameTooltip:SetText(playerLabel(self.member))
                     GameTooltip:AddLine('Роль: ' .. roleLabel(self.memberRole), 1, 1, 1)
+                    local group = self.groupKey and Finder.groups[self.groupKey]
+                    if group and self.member ~= group.owner then
+                        GameTooltip:AddLine(not group.partyObserved and 'Стан невідомий' or (group.partyObserved[self.member] and 'У паті' or 'Резерв'), 1, 1, 1)
+                    end
                 else
                     GameTooltip:SetText('Вільне місце' .. (self.requiredRole and (': ' .. roleLabel(self.requiredRole)) or ''))
                     local group = self.groupKey and Finder.groups[self.groupKey]

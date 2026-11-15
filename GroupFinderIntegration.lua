@@ -4,6 +4,8 @@ local comm = OldKraken.Communication
 local active, storage, nextQuery, nextBroadcast, nextRetry, lastQuery = false, nil, 0, 0, 0, -60
 local currentKey, tickerStarted = nil, false
 local partyDirty = true
+local nextPartyCheck = 0
+local soloSince = nil
 local diagnostics = { received = 0, accepted = 0, rejected = 0 }
 local lastBump = {}
 
@@ -32,6 +34,8 @@ local function deactivate()
     if active then comm:ClearProtocolState() end
     active, finder.active, storage, currentKey = false, false, nil, nil
     partyDirty = true
+    nextPartyCheck = 0
+    soloSince = nil
 end
 
 local function saveOwned()
@@ -189,7 +193,7 @@ end
 local function readParty()
     if type(IsInGroup) ~= 'function' or type(IsInRaid) ~= 'function'
         or type(GetNumGroupMembers) ~= 'function' or type(UnitName) ~= 'function' then return nil end
-    local ok, result = pcall(function()
+    local ok, result, isGrouped = pcall(function()
         local function plain(value)
             if type(issecretvalue) == 'function' and issecretvalue(value) then error('unavailable group data') end
             return value
@@ -198,7 +202,7 @@ local function readParty()
         if raid ~= nil and raid ~= true and raid ~= false and raid ~= 1 then return nil end
         if grouped ~= nil and grouped ~= true and grouped ~= false and grouped ~= 1 then return nil end
         if raid and not grouped then return nil end
-        if not grouped then return {} end
+        if not grouped then return {}, false end
         local count = plain(GetNumGroupMembers())
         if type(count) ~= 'number' or count % 1 ~= 0 or count < 1 or count > (raid and 40 or 5)
             or (not raid and count < 2) then return nil end
@@ -216,9 +220,45 @@ local function readParty()
             else names[#names + 1] = fullName end
         end
         if not foundPlayer then return nil end
-        return names
+        return names, true
     end)
-    return ok and result or nil
+    if ok then return result, isGrouped end
+    return nil
+end
+
+local function reconcileParty(additionsOnly)
+    local party, isGrouped = readParty()
+    if not party then soloSince = nil; diagnostics.partySyncError = 'unavailable'; return end
+    if isGrouped then soloSince = nil end
+    if additionsOnly then
+        if #party == 0 then return end
+        local current = {}; for _, name in ipairs(party) do current[name] = true end
+        for _, group in pairs(finder.groups) do
+            if group.owner == finder.identity and not group.closed then
+                for name in pairs(group.partyObserved or {}) do if not current[name] then return end end
+            end
+        end
+    end
+    if isGrouped == false and not additionsOnly then
+        local wasGrouped = false
+        for _, group in pairs(finder.groups) do
+            if group.owner == finder.identity and not group.closed and group.partyObserved and next(group.partyObserved) then wasGrouped = true; break end
+        end
+        if wasGrouped then
+            if not soloSince then soloSince = GetTime() end
+            if GetTime() - soloSince < 3 then partyDirty = true; return end
+        end
+        local complete, changed = finder:DeleteDisbandedGroups()
+        if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
+        if not complete then partyDirty = true; return end
+    end
+    local complete, changed, reason = finder:SyncPartyMembers(party)
+    partyDirty = not complete
+    if reason == 'payload' and diagnostics.partySyncError ~= 'payload' then
+        print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
+    end
+    diagnostics.partySyncError = reason
+    if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
 end
 
 function finder:PrintSyncStatus()
@@ -233,6 +273,8 @@ function finder:PrintSyncStatus()
         '; після перевірки: ' .. tostring(diagnostics.lastNormalized or 'не визначено'))
     if diagnostics.partySyncError == 'payload' then
         print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
+    elseif diagnostics.partySyncError == 'unavailable' then
+        print('|cffff5555Old Kraken|r: Гра не повернула повний склад паті або рейду; аддон повторить перевірку.')
     end
 end
 
@@ -250,7 +292,13 @@ frame:RegisterEvent('PLAYER_LOGIN')
 frame:RegisterEvent('GUILD_ROSTER_UPDATE')
 frame:RegisterEvent('GROUP_ROSTER_UPDATE')
 frame:SetScript('OnEvent', function(_, event)
-    if event == 'GROUP_ROSTER_UPDATE' then partyDirty = true; return end
+    if event == 'GROUP_ROSTER_UPDATE' then
+        partyDirty = true
+        -- Capture a confirmed join immediately; defer removals until the
+        -- next tick so transient, incomplete roster updates cannot disband it.
+        if active then reconcileParty(true) end
+        return
+    end
     local identity, name = playerIdentity()
     local guild = GetGuildInfo and GetGuildInfo('player')
     if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == ''
@@ -396,17 +444,11 @@ frame:SetScript('OnEvent', function(_, event)
                 return
             end
             local now = GetTime()
-            if partyDirty then
-                local party = readParty()
-                if party then
-                    local complete, changed, reason = finder:SyncPartyMembers(party)
-                    partyDirty = not complete
-                    if reason == 'payload' and diagnostics.partySyncError ~= 'payload' then
-                        print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
-                    end
-                    diagnostics.partySyncError = reason
-                    if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
-                end
+            -- Some clients can miss a roster event or deliver it before the
+            -- roster is complete. Reconcile periodically even after success.
+            if partyDirty or now >= nextPartyCheck then
+                nextPartyCheck = now + 3
+                reconcileParty(false)
             end
             if now >= nextQuery and comm:RequestSync() then nextQuery = now + 180 end
             if now >= nextBroadcast then finder:OnQuery(); nextBroadcast = now + 300 end

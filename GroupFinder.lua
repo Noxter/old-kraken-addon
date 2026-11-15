@@ -386,6 +386,19 @@ function Finder:Delete(id)
     return true
 end
 
+-- Delete only listings whose owner actually observed another party/raid member.
+-- A solo author can still create a listing and wait for accepted reservations.
+function Finder:DeleteDisbandedGroups()
+    local changed = false
+    for _, group in pairs(self.groups) do
+        if group.owner == self.identity and not group.closed and group.partyObserved and next(group.partyObserved) then
+            if not self:Delete(group.id) then return false, changed end
+            changed = true
+        end
+    end
+    return true, changed
+end
+
 function Finder:RemoveMember(id, member)
     local group = self.groups[self.identity .. '\001' .. id]
     if not group or group.closed then return false end
