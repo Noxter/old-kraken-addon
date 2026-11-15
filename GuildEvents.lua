@@ -504,16 +504,17 @@ local function field(parent, label, x, y, width, value)
     box:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); box:SetSize(width,22); box:SetAutoFocus(false); box:SetText(value or '')
     box.label=caption; box:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return box
 end
-local function selectMenu(parent,name,x,y,width,values,labels,get,set,allowed)
+local function selectMenu(parent,name,x,y,width,values,labels,get,set,allowed,menuFont)
     local f=CreateFrame('Frame',name,parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
     f:SetPoint('TOPLEFT',parent,'TOPLEFT',x-16,y+3); UIDropDownMenu_SetWidth(f,width-34); UIDropDownMenu_JustifyText(f,'LEFT')
     UIDropDownMenu_Initialize(f,function(_,level)
         for _,v in ipairs(values) do
-            local value=v; local item=UIDropDownMenu_CreateInfo(); item.text=labels[value]; item.value=value; item.checked=get()==value
+            local value=v; local item=UIDropDownMenu_CreateInfo(); item.text=labels[value]; item.value=value; item.checked=get()==value; item.fontObject=menuFont
             item.disabled=allowed and not allowed(value) or false
             item.func=function() if allowed and not allowed(value) then return end; set(value); UIDropDownMenu_SetText(f,labels[value]) end; UIDropDownMenu_AddButton(item,level)
         end
     end)
+    if menuFont and _G[name..'Text'] then _G[name..'Text']:SetFontObject(menuFont) end
     UIDropDownMenu_SetText(f,labels[get()]); return f
 end
 local function selectMinutes(parent,x,y,get,set)
@@ -875,17 +876,17 @@ local function createWindow(parent)
     activityButton=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); activityButton:SetPoint('TOPLEFT',f,'TOPLEFT',460+shift,-522); activityButton:SetSize(180,28); activityButton:SetJustifyH('LEFT')
     f.activityButton=activityButton
     local grid=CreateFrame('Frame',nil,f)
-    grid:SetSize(embedded and 850 or 805,298); grid:SetPoint('TOPLEFT',f,'TOPLEFT',18,-112)
+    grid:SetSize(embedded and 850 or 805,286); grid:SetPoint('TOPLEFT',f,'TOPLEFT',18,-124)
     grid:SetFrameLevel(f:GetFrameLevel()+10); grid:EnableMouse(true); grid:EnableMouseWheel(true)
     local fill=grid:CreateTexture(nil,'BACKGROUND'); fill:SetAllPoints(grid); fill:SetColorTexture(0.035,0.04,0.05,1)
     grid.heading=grid:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); grid.heading:SetPoint('TOPLEFT',grid,'TOPLEFT',12,-10)
     action(grid,'Без конкретної локації',embedded and 560 or 515,-7,230,function() chooseActivity('') end)
-    local clip=CreateFrame('Frame',nil,grid); clip:SetPoint('TOPLEFT',grid,'TOPLEFT',8,-40); clip:SetSize(embedded and 830 or 785,250)
+    local clip=CreateFrame('Frame',nil,grid); clip:SetPoint('TOPLEFT',grid,'TOPLEFT',8,-40); clip:SetSize(embedded and 830 or 785,238)
     if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
     local body=CreateFrame('Frame',nil,clip); body:SetSize(embedded and 830 or 785,1)
     grid.cards={}; grid.offset=0; grid.full=1
     function grid:ScrollTo(value)
-        self.offset=math.max(0,math.min(math.max(0,self.full-250),value))
+        self.offset=math.max(0,math.min(math.max(0,self.full-238),value))
         body:ClearAllPoints(); body:SetPoint('TOPLEFT',clip,'TOPLEFT',0,self.offset)
     end
     local function wheel(_,delta) grid:ScrollTo(grid.offset-delta*70) end
@@ -931,11 +932,17 @@ local function createWindow(parent)
         activityButton:SetText(activity~='' and activityLabels[activity] or 'Локацію не вибрано')
         if f.creationMode and enabled then f:ShowActivityCards() else grid:Hide() end
     end
-    f.kindAccent=f:CreateTexture(nil,'BACKGROUND'); f.kindAccent:SetPoint('TOPLEFT',f,'TOPLEFT',18,-65); f.kindAccent:SetSize(embedded and 850 or 805,40); f.kindAccent:SetColorTexture(0.24,0.18,0.06,0.9)
+    f.kindAccent=f:CreateTexture(nil,'BACKGROUND'); f.kindAccent:SetPoint('TOPLEFT',f,'TOPLEFT',18,-77); f.kindAccent:SetSize(embedded and 850 or 805,40); f.kindAccent:SetColorTexture(0.24,0.18,0.06,0.9)
     f.kindEdge=f:CreateTexture(nil,'ARTWORK'); f.kindEdge:SetPoint('TOPLEFT',f.kindAccent,'TOPLEFT'); f.kindEdge:SetSize(3,40); f.kindEdge:SetColorTexture(1,0.77,0.25,1)
-    f.kindLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.kindLabel:SetPoint('TOPLEFT',f,'TOPLEFT',30,-77); f.kindLabel:SetText('Тип події')
+    local kindFont=GameFontNormalLarge
+    if type(CreateFont)=='function' then
+        kindFont=CreateFont('OldKrakenEventKindFont')
+        kindFont:SetFont(STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF',18,'OUTLINE')
+        kindFont:SetTextColor(1,0.83,0.35)
+    end
+    f.kindLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.kindLabel:SetPoint('TOPLEFT',f,'TOPLEFT',30,-89); f.kindLabel:SetText('Тип події'); if kindFont then f.kindLabel:SetFontObject(kindFont) end
     local kindLabels={}; for value,label in pairs(kinds) do kindLabels[value]='|cffffd35a'..label..'|r' end
-    f.kindMenu=selectMenu(f,'OldKrakenEventsKind',155,-74,240,{'raid','dungeon','pvp','guild'},kindLabels,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end)
+    f.kindMenu=selectMenu(f,'OldKrakenEventsKind',180,-86,270,{'raid','dungeon','pvp','guild'},kindLabels,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end,nil,kindFont)
     showActivity()
     f.submit=action(f,'Створити',650+shift,-520,150,function()
         local day=getDate()
