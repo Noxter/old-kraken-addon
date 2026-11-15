@@ -56,5 +56,13 @@ local remote = setmetatable({}, {__index=model})
 remote:Initialize('Observer Realm', function() return true end)
 assert(not remote:ReceiveGroup('Mallory Realm', savedGroup))
 assert(remote:ReceiveGroup('Owner Realm', savedGroup))
+
+-- Once the listing is closed, its tombstone becomes the replay barrier;
+-- the per-applicant high-water marks can then be pruned safely.
+assert(restarted:Cancel(id))
+assert(restarted:Prune())
+assert(restarted.requestVersions[id .. '\001' .. 'Applicant Realm'] == nil)
+assert(not restarted:ReceiveJoin('Applicant Realm', apply))
+
 """)
 print("Group Finder replay and sender checks passed")
