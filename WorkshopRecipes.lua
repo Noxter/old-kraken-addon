@@ -647,7 +647,10 @@ local function reagentText(r)
     return #lines>0 and ('Матеріали:\n'..table.concat(lines,'\n')) or 'Матеріали: гра не надала даних для цього рецепта.'
 end
 local function resizeInfo()
-    if frame and frame.infoContent then frame.infoContent:SetHeight(math.max(110, frame.detailInfo:GetStringHeight()+8)) end
+    if frame and frame.infoContent then
+        local reagents=frame.embedded and (frame.detailReagents:GetStringHeight()+16) or 0
+        frame.infoContent:SetHeight(math.max(frame.embedded and 277 or 110,frame.detailInfo:GetStringHeight()+reagents+8))
+    end
 end
 render=function()
     if not frame or not frame:IsShown() then return end
@@ -796,7 +799,7 @@ local function createWindow(parent)
     local f
     if parent then
         f=CreateFrame('Frame','OldKrakenWorkshopRecipesFrame',parent)
-        f:SetSize(750,470); f:SetPoint('TOPLEFT',parent,'TOPLEFT',0,-65)
+        f:SetSize(900,525); f:SetPoint('TOPLEFT',parent,'TOPLEFT',0,-65)
     else
         f=CreateFrame('Frame','OldKrakenWorkshopRecipesFrame',UIParent,'BasicFrameTemplateWithInset')
         table.insert(UISpecialFrames,'OldKrakenWorkshopRecipesFrame'); f:SetSize(750,470); f:SetPoint('CENTER'); f:SetMovable(true); f:SetClampedToScreen(true)
@@ -831,7 +834,7 @@ local function createWindow(parent)
         selectedEntry=nil; viewOwner=nil; if search(f.query:GetText() or '') then f.query:ClearFocus() end
     end
     f.query:SetScript('OnEnterPressed',submitSearch)
-    button(f,'Знайти',335,-74,105,submitSearch,'primary')
+    f.searchButton=button(f,'Знайти',335,-74,105,submitSearch,'primary')
     f.onlineOnly=button(f,'Лише онлайн: ні',455,-74,160,function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end)
     f.pickProfession=CreateFrame('Frame','OldKrakenRecipePickerProfession',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f.pickProfession)
     f.pickProfession:SetPoint('TOPLEFT',f,'TOPLEFT',439,-71); UIDropDownMenu_SetWidth(f.pickProfession,160)
@@ -880,15 +883,44 @@ local function createWindow(parent)
         viewOwner=selectedMaster.name; tab='recipes'; selectedEntry=nil; selectedMaster=nil; offset=0; f.query:SetText(''); render()
         if not professionContext then professionContext=masterProfession; search('prof:'..professionContext); render() end
     end)
-    button(f,'‹',20,-394,44,function() offset=offset-1; render() end)
+    f.previousPage=button(f,'‹',20,-394,44,function() offset=offset-1; render() end)
     f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-399)
-    button(f,'›',130,-394,44,function() offset=offset+1; render() end)
+    f.nextPage=button(f,'›',130,-394,44,function() offset=offset+1; render() end)
     f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-438); f.status:SetWidth(410); f.status:SetJustifyH('LEFT')
     f.status:SetText(scanStatus)
     f.cancelPick=button(f,'Скасувати вибір',570,-438,145,function()
         if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Back()
         else Recipes:CancelPicker(); f:Hide() end
     end)
+    if parent then
+        local function place(control,x,y,width,height)
+            control:ClearAllPoints(); control:SetPoint('TOPLEFT',f,'TOPLEFT',x,y)
+            if width and height then control:SetSize(width,height) end
+        end
+        place(f.context,20,-18)
+        place(f.searchLabel,20,-40)
+        place(f.query,24,-62,315,26); place(f.searchButton,350,-62,110,26)
+        place(f.onlineOnly,490,-62,175,26); place(f.pickProfession,474,-59)
+        place(f.count,20,-96)
+        for i,row in ipairs(rows) do
+            place(row,20,-116-(i-1)*35,450,33)
+            row.icon:SetSize(27,27)
+            row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT',row,'TOPLEFT',37,-4); row.name:SetWidth(403)
+            row.meta:ClearAllPoints(); row.meta:SetPoint('BOTTOMLEFT',row,'BOTTOMLEFT',37,4); row.meta:SetWidth(403)
+        end
+        place(f.detailIcon,490,-116,46,46)
+        place(f.detailTitle,549,-120); f.detailTitle:SetWidth(310)
+        place(f.infoScroll,490,-177,350,277)
+        f.infoContent:SetSize(340,277); f.detailInfo:SetWidth(340)
+        f.detailReagents:SetParent(f.infoContent); f.detailReagents:ClearAllPoints()
+        f.detailReagents:SetPoint('TOPLEFT',f.detailInfo,'BOTTOMLEFT',0,-16); f.detailReagents:SetWidth(340)
+        place(f.whisper,490,-465,125,26); place(f.order,630,-465,145,26)
+        place(f.masterRecipes,630,-465,210,26)
+        place(f.previousPage,20,-475,48,26); place(f.page,82,-481)
+        place(f.nextPage,150,-475,48,26)
+        place(f.status,20,-506); f.status:SetWidth(560)
+        place(f.cancelPick,680,-497,160,24)
+    end
     f.cancelPick:Hide()
     if not parent then f:SetScript('OnHide',function() Recipes:CancelPicker() end) end
     f:Hide(); return f

@@ -788,8 +788,8 @@ refresh=function()
             else row.progress:Hide() end
             if o.owner==identity and o.status~='done' and o.status~='cancelled' then
                 row.cancel:ClearAllPoints()
-                row.cancel:SetPoint('TOPLEFT',row,'TOPLEFT',112,o.status=='open' and -109 or -104)
-                row.cancel:SetHeight(o.status=='open' and 19 or 24); row.cancel:Show()
+                row.cancel:SetPoint('TOPLEFT',row,'TOPLEFT',112,window.embedded and -150 or (o.status=='open' and -109 or -104))
+                row.cancel:SetHeight(window.embedded and 24 or (o.status=='open' and 19 or 24)); row.cancel:Show()
             else row.cancel:Hide() end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
@@ -823,8 +823,9 @@ refresh=function()
         local deadlineColor=statusKey=='expired' and '|cffff7770' or '|cffffffff'
         local note=o.note~='' and ('\n\n|cff9ba9bcКоментар:|r '..o.note) or ''
         window.details:SetText('|cffffd35a'..o.item..' ×'..o.quantity..'|r\n|cff9ba9bc'..professionNames[o.profession]..'|r · '..coloredState..'\n\n|cff9ba9bcЗамовник:|r '..playerLabel(o.owner,classes)..(o.relayed and '\n|cffffc36bДані через гільдію; можуть бути застарілими.|r' or '')..'\n|cff9ba9bcМайстер:|r '..(o.worker and (playerLabel(o.worker,classes)..' · '..onlineLabel(o.worker,online)) or '|cff9ba9bcне обрано|r')..'\n\n|cff9ba9bcВинагорода:|r |cffffd35a'..o.reward..' зол.|r\n|cff9ba9bcРесурси:|r '..materialNames[o.materials]..'\n|cff9ba9bcТермін:|r '..deadlineColor..date('%d.%m.%Y %H:%M',o.deadline)..'|r'..known..progress..note..(pending and (pending.receiptRev and '\n\n|cffffc36bПідтверджено; очікується оновлення стану.|r' or '\n\n|cffffc36bОчікується підтвердження замовника; дія передається через гільдію.|r') or ''))
-        local detailsHeight=o.owner==identity and o.status=='open' and 110 or 215
-        window.detailsScroll:SetSize(340,detailsHeight)
+        local choosing=o.owner==identity and o.status=='open'
+        local detailsHeight=window.embedded and (choosing and 225 or 360) or (choosing and 110 or 215)
+        window.detailsScroll:SetSize(350,detailsHeight)
         window.detailsContent:SetHeight(math.max(detailsHeight,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
         window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending)
@@ -868,7 +869,7 @@ refresh=function()
             window.candidateContent:SetHeight(math.max(96,#names*48)); window.candidateTitle:Show(); window.candidateScroll:Show()
         else window.candidateTitle:Hide(); window.candidateScroll:Hide() end
     else
-        window.details:SetText('|cff9ba9bcОберіть замовлення зі списку.|r'); window.detailsScroll:SetSize(340,215); window.detailsContent:SetHeight(215); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.reopen:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
+        window.details:SetText('|cff9ba9bcОберіть замовлення зі списку.|r'); window.detailsScroll:SetSize(350,window.embedded and 360 or 215); window.detailsContent:SetHeight(window.embedded and 360 or 215); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.reopen:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
     end
 end
 local function createWindow(parent)
@@ -900,13 +901,13 @@ local function createWindow(parent)
     f.orderRows=orderRows
     for i=1,CARDS_PER_PAGE do
         local col=(i-1)%2; local line=math.floor((i-1)/2)
-        local card=button(f,'',18+col*229,y(-80-line*142),219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
-        card:SetHeight(134)
+        local card=button(f,'',18+col*(embedded and 235 or 229),y(-80-line*(embedded and 194 or 142)),embedded and 225 or 219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
+        card:SetHeight(embedded and 184 or 134)
         card.icon=card:CreateTexture(nil,'ARTWORK'); card.icon:SetPoint('TOPLEFT',card,'TOPLEFT',7,-8); card.icon:SetSize(34,34)
         local function label(template,y)
             local text=card:CreateFontString(nil,'OVERLAY',template); text:SetPoint('TOPLEFT',card,'TOPLEFT',48,y); text:SetPoint('RIGHT',card,'RIGHT',-6,0); text:SetJustifyH('LEFT'); text:SetWordWrap(false); return text
         end
-        card.title=label('GameFontNormal',-6); card.meta=label('GameFontHighlightSmall',-25)
+        card.title=label('GameFontNormal',-6); card.meta=label('GameFontHighlightSmall',embedded and -32 or -25)
         card.title:ClearAllPoints(); card.title:SetPoint('TOPLEFT',card,'TOPLEFT',48,-6); card.title:SetPoint('RIGHT',card,'RIGHT',-28,0)
         card.delete=CreateFrame('Button',nil,card); card.delete:SetSize(24,23); card.delete:SetPoint('TOPRIGHT',card,'TOPRIGHT',-3,-2)
         local function trashPiece(x,y,width,height)
@@ -918,12 +919,12 @@ local function createWindow(parent)
         card.delete:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити замовлення'); GameTooltip:Show() end end)
         card.delete:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         card.delete:Hide()
-        card.reward=label('GameFontHighlightSmall',-42); card.state=label('GameFontNormalSmall',-59)
-        card.offer=button(card,'Запропонувати допомогу',8,-104,203,function(self)
+        card.reward=label('GameFontHighlight',embedded and -57 or -42); card.state=label('GameFontNormal',embedded and -82 or -59)
+        card.offer=button(card,'Запропонувати допомогу',8,embedded and -150 or -104,203,function(self)
             local k=self:GetParent().entryKey
             if not k or not intent(k,'offer') then showError() end
         end)
-        card.progress=button(card,'Передав',8,-104,203,function(self)
+        card.progress=button(card,'Передав',8,embedded and -150 or -104,203,function(self)
             local k=self:GetParent().entryKey; local o=k and get(k)
             if not o then showError(); return end
             if o.owner==identity and o.status=='delivered' then
@@ -932,16 +933,16 @@ local function createWindow(parent)
                 confirmCardAction(k,'delivered')
             else showError() end
         end)
-        card.withdraw=button(card,'Відмовитися',112,-104,99,function(self)
+        card.withdraw=button(card,'Відмовитися',112,embedded and -150 or -104,99,function(self)
             local k=self:GetParent().entryKey
             confirmCardAction(k,'withdraw')
         end)
-        card.cancel=button(card,'Скасувати',112,-104,99,function(self)
+        card.cancel=button(card,'Скасувати',112,embedded and -150 or -104,99,function(self)
             local k=self:GetParent().entryKey
             confirmCardAction(k,'cancel')
         end)
         card.applicants=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-        card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,-80); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
+        card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,embedded and -112 or -80); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
         card.menu=CreateFrame('Frame','OldKrakenOrderCardMenu'..i,card,'UIDropDownMenuTemplate')
         UIDropDownMenu_Initialize(card.menu,function(menu,level)
             local target=menu.orderKey; local o=target and own[target]
@@ -954,7 +955,7 @@ local function createWindow(parent)
                 UIDropDownMenu_AddButton(item,level)
             end
         end,'MENU')
-        card.choose=button(card,'Обрати',8,-109,99,function(self)
+        card.choose=button(card,'Обрати',8,embedded and -150 or -109,99,function(self)
             local parent=self:GetParent(); parent.menu.orderKey=parent.entryKey
             if not parent.menu.orderKey then return end
             ToggleDropDownMenu(1,nil,parent.menu,self,0,0)
@@ -968,7 +969,7 @@ local function createWindow(parent)
                 list:SetFrameStrata('FULLSCREEN_DIALOG')
             end
         end)
-        card.choose:SetHeight(19)
+        card.choose:SetHeight(embedded and 24 or 19)
         card:SetScript('OnEnter',function(self)
             local o=self.order; if not o or not GameTooltip then return end
             local _,classes=rosterPresentation()
@@ -986,33 +987,33 @@ local function createWindow(parent)
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         orderRows[i]=card
     end
-    button(f,'‹',18,y(-368),44,function() offset=offset-1; refresh() end)
-    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,y(-374))
-    button(f,'›',130,y(-368),44,function() offset=offset+1; refresh() end)
-    local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,y(-375)); searchLabel:SetText('Пошук')
+    button(f,'‹',18,y(embedded and -500 or -368),44,function() offset=offset-1; refresh() end)
+    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,y(embedded and -506 or -374))
+    button(f,'›',130,y(embedded and -500 or -368),44,function() offset=offset+1; refresh() end)
+    local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,y(embedded and -506 or -375)); searchLabel:SetText('Пошук')
     local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
-    search:SetPoint('TOPLEFT',f,'TOPLEFT',265,y(-370)); search:SetSize(195,22); search:SetAutoFocus(false)
+    search:SetPoint('TOPLEFT',f,'TOPLEFT',265,y(embedded and -500 or -370)); search:SetSize(195,22); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) searchQuery=lower(self:GetText() or ''); offset=0; refresh() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local detailsHeader=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); detailsHeader:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-80)); detailsHeader:SetText('Деталі замовлення')
-    local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-105)); detailsScroll:SetSize(340,110); f.detailsScroll=detailsScroll
-    f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(330,110); detailsScroll:SetScrollChild(f.detailsContent)
-    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(330); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
-    f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-225))
-    f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-244)); f.candidateScroll:SetSize(340,96)
+    local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-105)); detailsScroll:SetSize(350,embedded and 225 or 110); f.detailsScroll=detailsScroll
+    f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(340,embedded and 225 or 110); detailsScroll:SetScrollChild(f.detailsContent)
+    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(340); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(embedded and -342 or -225))
+    f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(embedded and -362 or -244)); f.candidateScroll:SetSize(350,embedded and 116 or 96)
     f.candidateContent=CreateFrame('Frame',nil,f.candidateScroll); f.candidateContent:SetSize(330,96); f.candidateScroll:SetScrollChild(f.candidateContent); f.candidates={}
     local previousScroll=f.candidateScroll:GetScript('OnVerticalScroll')
     f.candidateScroll:SetScript('OnVerticalScroll',function(self,value)
         if previousScroll then previousScroll(self,value) end
         changed()
     end)
-    f.offer=button(f,'Запропонувати',495,y(-345),130,function() if not selected or not intent(selected,'offer') then showError() end end)
-    f.withdraw=button(f,'Відмовитися',495,y(-345),130,function() if not selected or not intent(selected,'withdraw') then showError() end end)
-    f.delivered=button(f,'Передав',630,y(-345),100,function() if not selected or not intent(selected,'delivered') then showError() end end)
-    f.finish=button(f,'Отримано',495,y(-345),110,function() if not selected or not ownerAction(selected,'finish') then showError() end end)
-    f.cancel=button(f,'Скасувати',610,y(-345),110,function() if not selected or not ownerAction(selected,'cancel') then showError() end end)
-    f.reopen=button(f,'Перевідкрити',495,y(-345),110,function() confirmCardAction(selected,'reopen') end)
-    f.masters=button(f,'Майстри',735,y(-345),110,function()
+    f.offer=button(f,'Запропонувати',495,y(embedded and -500 or -345),130,function() if not selected or not intent(selected,'offer') then showError() end end)
+    f.withdraw=button(f,'Відмовитися',495,y(embedded and -500 or -345),130,function() if not selected or not intent(selected,'withdraw') then showError() end end)
+    f.delivered=button(f,'Передав',630,y(embedded and -500 or -345),100,function() if not selected or not intent(selected,'delivered') then showError() end end)
+    f.finish=button(f,'Отримано',495,y(embedded and -500 or -345),110,function() if not selected or not ownerAction(selected,'finish') then showError() end end)
+    f.cancel=button(f,'Скасувати',610,y(embedded and -500 or -345),110,function() if not selected or not ownerAction(selected,'cancel') then showError() end end)
+    f.reopen=button(f,'Перевідкрити',495,y(embedded and -500 or -345),110,function() confirmCardAction(selected,'reopen') end)
+    f.masters=button(f,'Майстри',735,y(embedded and -500 or -345),110,function()
         local o=selected and get(selected)
         if o and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:ShowMasters(o.itemID or 0,o.recipeID or 0) end
     end)
