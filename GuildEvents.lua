@@ -13,6 +13,7 @@ local active, identity, profile, storage = false, nil, nil, nil
 local events, dirty, intents, newDirty, relayDirty = {}, {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
 local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
+local refresh
 local page = 1
 local EVENTS_PER_PAGE = 4
 local catalog = OldKraken.ActivityCatalog
@@ -41,15 +42,55 @@ local function count(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
 local function acceptedCount(e)
     local n=0; for name in pairs(e.people) do if (e.statuses[name] or 'accepted')=='accepted' then n=n+1 end end; return n
 end
-local function participantLabel(name,role,status)
-    return (catalog.roleIcons[role] or '')..' |cff9bcaff'..name..'|r · |c'..(roleColors[role] or 'ffb5b5b5')..(roles[role] or role)..'|r · |c'..(statusColors[status] or 'ffb5b5b5')..(statuses[status] or 'Невідомо')..'|r'
-end
 local function character()
     if type(UnitName) ~= 'function' then return nil end
     local a,b = UnitName('player')
     if not validText(a,1,128) then return nil end
     if type(b) == 'string' and b ~= '' then return a .. ' ' .. b end
     return a
+end
+local function usable(value,kind)
+    return type(value)==kind and not (type(issecretvalue)=='function' and issecretvalue(value))
+end
+local function participantClasses()
+    local classes={}
+    if type(GetNumGuildMembers)=='function' and type(GetGuildRosterInfo)=='function' then
+        local ok,total=pcall(GetNumGuildMembers)
+        if ok and usable(total,'number') and total>=0 and total<=10000 then
+            for i=1,math.floor(total) do
+                local success,name,_,_,_,_,_,_,_,_,_,class=pcall(GetGuildRosterInfo,i)
+                if success and usable(name,'string') and name~='' and usable(class,'string') and class~='' then classes[name]=class end
+            end
+        end
+    end
+    if type(UnitName)=='function' and type(UnitClass)=='function' then
+        local units={'player'}; local raid=false
+        if type(IsInRaid)=='function' then local ok,value=pcall(IsInRaid); if ok and (usable(value,'boolean') or usable(value,'number')) then raid=value==true or value==1 end end
+        for i=1,raid and 40 or 4 do units[#units+1]=(raid and 'raid' or 'party')..i end
+        for _,unit in ipairs(units) do
+            local ok,first,last=pcall(UnitName,unit); local got,_,class=pcall(UnitClass,unit)
+            if ok and got and usable(first,'string') and first~='' and usable(class,'string') and class~='' then
+                local name=first; if usable(last,'string') and last~='' then name=name..' '..last end
+                classes[name]=class
+            end
+        end
+    end
+    return classes
+end
+local function participantName(name,classes)
+    local class=classes[name]
+    local color=class and type(RAID_CLASS_COLORS)=='table' and RAID_CLASS_COLORS[class]
+    if type(color)=='table' and usable(color.r,'number') and usable(color.g,'number') and usable(color.b,'number') then
+        local function channel(v) return math.floor(math.max(0,math.min(1,v))*255) end
+        return string.format('|cff%02x%02x%02x%s|r',channel(color.r),channel(color.g),channel(color.b),name)
+    end
+    return name
+end
+local function participantRoleStatus(role,status)
+    return (catalog.roleIcons[role] or '')..' |c'..(roleColors[role] or 'ffb5b5b5')..(roles[role] or role)..'|r · |c'..(statusColors[status] or 'ffb5b5b5')..(statuses[status] or 'Невідомо')..'|r'
+end
+local function participantLabel(name,role,status,classes)
+    return participantName(name,classes)..' · '..participantRoleStatus(role,status)
 end
 local function save()
     if not storage then return end
@@ -279,8 +320,11 @@ local function connect()
     comm:SendProtocol('CEVQUERY',''); fire()
 end
 local frame=CreateFrame('Frame')
-frame:RegisterEvent('PLAYER_LOGIN'); frame:RegisterEvent('GUILD_ROSTER_UPDATE')
-frame:SetScript('OnEvent', connect)
+frame:RegisterEvent('PLAYER_LOGIN'); frame:RegisterEvent('GUILD_ROSTER_UPDATE'); frame:RegisterEvent('GROUP_ROSTER_UPDATE')
+frame:SetScript('OnEvent',function(_,event)
+    connect()
+    if (event=='GUILD_ROSTER_UPDATE' or event=='GROUP_ROSTER_UPDATE') and window and window:IsShown() and refresh then refresh() end
+end)
 if C_Timer and C_Timer.NewTicker then
     C_Timer.NewTicker(3,function()
         if not active then connect(); return end
@@ -424,7 +468,7 @@ local function datePicker(parent)
     parent:HookScript('OnHide',function() popup:Hide() end)
     return function() return chosen end
 end
-local function refresh()
+refresh=function()
     if not window then return end
     window.alertButton:SetText(Events:AlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local list={}
@@ -453,12 +497,13 @@ local function refresh()
     local e=selected and events[selected]
     for _,row in ipairs(window.signupRows) do row:Hide() end
     if e and not e.cancelled then
+        local classes=participantClasses()
         local names={}; for name in pairs(e.people) do names[#names+1]=name end; table.sort(names)
         local pending=intents[selected]
         local lines={}
         for _,name in ipairs(names) do
             local role=e.people[name]
-            lines[#lines+1]=participantLabel(name,role,e.statuses[name])
+            lines[#lines+1]=participantLabel(name,role,e.statuses[name],classes)
         end
         local own=e.owner==identity
         window.detailsTitle:SetText(e.title); window.detailsTitle:Show()
@@ -471,19 +516,24 @@ local function refresh()
             for i,name in ipairs(names) do
                 local row=window.signupRows[i]
                 if not row then
-                    row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth-10,58)
-                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetWidth(window.detailsWidth-15); row.label:SetJustifyH('LEFT')
-                    row.accept=action(row,'Прийняти',0,-22,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,'primary')
-                    row.reserve=action(row,'Резерв',100,-22,94,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end)
-                    row.reject=action(row,'Відхилити',200,-22,104,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end)
+                    row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth-10,72)
+                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-15,18); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
+                    row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',0,-18); row.roleStatus:SetSize(window.detailsWidth-15,16); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
+                    row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-15,34); row.hover:EnableMouse(true)
+                    row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
+                    row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+                    row.accept=action(row,'Прийняти',0,-40,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,'primary')
+                    row.reserve=action(row,'Резерв',100,-40,94,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end)
+                    row.reject=action(row,'Відхилити',200,-40,104,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end)
                     window.signupRows[i]=row
                 end
-                row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*58)
+                row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*72)
                 local role=e.people[name]
-                row.label:SetText(participantLabel(name,role,e.statuses[name]))
+                row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(participantRoleStatus(role,e.statuses[name]))
+                row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
                 row.accept:SetShown(name~=identity); row.reserve:SetShown(name~=identity); row.reject:SetShown(name~=identity); row:Show()
             end
-            height=height+#names*58
+            height=height+#names*72
         end
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.cancel:SetShown(e.owner==identity)
