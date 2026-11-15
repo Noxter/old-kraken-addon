@@ -21,7 +21,7 @@ def client(name, realm):
         function GetGuildRosterInfo(i) return i==1 and 'Alice Moon' or 'Bob Other Realm','Member',0,60,'Class','Zone',nil,nil,true,'',i==1 and 'WARRIOR' or 'PALADIN' end
         function IsInGuild() return true end
         function GetServerTime() return 1700000000 end
-        function GetTime() return 100 end
+        clock=100; function GetTime() return clock end
         function CreateFrame()
             local f={events={}}
             function f:RegisterEvent(event) self.events[event]=true end
@@ -46,7 +46,7 @@ alice, bob = client('Alice', 'Moon'), client('Bob', 'Other Realm')
 
 
 def flush(sender, recipients):
-    sender.execute('while #OldKraken.Communication.queue > 0 do OldKraken.Communication:Pump() end')
+    sender.execute('while #OldKraken.Communication.queue > 0 do clock=clock+1; OldKraken.Communication:Pump() end')
     outgoing = sender.globals().outgoing
     packets = [outgoing[i] for i in range(1, len(outgoing) + 1)]
     sender.execute('outgoing={}')

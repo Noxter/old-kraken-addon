@@ -9,16 +9,25 @@ Communication.ready = false
 Communication.lastTestID = nil
 Communication.handlers = {}
 Communication.stats = { sent = 0, retried = 0, dropped = 0, received = 0, invalid = 0 }
-local MAX_ATTEMPTS = 5
-local MAX_QUEUE = 50
+local MAX_QUEUE = 4096
+local ACTION_RESERVE = 256
+Communication.MAX_QUEUE = MAX_QUEUE
+Communication.BACKGROUND_LIMIT = MAX_QUEUE - ACTION_RESERVE
+Communication.pendingTransmissions = {}
+Communication.retryAt, Communication.backoff = 0, 0
+Communication.stats.deduplicated, Communication.stats.backpressure, Communication.stats.restarted = 0, 0, 0
+local PRIORITY = {JOIN=0,RESPONSE=0,CANCEL=0,CEVRSVP=0,CVCANCEL=0,
+    WOREQ=0,WOACT=0,WOPAY=0,WOPAYR=0,WORESULT=0,WORESR=0,
+    ANNOUNCE=1,UPDATE=1,BUMP=1,WORDER=1,CVNEW=1,CVSTATE=1,CEVENT=1}
 local PART_BYTES = 80
 local MAX_PARTS = 32
-local MAX_ASSEMBLIES = 20
-local CACHE_LIMIT = 256
+local MAX_ASSEMBLIES = 1024
+local CACHE_LIMIT = 4096
 local CACHE_TTL = 120
 local messageSequence = 0
 local sessionID = tostring(GetServerTime()) .. "-" .. tostring(math.random(100000, 999999))
 local assemblies, completed = {}, {}
+local nextPrune=0
 
 local function Count(t)
     local n = 0
@@ -27,6 +36,8 @@ local function Count(t)
 end
 
 local function Prune(now)
+    if now<nextPrune then return end
+    nextPrune=now+1
     for k, v in pairs(assemblies) do
         if now - v.time > CACHE_TTL then assemblies[k] = nil end
     end
@@ -52,6 +63,19 @@ local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = tr
     WRQ = true, WRIDX = true, WRGET = true, WRPAGE = true,
     WORDER = true, WORELAY = true, WOREQ = true, WOPAY = true, WOERROR = true, WOQUERY = true,
     WOACT = true, WOPAYR = true, WORESULT = true, WORESR = true }
+local GROUP_SNAPSHOTS={ANNOUNCE=true,UPDATE=true,SYNC=true,CANCEL=true,BUMP=true}
+local function groupRecordKey(kind,payload)
+    if not GROUP_SNAPSHOTS[kind] and kind~='RESPONSE' and kind~='JOIN' then return end
+    local fields,pos={},1
+    for i=1,2 do
+        local first,last,size=payload:find('(%d+):',pos)
+        if first~=pos or not size or #size>4 then return end
+        size=tonumber(size); if last+size>#payload then return end
+        fields[i]=payload:sub(last+1,last+size); pos=last+size+1
+    end
+    if GROUP_SNAPSHOTS[kind] then return fields[2]..'\001'..fields[1] end
+    return fields[1]..'\001'..fields[2]
+end
 
 function Communication:RegisterHandler(kind, callback)
     if not VALID_TYPES[kind] or type(callback) ~= "function" or self.handlers[kind] then
@@ -68,10 +92,18 @@ function Communication:SendProtocol(kind, payload)
     if not self.ready or not IsInGuild or not IsInGuild() then
         return false, "transport unavailable"
     end
+    local guild=GetGuildInfo and GetGuildInfo('player')
+    if type(guild)~='string' or guild=='' then return false,'transport unavailable' end
+    if #self.queue==0 then self.pendingTransmissions={} end
+    local pendingKey=guild..'\001'..kind..'\001'..payload
+    local pending=self.pendingTransmissions[pendingKey]
+    if pending then self.stats.deduplicated=self.stats.deduplicated+1; return true,pending.id end
+    local priority=PRIORITY[kind] or 2
     messageSequence = (messageSequence + 1) % 1000000
     local id = sessionID .. "-" .. tostring(messageSequence)
     local count = math.max(1, math.ceil(#payload / PART_BYTES))
-    if #self.queue + count > MAX_QUEUE then return false, "queue full" end
+    local limit=priority==0 and MAX_QUEUE or (MAX_QUEUE-ACTION_RESERVE)
+    if #self.queue+count>limit then self.stats.backpressure=self.stats.backpressure+1; return false,'queue full' end
     local messages = {}
     for part = 1, count do
         local data = payload:sub((part - 1) * PART_BYTES + 1, part * PART_BYTES)
@@ -79,13 +111,16 @@ function Communication:SendProtocol(kind, payload)
         if #message > 240 then return false, "message too long" end
         messages[part] = message
     end
+    local job={key=pendingKey,id=id,messages=messages,remaining=count,priority=priority,
+        recordKey=groupRecordKey(kind,payload),snapshot=GROUP_SNAPSHOTS[kind]}
     local originalCount = #self.queue
-    for _, message in ipairs(messages) do
-        if not self:QueueMessage(message) then
+    for part, message in ipairs(messages) do
+        if not self:QueueMessage(message,job,part) then
             while #self.queue > originalCount do table.remove(self.queue) end
             return false, "transport unavailable"
         end
     end
+    self.pendingTransmissions[pendingKey]=job
     return true, id
 end
 
@@ -98,6 +133,8 @@ function Communication:ClearProtocolState()
         if self.queue[i].message:sub(1, 4) == 'GF2^' then table.remove(self.queue, i) end
     end
     assemblies, completed = {}, {}
+    self.pendingTransmissions={}
+    self.retryAt,self.backoff=0,0
 end
 
 local function PlayerName()
@@ -130,6 +167,8 @@ function Communication:GetStatus()
         restricted = restricted,
         registered = self.ready,
         queued = #self.queue,
+        retryIn=math.max(0,math.ceil(self.retryAt-GetTime())),
+        lastSendError=self.lastSendError,
         inGuild = IsInGuild and IsInGuild() or false,
     }
 end
@@ -144,22 +183,22 @@ function Communication:PrintStatus()
         (status.restricted == nil and "невідомо" or (status.restricted and "так" or "ні")))
     Print("  Гільдія: " .. (status.inGuild and "так" or "ні") ..
         "; повідомлень у черзі: " .. status.queued)
+    Print('  Очікування повтору: '..status.retryIn..' с.; об’єднано повторів: '..self.stats.deduplicated..'; черга зайнята: '..self.stats.backpressure)
     Print("  Надіслано: " .. self.stats.sent .. "; повторів: " .. self.stats.retried ..
         "; відкинуто: " .. self.stats.dropped .. "; некоректних: " .. self.stats.invalid)
 end
 
-function Communication:QueueMessage(message)
+function Communication:QueueMessage(message,job,part)
     if type(message) ~= "string" or message == "" then
         return false
     end
 
     if #message > 240 then
-        Print("Тестове повідомлення завелике, його не додано до черги.")
         return false
     end
 
     if #self.queue >= MAX_QUEUE then
-        Print("Черга обміну переповнена; повідомлення не додано.")
+        self.stats.backpressure=self.stats.backpressure+1
         return false
     end
 
@@ -168,66 +207,69 @@ function Communication:QueueMessage(message)
         guild = GetGuildInfo and GetGuildInfo('player')
         if type(guild) ~= 'string' or guild == '' then return false end
     end
-    self.queue[#self.queue + 1] = { message = message, attempts = 0, guild = guild }
+    self.queue[#self.queue + 1] = { message = message, attempts = 0, guild = guild,job=job,part=part,priority=job and job.priority or 1 }
     return true
 end
 
+local function finishEntry(self,index,accepted)
+    local entry=table.remove(self.queue,index)
+    if entry.job then
+        local job=entry.job
+        job.remaining=job.remaining-1
+        if accepted and not job.startedAt then job.startedAt=GetTime() end
+        if job.remaining==0 then self.pendingTransmissions[job.key]=nil end
+    end
+end
+local function deferEntry(self,entry,reason)
+    entry.attempts=entry.attempts+1
+    self.stats.retried=self.stats.retried+1
+    self.backoff=math.min(60,self.backoff==0 and 2 or self.backoff*2)
+    self.retryAt=GetTime()+self.backoff+math.random()
+    self.lastSendError=reason
+end
 function Communication:Pump()
-    local entry = self.queue[1]
-    if not entry then
-        return
+    if #self.queue==0 or GetTime()<self.retryAt then return end
+    if not IsInGuild or not IsInGuild() then return end
+    local index,priority=1,3
+    for i,entry in ipairs(self.queue) do
+        local value=entry.priority or 1
+        if value<priority then index,priority=i,value; if value==0 then break end end
     end
-
-    if not IsInGuild or not IsInGuild() then
-        return
-    end
-
-    if entry.guild and (not GetGuildInfo or GetGuildInfo('player') ~= entry.guild) then
-        table.remove(self.queue, 1)
-        self.stats.dropped = self.stats.dropped + 1
-        return
-    end
-
-    local chatInfo = C_ChatInfo
-    if not chatInfo or type(chatInfo.SendAddonMessage) ~= "function" then
-        table.remove(self.queue, 1)
-        self.stats.dropped = self.stats.dropped + 1
-        Print("SendAddonMessage недоступний; повідомлення відкинуто.")
-        return
-    end
-
-    local ok, result = pcall(chatInfo.SendAddonMessage, self.PREFIX, entry.message, "GUILD")
-    if not ok then
-        table.remove(self.queue, 1)
-        self.stats.dropped = self.stats.dropped + 1
-        Print("Помилка SendAddonMessage: " .. tostring(result))
-        return
-    end
-
-    local results = Enum and Enum.SendAddonMessageResult
-    if results and result ~= nil and (
-        (results.AddonMessageThrottle ~= nil and result == results.AddonMessageThrottle)
-        or (results.ChannelThrottle ~= nil and result == results.ChannelThrottle)
-        or (results.AddOnMessageLockdown ~= nil and result == results.AddOnMessageLockdown)
-    ) then
-        entry.attempts = entry.attempts + 1
-        self.stats.retried = self.stats.retried + 1
-        if entry.attempts >= MAX_ATTEMPTS then
-            table.remove(self.queue, 1)
-            self.stats.dropped = self.stats.dropped + 1
-            Print("Повідомлення відкинуто після повторних спроб; оновіть дані.")
+    -- A decision must never overtake the snapshot it refers to: a receiver may
+    -- have just reloaded and cannot apply the decision until it knows the group.
+    local selected=self.queue[index].job
+    if selected and selected.recordKey then
+        for i=1,index-1 do
+            local prior=self.queue[i].job
+            if prior and prior.snapshot and prior.recordKey==selected.recordKey then index=i; break end
         end
+    end
+    local entry=self.queue[index]
+    if entry.guild and (not GetGuildInfo or GetGuildInfo('player')~=entry.guild) then
+        finishEntry(self,index,false); self.stats.dropped=self.stats.dropped+1; return
+    end
+    -- If a multipart transfer was interrupted long enough to approach the receiver
+    -- assembly timeout, replay its complete set rather than leave orphaned fragments.
+    local job=entry.job
+    if job and job.startedAt and GetTime()-job.startedAt>=90 then
+        for i=#self.queue,1,-1 do if self.queue[i].job==job then table.remove(self.queue,i) end end
+        job.remaining=#job.messages; job.startedAt=nil
+        for part,message in ipairs(job.messages) do
+            self.queue[#self.queue+1]={message=message,attempts=0,guild=entry.guild,job=job,part=part,priority=job.priority}
+        end
+        self.stats.restarted=self.stats.restarted+1
         return
     end
-
-    table.remove(self.queue, 1)
-    -- A successful API call is not an acknowledgement of delivery.
-    if results and results.Success ~= nil and result ~= nil and result ~= results.Success then
-        self.stats.dropped = self.stats.dropped + 1
-        Print("Повідомлення не надіслано: " .. tostring(result))
-    else
-        self.stats.sent = self.stats.sent + 1
-    end
+    local chatInfo=C_ChatInfo
+    if not chatInfo or type(chatInfo.SendAddonMessage)~='function' then deferEntry(self,entry,'API unavailable'); return end
+    local ok,result=pcall(chatInfo.SendAddonMessage,self.PREFIX,entry.message,'GUILD')
+    if not ok then deferEntry(self,entry,tostring(result)); return end
+    local results=Enum and Enum.SendAddonMessageResult
+    local success=result==nil or (results and results.Success~=nil and result==results.Success) or (not results and result==0)
+    if not success then deferEntry(self,entry,tostring(result)); return end
+    finishEntry(self,index,true)
+    self.backoff,self.retryAt,self.lastSendError=0,0,nil
+    self.stats.sent=self.stats.sent+1
 end
 
 function Communication:SendTest()
@@ -465,6 +507,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         end
 
         if C_Timer and C_Timer.NewTicker then
+            Communication.retryAt=GetTime()+math.random()*3
             Communication.pumpTicker = C_Timer.NewTicker(0.7, function()
                 Communication:Pump()
             end)

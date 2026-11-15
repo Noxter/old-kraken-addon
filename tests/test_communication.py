@@ -47,8 +47,9 @@ c:OnAddonMessage(c.PREFIX, 'GF2^ANNOUNCE^1-2-3^1^1^F', 'GUILD', 'Author')
 assert(c.stats.received == count and c.stats.invalid == 1)
 assert(not c:SendProtocol('ANNOUNCE', string.rep('x', 2561)))
 result = 1
-for i=1,5 do c:Pump() end
-assert(#c.queue == 0 and c.stats.dropped == 1)
+for i=1,8 do c:Pump(); now=now+100 end
+assert(#c.queue==1 and c.stats.dropped==0)
+result=0; c:Pump(); assert(#c.queue==0)
 result = 0
 c:SendTest()
 c:Pump()
@@ -82,9 +83,9 @@ now = now + 121
 c:OnAddonMessage(c.PREFIX, second, 'GUILD', 'Late')
 assert(c.stats.received == received)
 -- Atomic enqueue: insufficient space must not leave partial messages.
-while #c.queue < 49 do assert(c:QueueMessage('test')) end
+while #c.queue < c.BACKGROUND_LIMIT-1 do assert(c:QueueMessage('test')) end
 local queued = #c.queue
-assert(not c:SendProtocol('SYNC', string.rep('x', 81)))
+assert(not c:SendProtocol('SYNC', string.rep('z', 81)))
 assert(#c.queue == queued)
 local before = c.stats.invalid
 assert(c:RegisterHandler('UPDATE', function() error('broken handler') end))
