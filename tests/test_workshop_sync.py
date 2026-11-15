@@ -62,7 +62,8 @@ def pack(lua, values):
 
 
 def send_packets(sender, receiver, packets):
-    for packet in packets:
+    for index in range(1, len(packets) + 1):
+        packet = packets[index]
         handler = receiver.globals().handlers[packet["kind"]]
         if handler:
             handler(sender.globals().player + " Realm", "GUILD", packet["payload"])
@@ -138,7 +139,8 @@ def test_relayed_snapshot_is_not_promoted_to_direct_authority():
     relay_indexes = relay.globals().drain("WRIDX")
     alice_indexes = []
     codec = relay.globals().OldKraken.GroupFinder
-    for packet in relay_indexes:
+    for index in range(1, len(relay_indexes) + 1):
+        packet = relay_indexes[index]
         fields = codec._unpackFields(packet["payload"], 4)
         if fields and fields[2] == "Alice":
             alice_indexes.append(packet)
@@ -160,7 +162,8 @@ def test_relayed_snapshot_is_not_promoted_to_direct_authority():
     tick(receiver, 5)
     dave_indexes = receiver.globals().drain("WRIDX")
     advertised = []
-    for packet in dave_indexes:
+    for index in range(1, len(dave_indexes) + 1):
+        packet = dave_indexes[index]
         fields = codec._unpackFields(packet["payload"], 4)
         if fields and fields[2] == "Alice":
             advertised.append(packet)
