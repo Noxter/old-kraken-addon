@@ -532,8 +532,8 @@ end
 local function datePicker(parent)
     local chosen, month, year
     local caption=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall')
-    caption:SetPoint('TOPLEFT',parent,'TOPLEFT',255,-382); caption:SetText('Дата')
-    local button=action(parent,'Обрати дату',255,-400,125,function() end)
+    caption:SetPoint('TOPLEFT',parent,'TOPLEFT',255,-449); caption:SetText('Дата')
+    local button=action(parent,'Обрати дату',255,-467,125,function() end)
     local popup=CreateFrame('Frame',nil,parent,'BackdropTemplate')
     popup:SetSize(242,250); popup:SetPoint('BOTTOMLEFT',button,'TOPLEFT',0,4)
     popup:SetFrameLevel(parent:GetFrameLevel()+20); popup:EnableMouse(true)
@@ -684,8 +684,8 @@ local function createWindow(parent)
     f.eventRows=rows
     for i=1,EVENTS_PER_PAGE do
         local index=i
-        rows[i]=action(f,'',18,-65-(i-1)*60,embedded and 420 or 383,function() local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; if entry then selected=entry.key; refresh() end end)
-        rows[i]:SetHeight(54)
+        rows[i]=action(f,'',18,-65-(i-1)*77,embedded and 420 or 383,function() local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; if entry then selected=entry.key; refresh() end end)
+        rows[i]:SetHeight(70)
         rows[i].art=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].art:SetPoint('TOPLEFT',rows[i],'TOPLEFT',3,-3); rows[i].art:SetSize(48,48)
         rows[i].title=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].title:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-9); rows[i].title:SetWidth(embedded and 352 or 315); rows[i].title:SetJustifyH('LEFT'); rows[i].title:SetWordWrap(false)
         rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlight'); rows[i].meta:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-31); rows[i].meta:SetWidth(embedded and 352 or 315); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false)
@@ -716,50 +716,100 @@ local function createWindow(parent)
         remove:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         remove:Hide()
     end
-    f.previousPage=action(f,'‹',138+(embedded and 5 or 0),-310,45,function() page=page-1; refresh() end)
+    f.previousPage=action(f,'‹',138+(embedded and 5 or 0),-380,45,function() page=page-1; refresh() end)
     f.pageLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-    f.pageLabel:SetPoint('TOPLEFT',f,'TOPLEFT',191+(embedded and 5 or 0),-315); f.pageLabel:SetWidth(64); f.pageLabel:SetJustifyH('CENTER')
-    f.nextPage=action(f,'›',263+(embedded and 5 or 0),-310,45,function() page=page+1; refresh() end)
-    local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,-66); scroll:SetSize(detailsWidth,250)
+    f.pageLabel:SetPoint('TOPLEFT',f,'TOPLEFT',191+(embedded and 5 or 0),-385); f.pageLabel:SetWidth(64); f.pageLabel:SetJustifyH('CENTER')
+    f.nextPage=action(f,'›',263+(embedded and 5 or 0),-380,45,function() page=page+1; refresh() end)
+    local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,-66); scroll:SetSize(detailsWidth,320)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(detailsWidth,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
     f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
-    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,-325,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
-    f.join=action(f,'Записатися',605+shift,-325,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
-    f.leave=action(f,'Виписатися',605+shift,-325,100,function() if selected then Events:Signup(selected,'leave') end end)
-    f.cancel=action(f,'Скасувати',710+shift,-325,105,function() if selected then Events:Cancel(selected) end end)
+    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,-395,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
+    f.join=action(f,'Записатися',605+shift,-395,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
+    f.leave=action(f,'Виписатися',605+shift,-395,100,function() if selected then Events:Signup(selected,'leave') end end)
+    f.cancel=action(f,'Скасувати',710+shift,-395,105,function() if selected then Events:Cancel(selected) end end)
     f.inviteAll=action(f,'Запросити всіх у рейд',450+shift,-35,170,function() if selected then Events:InviteAll(selected) end end,'primary')
     f.inviteAll:Hide()
-    local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-358); heading:SetText('Створити подію')
-    f.title=field(f,'Назва',18,-382,220,''); local getDate=datePicker(f)
+    local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-428); heading:SetText('Створити подію')
+    f.title=field(f,'Назва',18,-449,220,''); local getDate=datePicker(f)
     local hour,minute=0,0
     local hourValues,hourLabels={},{}
     for value=0,23 do hourValues[#hourValues+1]=value; hourLabels[value]=string.format('%02d',value) end
-    local timeLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); timeLabel:SetPoint('TOPLEFT',f,'TOPLEFT',390+shift,-382); timeLabel:SetText('Година')
-    local minuteLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); minuteLabel:SetPoint('TOPLEFT',f,'TOPLEFT',490+shift,-382); minuteLabel:SetText('Хвилина')
-    selectMenu(f,'OldKrakenEventsHour',390+shift,-400,90,hourValues,hourLabels,function() return hour end,function(v) hour=v end)
-    selectMinutes(f,490+shift,-400,function() return minute end,function(v) minute=v end)
-    f.size=field(f,'Місць (2–40)',600+shift,-382,80,'10')
-    f.description=field(f,'Опис',18,-435,430,'')
+    local timeLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); timeLabel:SetPoint('TOPLEFT',f,'TOPLEFT',390+shift,-449); timeLabel:SetText('Година')
+    local minuteLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); minuteLabel:SetPoint('TOPLEFT',f,'TOPLEFT',490+shift,-449); minuteLabel:SetText('Хвилина')
+    selectMenu(f,'OldKrakenEventsHour',390+shift,-467,90,hourValues,hourLabels,function() return hour end,function(v) hour=v end)
+    selectMinutes(f,490+shift,-467,function() return minute end,function(v) minute=v end)
+    f.size=field(f,'Місць (2–40)',600+shift,-449,80,'10')
+    f.description=field(f,'Опис',18,-502,270,'')
     local activity=''
-    local activityLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); activityLabel:SetPoint('TOPLEFT',f,'TOPLEFT',18,-485)
-    local activityMenu=CreateFrame('Frame','OldKrakenEventsActivity',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(activityMenu)
-    activityMenu:SetPoint('TOPLEFT',f,'TOPLEFT',2,-500); UIDropDownMenu_SetWidth(activityMenu,310); UIDropDownMenu_JustifyText(activityMenu,'LEFT')
-    UIDropDownMenu_Initialize(activityMenu,function(_,level)
-        for _,entry in ipairs(catalog[currentKind] or {}) do
-            local value=entry.value; local item=UIDropDownMenu_CreateInfo(); item.text=entry.label; item.value=value; item.checked=activity==value
-            item.func=function() activity=value; if currentKind=='raid' and value~='' then f.title:SetText(activityLabels[value]) end; UIDropDownMenu_SetText(activityMenu,value~='' and activityLabels[value] or 'Не вибрано') end
-            UIDropDownMenu_AddButton(item,level)
-        end
-    end)
-    local function showActivity()
-        local enabled=catalog[currentKind]~=nil
-        activityLabel:SetText(currentKind=='raid' and 'Рейд' or 'Підземелля'); activityLabel:SetShown(enabled); activityMenu:SetShown(enabled)
-        UIDropDownMenu_SetText(activityMenu,activity~='' and activityLabels[activity] or 'Не вибрано')
+    local activityButton
+    local function chooseActivity(value)
+        activity=value
+        if value~='' then f.title:SetText(activityLabels[value]) end
+        activityButton:SetText(value~='' and activityLabels[value] or 'Обрати картку…')
+        f.activityCards:Hide()
     end
-    selectMenu(f,'OldKrakenEventsKind',465+shift,-453,160,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end)
+    activityButton=action(f,'Обрати картку…',460+shift,-520,180,function() f:ShowActivityCards() end)
+    f.activityButton=activityButton
+    local grid=CreateFrame('Frame',nil,f)
+    grid:SetSize(embedded and 850 or 805,345); grid:SetPoint('TOPLEFT',f,'TOPLEFT',18,-65)
+    grid:SetFrameLevel(f:GetFrameLevel()+10); grid:EnableMouse(true); grid:EnableMouseWheel(true)
+    local fill=grid:CreateTexture(nil,'BACKGROUND'); fill:SetAllPoints(grid); fill:SetColorTexture(0.035,0.04,0.05,1)
+    grid.heading=grid:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); grid.heading:SetPoint('TOPLEFT',grid,'TOPLEFT',12,-10)
+    action(grid,'Без конкретної локації',embedded and 560 or 515,-7,230,function() chooseActivity('') end)
+    action(grid,'X',embedded and 812 or 765,-7,28,function() grid:Hide() end)
+    local clip=CreateFrame('Frame',nil,grid); clip:SetPoint('TOPLEFT',grid,'TOPLEFT',8,-40); clip:SetSize(embedded and 830 or 785,297)
+    if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
+    local body=CreateFrame('Frame',nil,clip); body:SetSize(embedded and 830 or 785,1)
+    grid.cards={}; grid.offset=0; grid.full=1
+    function grid:ScrollTo(value)
+        self.offset=math.max(0,math.min(math.max(0,self.full-297),value))
+        body:ClearAllPoints(); body:SetPoint('TOPLEFT',clip,'TOPLEFT',0,self.offset)
+    end
+    local function wheel(_,delta) grid:ScrollTo(grid.offset-delta*70) end
+    grid:SetScript('OnMouseWheel',wheel); clip:EnableMouseWheel(true); clip:SetScript('OnMouseWheel',wheel)
+    f.activityCards=grid
+    function f:ShowActivityCards()
+        if grid:IsShown() then grid:Hide(); return end
+        grid.heading:SetText(currentKind=='raid' and 'Оберіть рейд' or 'Оберіть підземелля')
+        local width=embedded and 268 or 253
+        local level=type(UnitLevel)=='function' and tonumber((UnitLevel('player'))) or 0; level=level or 0
+        local count=0
+        for _,entry in ipairs(catalog[currentKind] or {}) do
+            if entry.value~='' then
+                count=count+1
+                local card=grid.cards[count]
+                if not card then
+                    card=CreateFrame('Button',nil,body); OldKraken.UIStyle.Button(card)
+                    card:SetSize(width,64); card:SetPoint('TOPLEFT',body,'TOPLEFT',((count-1)%3)*(width+9),-math.floor((count-1)/3)*70)
+                    card.art=card:CreateTexture(nil,'ARTWORK'); card.art:SetSize(62,62); card.art:SetPoint('TOPLEFT',card,'TOPLEFT',1,-1)
+                    card.title=card:CreateFontString(nil,'OVERLAY','GameFontNormal'); card.title:SetPoint('TOPLEFT',card,'TOPLEFT',71,-6); card.title:SetSize(width-79,30); card.title:SetJustifyH('LEFT')
+                    card.levels=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); card.levels:SetPoint('BOTTOMLEFT',card,'BOTTOMLEFT',71,6); card.levels:SetWidth(width-79); card.levels:SetJustifyH('LEFT')
+                    card:SetScript('OnClick',function(self) if self.entry then chooseActivity(self.entry.value) end end)
+                    card:EnableMouseWheel(true); card:SetScript('OnMouseWheel',wheel)
+                    grid.cards[count]=card
+                end
+                card.entry=entry
+                local fits=level==0 or (level>=entry.min-2 and level<=entry.max+2)
+                catalog.SetArtwork(card.art,entry.value); card.art:SetDesaturated(not fits); card.art:SetAlpha(fits and 1 or 0.55)
+                card.title:SetText(entry.label); card.levels:SetText(entry.min..'–'..entry.max..(fits and '  |cff69dc8cпід ваш рівень|r' or ''))
+                if entry.value==activity then card:LockHighlight() else card:UnlockHighlight() end
+                card:Show()
+            end
+        end
+        for i=count+1,#grid.cards do grid.cards[i]:Hide(); grid.cards[i].entry=nil end
+        grid.full=math.max(1,math.ceil(count/3)*70); body:SetHeight(grid.full); grid:ScrollTo(0); grid:Show()
+    end
+    grid:Hide()
+    f:HookScript('OnHide',function() grid:Hide() end)
+    local function showActivity()
+        activityButton:SetShown(catalog[currentKind]~=nil)
+        activityButton:SetText(activity~='' and activityLabels[activity] or 'Обрати картку…')
+        grid:Hide()
+    end
+    f.kindMenu=selectMenu(f,'OldKrakenEventsKind',310+shift,-520,130,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end)
     showActivity()
-    action(f,'Створити',650+shift,-453,150,function()
+    action(f,'Створити',650+shift,-520,150,function()
         local day=getDate()
         local when=day and parseDate(day.day,day.month,day.year,hour,minute)
         if not when then print('Old Kraken: оберіть коректні дату та місцевий час.'); return end

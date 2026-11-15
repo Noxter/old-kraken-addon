@@ -42,8 +42,22 @@ OldKraken.UIHub:ShowPage('events')
 local events=OldKraken.GuildEvents
 local ui=OldKrakenEventsFrame
 ui.title:SetText('Old title')
-selectOption(OldKrakenEventsActivity,'onyxia')
+ui.activityButton.scripts.OnClick(); for _,card in ipairs(ui.activityCards.cards) do if type(card.entry)=='table' and card.entry.value=='onyxia' then card.scripts.OnClick(card) end end
 assert(ui.title:GetText()=='Лігво Оніксії (Ony)')
+selectOption(ui.kindMenu,'dungeon')
+ui.activityButton.scripts.OnClick()
+assert(ui.activityCards:IsShown() and #ui.activityCards.cards==#OldKraken.ActivityCatalog.dungeon-1)
+ui.activityCards.scripts.OnMouseWheel(ui.activityCards,-1)
+assert(ui.activityCards.offset==70)
+for _,card in ipairs(ui.activityCards.cards) do if type(card.entry)=='table' and card.entry.value=='wc' then card.scripts.OnClick(card) end end
+assert(ui.title:GetText()=='Печери Стогонів (WC)' and not ui.activityCards:IsShown())
+local allocated=#createdFrames
+selectOption(ui.kindMenu,'raid')
+ui.activityButton.scripts.OnClick()
+local shown=0
+for _,card in ipairs(ui.activityCards.cards) do if card:IsShown() and card.entry then shown=shown+1 end end
+assert(shown==#OldKraken.ActivityCatalog.raid-1 and #createdFrames==allocated)
+for _,card in ipairs(ui.activityCards.cards) do if type(card.entry)=='table' and card.entry.value=='onyxia' then card.scripts.OnClick(card) end end
 assert(events:Create(ui.title:GetText(),'',GetServerTime()+3600,'raid',40,'onyxia'))
 local store=OldKraken.DB.events.guildCalendarV1['Test Realm\\001Guild\\001Tester Realm']
 local key,e=next(store.owned); assert(e)
