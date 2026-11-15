@@ -875,17 +875,17 @@ local function createWindow(parent)
     activityButton=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); activityButton:SetPoint('TOPLEFT',f,'TOPLEFT',460+shift,-522); activityButton:SetSize(180,28); activityButton:SetJustifyH('LEFT')
     f.activityButton=activityButton
     local grid=CreateFrame('Frame',nil,f)
-    grid:SetSize(embedded and 850 or 805,345); grid:SetPoint('TOPLEFT',f,'TOPLEFT',18,-65)
+    grid:SetSize(embedded and 850 or 805,298); grid:SetPoint('TOPLEFT',f,'TOPLEFT',18,-112)
     grid:SetFrameLevel(f:GetFrameLevel()+10); grid:EnableMouse(true); grid:EnableMouseWheel(true)
     local fill=grid:CreateTexture(nil,'BACKGROUND'); fill:SetAllPoints(grid); fill:SetColorTexture(0.035,0.04,0.05,1)
     grid.heading=grid:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); grid.heading:SetPoint('TOPLEFT',grid,'TOPLEFT',12,-10)
     action(grid,'Без конкретної локації',embedded and 560 or 515,-7,230,function() chooseActivity('') end)
-    local clip=CreateFrame('Frame',nil,grid); clip:SetPoint('TOPLEFT',grid,'TOPLEFT',8,-40); clip:SetSize(embedded and 830 or 785,297)
+    local clip=CreateFrame('Frame',nil,grid); clip:SetPoint('TOPLEFT',grid,'TOPLEFT',8,-40); clip:SetSize(embedded and 830 or 785,250)
     if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
     local body=CreateFrame('Frame',nil,clip); body:SetSize(embedded and 830 or 785,1)
     grid.cards={}; grid.offset=0; grid.full=1
     function grid:ScrollTo(value)
-        self.offset=math.max(0,math.min(math.max(0,self.full-297),value))
+        self.offset=math.max(0,math.min(math.max(0,self.full-250),value))
         body:ClearAllPoints(); body:SetPoint('TOPLEFT',clip,'TOPLEFT',0,self.offset)
     end
     local function wheel(_,delta) grid:ScrollTo(grid.offset-delta*70) end
@@ -931,7 +931,11 @@ local function createWindow(parent)
         activityButton:SetText(activity~='' and activityLabels[activity] or 'Локацію не вибрано')
         if f.creationMode and enabled then f:ShowActivityCards() else grid:Hide() end
     end
-    f.kindMenu=selectMenu(f,'OldKrakenEventsKind',310+shift,-520,130,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end)
+    f.kindAccent=f:CreateTexture(nil,'BACKGROUND'); f.kindAccent:SetPoint('TOPLEFT',f,'TOPLEFT',18,-65); f.kindAccent:SetSize(embedded and 850 or 805,40); f.kindAccent:SetColorTexture(0.24,0.18,0.06,0.9)
+    f.kindEdge=f:CreateTexture(nil,'ARTWORK'); f.kindEdge:SetPoint('TOPLEFT',f.kindAccent,'TOPLEFT'); f.kindEdge:SetSize(3,40); f.kindEdge:SetColorTexture(1,0.77,0.25,1)
+    f.kindLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.kindLabel:SetPoint('TOPLEFT',f,'TOPLEFT',30,-77); f.kindLabel:SetText('Тип події')
+    local kindLabels={}; for value,label in pairs(kinds) do kindLabels[value]='|cffffd35a'..label..'|r' end
+    f.kindMenu=selectMenu(f,'OldKrakenEventsKind',155,-74,240,{'raid','dungeon','pvp','guild'},kindLabels,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end)
     showActivity()
     f.submit=action(f,'Створити',650+shift,-520,150,function()
         local day=getDate()
@@ -940,7 +944,7 @@ local function createWindow(parent)
         if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText(),activity) then f.title:SetText(''); f.description:SetText(''); f.creationMode=false; refresh(); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
     end,'primary')
-    f.formControls={heading,f.title,f.title.label,f.dateButton,f.dateCaption,timeLabel,minuteLabel,f.hourMenu,f.minuteMenu,f.size,f.size.label,f.description,f.description.label,f.kindMenu,f.submit,activityButton}
+    f.formControls={heading,f.title,f.title.label,f.dateButton,f.dateCaption,timeLabel,minuteLabel,f.hourMenu,f.minuteMenu,f.size,f.size.label,f.description,f.description.label,f.kindAccent,f.kindEdge,f.kindLabel,f.kindMenu,f.submit,activityButton}
     f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleMenu}
     f.SetCreationMode=function(_,value) f.creationMode=value==true; refresh() end
     f:HookScript('OnShow',refresh)
