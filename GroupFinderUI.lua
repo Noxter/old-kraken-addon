@@ -49,6 +49,7 @@ local roles = {'tank', 'healer', 'dps', 'flex'}
 local roleLabels = {['']='Не визначено', tank='Танк', healer='Лікар', dps='DPS', flex='Гнучка'}
 local roleColors = {tank='ff66b3ff', healer='ff69dc8c', dps='ffff7a6e', flex='ffffd06a', ['']='ffb5b5b5'}
 local pendingLabels = {pending='Очікує', reject='Відхилено', closed='Закрито', retry='Подайте заявку знову'}
+local pendingColors = {pending='ffffc36b', reject='ffff7a6e', closed='ffb5b5b5', retry='ffffc36b'}
 local applicationBadges = {
     pending={text='ОЧІКУЄ', color={1, 0.80, 0.25}},
     reject={text='ВІДХИЛЕНО', color={1, 0.35, 0.32}},
@@ -386,10 +387,11 @@ refresh=function()
         local applicationStatus = Finder.pending[selected]
         local activity = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category]
         local activityLine = activity and activity ~= g.title and ('\n|cff9ba9bc' .. activity .. '|r') or ''
-        window.details:SetText(string.format('|cffffd35a%s|r%s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСтатус: %s%s\nСклад:',
-            g.title, activityLine, playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role),
-            g.description, g.closed and 'Закрито' or 'Відкрито',
-            applicationStatus and (' | Заявка: ' .. (pendingLabels[applicationStatus] or applicationStatus)) or ''))
+        local status = g.closed and '|cffb5b5b5Закрито|r' or '|cff69dc8cВідкрито|r'
+        local application = applicationStatus and ('\n|cff9ba9bcЗаявка:|r |c' .. (pendingColors[applicationStatus] or 'ffb5b5b5') .. (pendingLabels[applicationStatus] or applicationStatus) .. '|r') or ''
+        local description = g.description ~= '' and ('\n\n|cff9ba9bcОпис:|r ' .. g.description) or ''
+        window.details:SetText(string.format('|cffffd35a%s|r%s\n\n|cff9ba9bcАвтор:|r |cff9bcaff%s|r\n|cff9ba9bcРівень:|r |cff9bcaff%d–%d|r\n|cff9ba9bcРоль:|r %s\n|cff9ba9bcСтатус:|r %s%s%s\n\n|cffffd35aСклад:|r',
+            g.title, activityLine, playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role), status, application, description))
     else window.details:SetText('Виберіть оголошення у списку.') end
     local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
     local members = g and g.members or {}
