@@ -1227,8 +1227,21 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
         groupAlert.alertTitle:SetTextColor(0.94, 0.95, 0.96)
         groupAlert.alertTitle:SetHeight(22)
         groupAlert.alertTitle:SetWordWrap(false)
-        groupAlert.alertSubtitle = groupAlert:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-        groupAlert.alertSubtitle:SetTextColor(0.72, 0.75, 0.79)
+        groupAlert.alertSubtitle = groupAlert:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+        groupAlert.alertSubtitle:SetTextColor(0.9, 0.93, 0.97)
+        groupAlert.alertSubtitle:SetShadowColor(0,0,0,1)
+        groupAlert.alertSubtitle:SetShadowOffset(1,-1)
+        local subtitleFont,subtitleSize=groupAlert.alertSubtitle:GetFont()
+        if subtitleFont then groupAlert.alertSubtitle:SetFont(subtitleFont,math.max(13,tonumber(subtitleSize) or 13),'OUTLINE') end
+        groupAlert.alertHint = groupAlert:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+        groupAlert.alertHint:SetTextColor(0.75,0.83,0.93)
+        groupAlert.alertHint:SetJustifyH('LEFT')
+        groupAlert.alertHint:SetWordWrap(false)
+        local hintFont,hintSize=groupAlert.alertHint:GetFont()
+        if hintFont then groupAlert.alertHint:SetFont(hintFont,math.max(12,tonumber(hintSize) or 12),'OUTLINE') end
+        groupAlert.alertHint:SetShadowColor(0,0,0,1); groupAlert.alertHint:SetShadowOffset(1,-1)
+        groupAlert.alertFooter=groupAlert:CreateTexture(nil,'BACKGROUND')
+        groupAlert.alertFooter:SetColorTexture(0.025,0.045,0.075,0.9)
         groupAlert.alertSubtitle:SetWordWrap(true)
         groupAlert.alertCaption:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 82, -10)
         groupAlert.alertTitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 82, -28)
@@ -1302,7 +1315,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     end
     for _,control in ipairs(groupAlert.roleSlots or {}) do control:Hide() end
     local graphical=kind=='group' and rosterGroup~=nil
-    groupAlert:SetSize(560,graphical and 146 or 100)
+    groupAlert:SetSize(560,graphical and 166 or 112)
     groupAlert.kind, groupAlert.groupKey = kind, key
     local hasGroupArt = kind == 'group'
     groupAlert.alertArt:SetShown(hasGroupArt)
@@ -1329,16 +1342,26 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, 8)
     groupAlert.alertCaption:SetText(alertCaptions[kind] or 'OLD KRAKEN')
     groupAlert.alertTitle:SetText(title)
-    local hint = (alertActions[kind] or 'Клік — відкрити') .. ' · перетягніть, щоб перемістити'
+    groupAlert.alertFooter:ClearAllPoints()
+    groupAlert.alertFooter:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft-7,7)
+    groupAlert.alertFooter:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-7,7)
+    groupAlert.alertFooter:SetHeight(graphical and 54 or 58)
+    groupAlert.alertHint:ClearAllPoints()
+    groupAlert.alertHint:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft,12)
+    groupAlert.alertHint:SetPoint('RIGHT',groupAlert,'RIGHT',-12,0)
+    groupAlert.alertHint:SetHeight(16)
+    groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or 'Клік — відкрити')..'|r  |cffb0baca· перетягніть, щоб перемістити|r')
+    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,34)
     if graphical then
         paintAlertRoster(rosterGroup)
         groupAlert.alertSubtitle:ClearAllPoints()
         groupAlert.alertSubtitle:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',82,-108)
-        groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,8)
+        groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,34)
         local extra=#rosterGroup.members>5 and (' · ще учасників: '..(#rosterGroup.members-5)) or ''
-        groupAlert.alertSubtitle:SetText('Склад '..#rosterGroup.members..'/'..rosterGroup.maxSize..' · вільно '..math.max(0,rosterGroup.maxSize-#rosterGroup.members)..extra..'\n'..hint)
+        groupAlert.alertSubtitle:SetText('|cffffd36bУ складі: '..#rosterGroup.members..' із '..rosterGroup.maxSize..'|r  ·  |cff69dc8cВільних місць: '..math.max(0,rosterGroup.maxSize-#rosterGroup.members)..'|r'..extra)
+        groupAlert.alertHint:SetText('|cff8ccfffВільна роль — подати заявку|r  ·  |cffe0e6efКлік по банеру — група|r')
     else
-    groupAlert.alertSubtitle:SetText(subtitle ~= '' and (subtitle .. '\n' .. hint) or hint)
+    groupAlert.alertSubtitle:SetText(subtitle)
     end
     groupAlert.remaining = ALERT_DURATION
     groupAlert:SetAlpha(1)
@@ -1406,7 +1429,7 @@ end)
 
 OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
     refreshPeople()
-    showAlert('Нова заявка від ' .. playerLabel(name), roleLabel(role) .. ' · ' .. group.title,
+    showAlert('Нова заявка від ' .. playerLabel(name), roleLabel(role) .. '  |cff9ba9bc·|r  |cffffd36b' .. group.title .. '|r',
         'request', group.owner .. '\001' .. group.id)
     refreshRequests()
 end)

@@ -16,7 +16,7 @@ end
 local group={id='graphics',owner='Tank Owner',title='Graphical group',category='dungeon',dungeon='rfc',role='tank',maxSize=5,minLevel=13,maxLevel=18,description='',members={'Tank Owner','Healer Friend'},memberRoles={['Healer Friend']='healer'},partyObserved={['Healer Friend']=true}}
 finder.groups[group.owner..'\\001'..group.id]=group
 OldKraken.listeners.GROUP_FINDER_NEW(group)
-assert(alert.height==146 and #alert.roleSlots==5)
+assert(alert.height==166 and #alert.roleSlots==5)
 local occupied=0
 for i,slot in ipairs(alert.roleSlots) do
     assert(slot:IsShown())
@@ -27,7 +27,7 @@ assert(occupied==2)
 assert(alert.roleSlots[1].role=='tank' and alert.roleSlots[1].memberName=='Tank Owner')
 assert(alert.roleSlots[2].role=='healer' and alert.roleSlots[2].memberName=='Healer Friend')
 assert(alert.roleSlots[3].role=='dps' and not alert.roleSlots[3].occupied)
-assert(alert.alertSubtitle.text:find('Склад 2/5',1,true))
+assert(alert.alertSubtitle.text:find('У складі: 2 із 5',1,true))
 assert(not alert.alertSubtitle.text:find('Вільні ролі',1,true))
 GameTooltip={SetOwner=function() end,SetText=function(_,text,...) assert(select('#',...)==0); tooltip=text end,Show=function() end,Hide=function() end}
 alert.roleSlots[2].scripts.OnEnter(alert.roleSlots[2]); assert(tooltip:find('Healer Friend',1,true))
@@ -43,9 +43,9 @@ OldKraken.listeners.GROUP_FINDER_NEW(group)
 assert(alert.roleSlots[5].role=='' and alert.roleSlots[5].memberName=='Unknown Role')
 assert(alert.roleSlots[5].icon.texture:find('QuestionMark',1,true),'must not invent a role')
 OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(group,'Applicant','healer')
-assert(alert.height==100)
+assert(alert.height==112)
 for _,slot in ipairs(alert.roleSlots) do assert(not slot:IsShown()) end
-finder:PreviewAlert('group'); assert(alert.roleSlots[1]:IsShown() and alert.height==146)
+finder:PreviewAlert('group'); assert(alert.roleSlots[1]:IsShown() and alert.height==166)
 group.category='raid'; group.maxSize=200; group.members={'Tank Owner'}
 for i=2,200 do group.members[i]='Raider '..i end
 OldKraken.listeners.GROUP_FINDER_NEW(group)
