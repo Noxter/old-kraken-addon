@@ -3,6 +3,7 @@ local Finder = OldKraken.GroupFinder
 local window, selected, requestsWindow
 local refresh
 local groupAlert
+local refreshAlertRoster
 local lastAlertSoundAt = -math.huge
 local ALERT_DURATION, ALERT_FADE_DURATION, ALERT_SOUND_INTERVAL = 9, 1, 60
 local tab = 'all'
@@ -1112,7 +1113,10 @@ local function scheduleRefresh()
     end
     if C_Timer and C_Timer.After then scheduleRefreshPending=true; C_Timer.After(0.15,flush) else flush() end
 end
-OldKraken:On('GROUP_FINDER_CHANGED', scheduleRefresh)
+OldKraken:On('GROUP_FINDER_CHANGED', function()
+    if refreshAlertRoster then refreshAlertRoster() end
+    scheduleRefresh()
+end)
 local peopleEvents = CreateFrame('Frame')
 peopleEvents:RegisterEvent('GUILD_ROSTER_UPDATE')
 peopleEvents:RegisterEvent('GROUP_ROSTER_UPDATE')
@@ -1163,11 +1167,27 @@ local function paintAlertRoster(group)
             control:RegisterForClicks('LeftButtonUp','RightButtonUp')
             control:SetScript('OnClick',function(self,mouseButton)
                 if GameTooltip then GameTooltip:Hide() end
+                if mouseButton=='LeftButton' and self and self.occupied then
+                    if refreshAlertRoster then refreshAlertRoster() end
+                    return
+                end
                 if mouseButton=='LeftButton' and self and not self.occupied then
                     local key=groupAlert.groupKey
                     local current=key and Finder.groups[key]
                     if not current or current.closed then
+                        groupAlert:Hide()
                         print('Old Kraken: набір уже недоступний.'); return
+                    end
+                    if current.category=='dungeon' and current.maxSize==5 then
+                        local live=Finder:DungeonSlots(current)[self.slotIndex]
+                        if not live or live.member or live.role~=self.role then
+                            paintAlertRoster(current)
+                            if refreshAlertRoster then refreshAlertRoster() end
+                            print('Old Kraken: це місце вже зайняте.'); return
+                        end
+                    elseif #current.members>=current.maxSize then
+                        if refreshAlertRoster then refreshAlertRoster() end
+                        print('Old Kraken: групу вже зібрано.'); return
                     end
                     if Finder.pending[key]=='pending' then
                         print('Old Kraken: заявку вже подано; очікуйте рішення автора.'); return
@@ -1197,8 +1217,8 @@ local function paintAlertRoster(group)
                 local member=slot.member
                 local displayedRole=member and (slot.memberRole or '') or slot.role
                 local coords=atlas[displayedRole]
-                control.memberName=member; control.role=displayedRole; control.occupied=member~=nil
-                control:SetEnabled(member~=nil or Finder:CanPerformRole(Finder.identity,displayedRole))
+                control.memberName=member; control.role=displayedRole; control.occupied=member~=nil; control.slotIndex=i
+                control:SetEnabled(member==nil and Finder:CanPerformRole(Finder.identity,displayedRole))
                 control.icon:SetTexture(coords and 'Interface\\LFGFrame\\UI-LFG-ICON-ROLES' or 'Interface\\Icons\\INV_Misc_QuestionMark')
                 if coords then control.icon:SetTexCoord(unpack(coords)) else control.icon:SetTexCoord(0,1,0,1) end
                 control.icon:SetDesaturated(not member); control.icon:SetAlpha(member and 1 or 0.4)
@@ -1214,6 +1234,20 @@ local function paintAlertRoster(group)
             end
         end
     end
+end
+
+local function alertCompositionText(group)
+    local extra=#group.members>5 and (' · ще учасників: '..(#group.members-5)) or ''
+    return '|cffffd36bУ складі: '..#group.members..' із '..group.maxSize..'|r  ·  |cff69dc8cВільних місць: '..math.max(0,group.maxSize-#group.members)..'|r'..extra
+end
+refreshAlertRoster=function()
+    if not groupAlert or not groupAlert:IsShown() or groupAlert.kind~='group' or not groupAlert.groupKey then return end
+    local group=Finder.groups[groupAlert.groupKey]
+    if not group or group.closed or group.hidden then groupAlert:Hide(); return end
+    if group.revision and groupAlert.rosterGroup==group and groupAlert.rosterRevision==group.revision then return end
+    paintAlertRoster(group)
+    groupAlert.alertSubtitle:SetText(alertCompositionText(group))
+    groupAlert.rosterGroup,groupAlert.rosterRevision=group,group.revision
 end
 
 local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
@@ -1386,8 +1420,8 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
         groupAlert.alertSubtitle:ClearAllPoints()
         groupAlert.alertSubtitle:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',116,-169)
         groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,12)
-        local extra=#rosterGroup.members>5 and (' · ще учасників: '..(#rosterGroup.members-5)) or ''
-        groupAlert.alertSubtitle:SetText('|cffffd36bУ складі: '..#rosterGroup.members..' із '..rosterGroup.maxSize..'|r  ·  |cff69dc8cВільних місць: '..math.max(0,rosterGroup.maxSize-#rosterGroup.members)..'|r'..extra)
+        groupAlert.alertSubtitle:SetText(alertCompositionText(rosterGroup))
+        groupAlert.rosterGroup,groupAlert.rosterRevision=rosterGroup,rosterGroup.revision
         groupAlert.alertHint:SetText(''); groupAlert.alertHint:Hide()
     else
     groupAlert.alertHint:Show()
