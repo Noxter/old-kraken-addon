@@ -8,7 +8,7 @@ local materialNames={customer='Замовника',crafter='Майстра',mixe
 local statusNames={open='Шукає майстра',assigned='У роботі',delivered='Передано',done='Виконано',cancelled='Скасовано',deleted='Видалено'}
 local deadlineNames={[3600]='1 година',[21600]='6 годин',[86400]='Доба',[604800]='Тиждень'}
 local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]=136243,[333]=136244,[185]=133971,[129]=135966,[186]=136248}
-local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.70,0.75,0.80},cancelled={1,0.42,0.38},expired={0.72,0.72,0.72}}
+local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.35,0.88,0.53},cancelled={1,0.42,0.38},expired={1,0.58,0.25}}
 local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
 local dirty,relayDirty,sequence,nextSync,lastQueries,nextDisplay={}, {},0,0,{},0
@@ -761,7 +761,7 @@ refresh=function()
             local stateKey=displayStatus(o)
             row.order=o; row.icon:SetTexture(orderIcon(o))
             row.title:SetText(o.item)
-            row.meta:SetText(professionNames[o.profession]..' · '..o.owner)
+            row.meta:SetText(professionNames[o.profession]..' · '..playerLabel(o.owner,classes))
             row.reward:SetText(o.quantity..' шт. · '..o.reward..' зол. · до '..date('%d.%m %H:%M',o.deadline))
             local statusText=stateKey=='expired' and (o.status=='assigned' and 'У роботі · прострочено' or 'Термін минув') or statusNames[stateKey]
             if view=='available' and (o.itemID or 0)==0 and (o.recipeID or 0)==0 then statusText=statusText..' · лише професія' end
@@ -786,6 +786,9 @@ refresh=function()
                     if stateKey=='expired' then row.choose:Disable() else row.choose:Enable() end
                     row.choose:Show()
                 else row.choose:Hide() end
+            elseif o.worker then
+                row.applicants:SetText('|cff9ba9bcМайстер:|r '..playerLabel(o.worker,classes))
+                row.applicants:Show(); row.choose:Hide()
             else row.applicants:Hide(); row.choose:Hide() end
             if o.worker==identity and o.owner~=identity and o.status=='assigned' then
                 row.progress:SetText(intents[entry.key] and 'Очікується відповідь' or 'Передав')
@@ -797,7 +800,7 @@ refresh=function()
             else row.progress:Hide() end
             if o.owner==identity and o.status~='done' and o.status~='cancelled' then
                 row.cancel:ClearAllPoints()
-                row.cancel:SetPoint('TOPLEFT',row,'TOPLEFT',112,o.status=='open' and -94 or -84)
+                row.cancel:SetPoint('TOPLEFT',row,'TOPLEFT',112,o.status=='open' and -109 or -104)
                 row.cancel:SetHeight(o.status=='open' and 19 or 24); row.cancel:Show()
             else row.cancel:Hide() end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
@@ -900,8 +903,8 @@ local function createWindow(parent)
     f.orderRows=orderRows
     for i=1,CARDS_PER_PAGE do
         local col=(i-1)%2; local line=math.floor((i-1)/2)
-        local card=button(f,'',18+col*229,y(-80-line*124),219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
-        card:SetHeight(116)
+        local card=button(f,'',18+col*229,y(-80-line*142),219,function(self) if self.entryKey then selected=self.entryKey; refresh() end end)
+        card:SetHeight(134)
         card.icon=card:CreateTexture(nil,'ARTWORK'); card.icon:SetPoint('TOPLEFT',card,'TOPLEFT',7,-8); card.icon:SetSize(34,34)
         local function label(template,y)
             local text=card:CreateFontString(nil,'OVERLAY',template); text:SetPoint('TOPLEFT',card,'TOPLEFT',48,y); text:SetPoint('RIGHT',card,'RIGHT',-6,0); text:SetJustifyH('LEFT'); text:SetWordWrap(false); return text
@@ -919,11 +922,11 @@ local function createWindow(parent)
         card.delete:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         card.delete:Hide()
         card.reward=label('GameFontHighlightSmall',-42); card.state=label('GameFontNormalSmall',-59)
-        card.offer=button(card,'Запропонувати допомогу',8,-84,203,function(self)
+        card.offer=button(card,'Запропонувати допомогу',8,-104,203,function(self)
             local k=self:GetParent().entryKey
             if not k or not intent(k,'offer') then showError() end
         end)
-        card.progress=button(card,'Передав',8,-84,203,function(self)
+        card.progress=button(card,'Передав',8,-104,203,function(self)
             local k=self:GetParent().entryKey; local o=k and get(k)
             if not o then showError(); return end
             if o.owner==identity and o.status=='delivered' then
@@ -932,16 +935,16 @@ local function createWindow(parent)
                 confirmCardAction(k,'delivered')
             else showError() end
         end)
-        card.withdraw=button(card,'Відмовитися',112,-84,99,function(self)
+        card.withdraw=button(card,'Відмовитися',112,-104,99,function(self)
             local k=self:GetParent().entryKey
             confirmCardAction(k,'withdraw')
         end)
-        card.cancel=button(card,'Скасувати',112,-84,99,function(self)
+        card.cancel=button(card,'Скасувати',112,-104,99,function(self)
             local k=self:GetParent().entryKey
             confirmCardAction(k,'cancel')
         end)
         card.applicants=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-        card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,-76); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
+        card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,-80); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
         card.menu=CreateFrame('Frame','OldKrakenOrderCardMenu'..i,card,'UIDropDownMenuTemplate')
         UIDropDownMenu_Initialize(card.menu,function(menu,level)
             local target=menu.orderKey; local o=target and own[target]
@@ -954,7 +957,7 @@ local function createWindow(parent)
                 UIDropDownMenu_AddButton(item,level)
             end
         end,'MENU')
-        card.choose=button(card,'Обрати',8,-94,99,function(self)
+        card.choose=button(card,'Обрати',8,-109,99,function(self)
             local parent=self:GetParent(); parent.menu.orderKey=parent.entryKey
             if not parent.menu.orderKey then return end
             ToggleDropDownMenu(1,nil,parent.menu,self,0,0)
@@ -971,8 +974,13 @@ local function createWindow(parent)
         card.choose:SetHeight(19)
         card:SetScript('OnEnter',function(self)
             local o=self.order; if not o or not GameTooltip then return end
+            local _,classes=rosterPresentation()
             GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(o.item)
-            GameTooltip:AddLine('Замовник: '..o.owner,1,1,1,true)
+            GameTooltip:AddLine('Замовник: '..playerLabel(o.owner,classes),1,1,1,true)
+            if o.worker then GameTooltip:AddLine('Майстер: '..playerLabel(o.worker,classes),1,1,1,true) end
+            local state=displayStatus(o); local color=statusColors[state] or statusColors.expired
+            local status=state=='expired' and (o.status=='assigned' and 'У роботі · прострочено' or 'Термін минув') or statusNames[state]
+            GameTooltip:AddLine('Статус: '..status,color[1],color[2],color[3],true)
             GameTooltip:AddLine('Професія: '..professionNames[o.profession],1,1,1,true)
             GameTooltip:AddLine('Кількість: '..o.quantity..' · Винагорода: '..o.reward..' зол.',1,1,1,true)
             GameTooltip:AddLine('Термін: '..date('%d.%m.%Y %H:%M',o.deadline),1,1,1,true)
@@ -981,12 +989,12 @@ local function createWindow(parent)
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         orderRows[i]=card
     end
-    button(f,'‹',18,y(-342),44,function() offset=offset-1; refresh() end)
-    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,y(-348))
-    button(f,'›',130,y(-342),44,function() offset=offset+1; refresh() end)
-    local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,y(-349)); searchLabel:SetText('Пошук')
+    button(f,'‹',18,y(-368),44,function() offset=offset-1; refresh() end)
+    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,y(-374))
+    button(f,'›',130,y(-368),44,function() offset=offset+1; refresh() end)
+    local searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',205,y(-375)); searchLabel:SetText('Пошук')
     local search=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(search)
-    search:SetPoint('TOPLEFT',f,'TOPLEFT',265,y(-344)); search:SetSize(195,22); search:SetAutoFocus(false)
+    search:SetPoint('TOPLEFT',f,'TOPLEFT',265,y(-370)); search:SetSize(195,22); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) searchQuery=lower(self:GetText() or ''); offset=0; refresh() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local detailsHeader=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); detailsHeader:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-80)); detailsHeader:SetText('Деталі замовлення')
