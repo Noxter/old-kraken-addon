@@ -20,8 +20,10 @@ local professionArt={
 }
 local active, identity, profile, store, records = false, nil, nil, nil, {}
 local nativeProfessions={}
+local professionRelayDirty={}
 local pending, queryPending, forceBroadcast, lastReply, nextScan = false, false, false, -60, 0
 local scanState
+local scanStarted,dropCandidate=nil,nil
 local frame
 local render
 
@@ -46,15 +48,18 @@ local function changed()
     if render then render() end
     if type(OldKraken.Fire)=='function' then OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED') end
 end
--- Avoid treating an unavailable or temporarily empty API as proof of no skills.
+-- Nil or invalid indexes and temporarily unavailable APIs are not removals.
 local function scan()
     if type(GetProfessions)~='function' or type(GetProfessionInfo)~='function' then return nil end
     local ok,a,b,c,d,e,f=pcall(GetProfessions)
     if not ok then return nil end
-    local indexes={a,b,c,d,e,f}; local found, list={},{}
+    local indexes={a,b,c,d,e,f}; local found, seenIndexes, list={},{},{}
     for i=1,6 do
+        if type(issecretvalue)=='function' and issecretvalue(indexes[i]) then return nil end
         local index=integer(indexes[i],1,100000)
+        if indexes[i]~=nil and not index then return nil end
         if index then
+            if seenIndexes[index] then return nil end; seenIndexes[index]=true
             local success,_,_,rank,maximum,_,_,line=pcall(GetProfessionInfo,index)
             if success then
                 local id=integer(line,1,1000000)
@@ -66,7 +71,12 @@ local function scan()
             else return nil end
         end
     end
-    if #list==0 then return nil end
+    if #list==0 then
+        if type(IsLoggedIn)~='function' or type(UnitExists)~='function' then return nil end
+        local loginOk,logged=pcall(IsLoggedIn); local playerOk,player=pcall(UnitExists,'player')
+        if not loginOk or not playerOk or not usable(logged,'boolean') or not logged
+            or not ((usable(player,'boolean') and player) or (usable(player,'number') and player==1)) then return nil end
+    end
     table.sort(list,function(x,y) return x.id<y.id end)
     return list
 end
@@ -79,7 +89,7 @@ local function decode(payload)
     local f=codec._unpackFields(payload,38)
     if not f or #f<2 then return nil end
     local timestamp,n=tonumber(f[1]),tonumber(f[2])
-    if not integer(timestamp,1,GetServerTime()+600) or not integer(n,1,12) or #f~=2+n*3 then return nil end
+    if not integer(timestamp,1,GetServerTime()+600) or not integer(n,0,12) or #f~=2+n*3 then return nil end
     local found,list={},{}
     for i=1,n do
         local id,rank,maximum=tonumber(f[i*3]),tonumber(f[i*3+1]),tonumber(f[i*3+2])
@@ -88,18 +98,40 @@ local function decode(payload)
     end
     return {timestamp=timestamp,list=list}
 end
+local function receiveProfession(owner,payload,relayed)
+    local value=decode(payload); if not value or owner==identity then return end
+    local old=records[owner]
+    if type(old)~='table' or not integer(old.timestamp,1,GetServerTime()+600) then old=nil end
+    if type(old)=='table' then
+        local lastDirect=integer(old.directTimestamp,0,GetServerTime()+600) or (not old.relayed and old.timestamp or 0)
+        if relayed then if old.timestamp>=value.timestamp then return end
+        elseif value.timestamp<lastDirect or (not old.relayed and old.timestamp==value.timestamp) then return
+        elseif old.relayed and value.timestamp<old.timestamp then old.directTimestamp=math.max(lastDirect,value.timestamp); return end
+        value.directTimestamp=relayed and lastDirect or value.timestamp
+    else
+        if count(records)>=1000 then return end
+        value.directTimestamp=relayed and 0 or value.timestamp
+    end
+    value.relayed=relayed and true or false
+    if not relayed then store.professionRelays[owner]=payload
+    else store.professionRelays[owner]=nil; professionRelayDirty[owner]=nil end
+    records[owner]=value; changed()
+end
 comm:RegisterHandler('WKPROF',function(sender,_,payload)
-    if not active or not usable(sender,'string') or sender=='' or #sender>128 then return end
-    local value=decode(payload); if not value then return end
-    if sender==identity then return end
-    if records[sender] and records[sender].timestamp>=value.timestamp then return end
-    if not records[sender] and count(records)>=1000 then return end
-    records[sender]=value; changed()
+    if not active or not usable(sender,'string') or sender=='' or #sender>128 or sender==identity then return end
+    receiveProfession(sender,payload,false)
+end)
+comm:RegisterHandler('WKRELAY',function(sender,_,payload)
+    if not active or not usable(sender,'string') or sender=='' or #sender>128 or sender==identity then return end
+    local f=codec._unpackFields(payload,2)
+    if not f or #f~=2 or not usable(f[1],'string') or f[1]=='' or #f[1]>128 or f[1]:find('[%z\1-\31\127]') or f[1]==sender or f[1]==identity then return end
+    receiveProfession(f[1],f[2],true)
 end)
 comm:RegisterHandler('WKQUERY',function(sender,_,payload)
     if not active or payload~='' or sender==identity then return end
     local now=GetTime(); if now-lastReply<30 then return end
     lastReply=now; forceBroadcast=true; nextScan=0
+    for owner in pairs(store.professionRelays) do professionRelayDirty[owner]=true end
 end)
 
 local function connect()
@@ -119,9 +151,15 @@ local function connect()
     if type(db.workshop.guilds[key])~='table' then db.workshop.guilds[key]={} end
     local scope=db.workshop.guilds[key]
     if type(scope.records)~='table' then scope.records={} end
+    if type(scope.professionRelays)~='table' then scope.professionRelays={} end
     active,identity,profile,store,records=true,name,key,scope,scope.records
+    professionRelayDirty={}
+    for owner,payload in pairs(scope.professionRelays) do
+        if not usable(owner,'string') or owner=='' or #owner>128 or type(payload)~='string' or not decode(payload) then scope.professionRelays[owner]=nil end
+    end
     nativeProfessions={}
     scanState=nil
+    scanStarted,dropCandidate=type(GetTime)=='function' and GetTime() or nil,nil
     pending,queryPending,forceBroadcast,lastReply,nextScan=false,true,true,-60,0
     changed()
 end
@@ -151,7 +189,7 @@ function Workshop:GetMemberProfessions(name)
     local record=records[name]; local result={}
     if usable(record,'table') and usable(record.list,'table') then
         for _,p in ipairs(record.list) do
-            if usable(p,'table') and byID[p.id] then result[#result+1]={id=p.id,rank=p.rank,maximum=p.maximum,timestamp=record.timestamp} end
+            if usable(p,'table') and byID[p.id] then result[#result+1]={id=p.id,rank=p.rank,maximum=p.maximum,timestamp=record.timestamp,relayed=record.relayed==true} end
         end
     elseif nativeProfessions[name] then
         for _,p in ipairs(nativeProfessions[name]) do result[#result+1]=p end
@@ -169,14 +207,14 @@ function Workshop:GetProfessionMasters(id)
         if usable(name,'string') and usable(record,'table') and usable(record.list,'table') then
             for _,p in ipairs(record.list) do
                 if usable(p,'table') and p.id==id then
-                    found[name]={name=name,rank=integer(p.rank,1,9999),maximum=integer(p.maximum,1,9999),timestamp=record.timestamp}
+                    found[name]={name=name,rank=integer(p.rank,1,9999),maximum=integer(p.maximum,1,9999),timestamp=record.timestamp,relayed=record.relayed==true}
                     break
                 end
             end
         end
     end
     for name,list in pairs(nativeProfessions) do
-        if usable(name,'string') and usable(list,'table') and not found[name] then
+        if usable(name,'string') and usable(list,'table') and not found[name] and not records[name] then
             for _,p in ipairs(list) do
                 if usable(p,'table') and p.id==id then found[name]={name=name,native=true}; break end
             end
@@ -189,16 +227,26 @@ end
 
 local function updateOwn()
     local list=scan(); scanState=list~=nil
-    if not list then changed(); return false end
+    if not list then dropCandidate=nil; changed(); return false end
     local previous=records[identity]
+    local removed={}
     if type(previous)=='table' and type(previous.list)=='table' then
         local found={}; for _,entry in ipairs(list) do found[entry.id]=true end
         for _,entry in ipairs(previous.list) do
             if type(entry)=='table' and byID[entry.id] and not found[entry.id] then
-                scanState=false; changed(); return false
+                removed[#removed+1]=entry.id
             end
         end
     end
+    if #removed>0 or (#list==0 and not previous) then
+        local fingerprint=encode({timestamp=1,list=list}); local now=GetTime()
+        if not dropCandidate or dropCandidate.fingerprint~=fingerprint then dropCandidate={fingerprint=fingerprint,first=now,count=1}
+        else dropCandidate.count=dropCandidate.count+1 end
+        if not scanStarted or now-scanStarted<15 or now-dropCandidate.first<6 or dropCandidate.count<3 then
+            scanState='checking'; changed(); return false
+        end
+    end
+    dropCandidate=nil
     if type(previous)=='table' and type(previous.list)=='table' and not forceBroadcast then
         local ok,prior=pcall(encode,{timestamp=1,list=previous.list})
         if ok and prior==encode({timestamp=1,list=list}) and integer(previous.timestamp,1,GetServerTime()+600) and GetServerTime()-previous.timestamp<86400 then return true end
@@ -206,10 +254,19 @@ local function updateOwn()
     local previousTime=type(previous)=='table' and integer(previous.timestamp,1,GetServerTime()+600) or nil
     local snapshot={timestamp=math.max(GetServerTime(),(previousTime or 0)+1),list=list}
     forceBroadcast=false
-    records[identity]=snapshot; pending=true; changed(); return true
+    records[identity]=snapshot; pending=true
+    if #removed>0 then
+        if type(store.pendingProfessionRemovals)~='table' then store.pendingProfessionRemovals={} end
+        if type(store.pendingProfessionRemovals[identity])~='table' then store.pendingProfessionRemovals[identity]={} end
+        for _,id in ipairs(removed) do
+            store.pendingProfessionRemovals[identity][id]=true
+            if OldKraken.WorkshopRecipes and type(OldKraken.WorkshopRecipes.ForgetProfession)=='function' then OldKraken.WorkshopRecipes:ForgetProfession(id,identity,profile) end
+        end
+    end
+    changed(); return true
 end
 local listener=CreateFrame('Frame')
-for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','SKILL_LINES_CHANGED','CHAT_MSG_SKILL','TRADE_SKILL_SHOW'}) do
+for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','SKILL_LINES_CHANGED','LEARNED_SPELL_IN_SKILL_LINE','CHAT_MSG_SKILL','TRADE_SKILL_SHOW'}) do
     pcall(listener.RegisterEvent,listener,event)
 end
 listener:SetScript('OnEvent',function(_,event)
@@ -220,9 +277,14 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then
     C_Timer.NewTicker(3,function()
         connect(); if not active then return end
         local now=GetTime()
-        if now>=nextScan then updateOwn(); nextScan=now+60 end
+        if now>=nextScan then local complete=updateOwn(); nextScan=now+(complete and 60 or (scanState=='checking' and 3 or 15)) end
         if queryPending and comm:SendProtocol('WKQUERY','') then queryPending=false end
         if pending and records[identity] and comm:SendProtocol('WKPROF',encode(records[identity])) then pending=false end
+        local owner=next(professionRelayDirty)
+        if owner and #comm.queue<=8 then
+            local payload=store.professionRelays[owner]
+            if not payload or owner==identity or comm:SendProtocol('WKRELAY',codec._pack({owner,payload})) then professionRelayDirty[owner]=nil end
+        end
     end)
 end
 
@@ -232,7 +294,7 @@ local function button(parent,text,x,y,width,callback,variant)
 end
 render=function()
     if not frame then return end
-    frame.heading:SetText(scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути майстрів.')
+    frame.heading:SetText(scanState=='checking' and 'Перевіряємо зміни професій…' or (scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути майстрів.'))
     local pageCount = 1
     frame.pageTotal = pageCount
 

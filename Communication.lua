@@ -48,7 +48,7 @@ end
 local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = true,
     UPDATE = true, QUERY = true, SYNC = true, BUMP = true,
     CEVENT = true, CVNEW = true, CVSTATE = true, CVCANCEL = true, CEVQUERY = true, CEVRSVP = true,
-    WKPROF = true, WKQUERY = true, WRQUERY = true, WRRESULT = true, WRBATCH = true, WRLEARN = true,
+    WKPROF = true, WKQUERY = true, WKRELAY = true, WRQUERY = true, WRRESULT = true, WRBATCH = true, WRLEARN = true, WRFORGET = true,
     WRQ = true, WRIDX = true, WRGET = true, WRPAGE = true,
     WORDER = true, WORELAY = true, WOREQ = true, WOPAY = true, WOERROR = true, WOQUERY = true,
     WOACT = true, WOPAYR = true, WORESULT = true, WORESR = true }

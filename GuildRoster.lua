@@ -350,7 +350,11 @@ local function CreateRow(index, parent)
             local name=OldKraken.Workshop:ProfessionInfo(self.professionID)
             GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(name)
             if self.native then GameTooltip:AddLine('Професія з ігрового ростера; рівень і рецепти невідомі.',1,1,1,true)
-            elseif self.rank then GameTooltip:AddLine('Рівень: '..tostring(self.rank)..'/'..tostring(self.maximum or '?'),1,1,1) end
+            elseif self.rank then
+                GameTooltip:AddLine('Рівень: '..tostring(self.rank)..'/'..tostring(self.maximum or '?'),1,1,1)
+                if self.relayed then GameTooltip:AddLine('Отримано через гільдію',1,1,1) end
+                if type(self.updated)=='number' and type(GetServerTime)=='function' and GetServerTime()-self.updated>604800 then GameTooltip:AddLine('Дані застарілі',1,0.7,0.25) end
+            end
             GameTooltip:AddLine('Натисніть, щоб переглянути збережені рецепти.',0.6,0.9,1,true); GameTooltip:Show()
         end)
         icon:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
@@ -478,7 +482,7 @@ function Roster:Render()
             local profession=professions[i]
             if profession then
                 local _,texture=OldKraken.Workshop:ProfessionInfo(profession.id)
-                icon.professionID,icon.memberName,icon.native,icon.rank,icon.maximum=profession.id,member.name,profession.native,profession.rank,profession.maximum
+                icon.professionID,icon.memberName,icon.native,icon.rank,icon.maximum,icon.updated,icon.relayed=profession.id,member.name,profession.native,profession.rank,profession.maximum,profession.timestamp,profession.relayed
                 icon.texture:SetTexture(texture); icon.texture:SetAlpha(profession.native and 0.55 or 1); icon:Show()
             else icon.professionID=nil; icon:Hide() end
         end

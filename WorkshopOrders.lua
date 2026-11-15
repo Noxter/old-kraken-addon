@@ -756,7 +756,7 @@ refresh=function()
         local state=displayStatus(o)=='expired' and (o.status=='assigned' and 'У роботі · прострочено' or 'Термін минув') or statusNames[o.status]
         local hasRecipe=(o.itemID or 0)>0 or (o.recipeID or 0)>0
         local masters=hasRecipe and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:FindMasters(o.itemID or 0,o.recipeID or 0) or {}
-        local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..')' end
+        local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..(GetServerTime()-masters[i].seen>604800 and ' · застаріло' or '')..')' end
         local known=hasRecipe and ('\nВідомі майстри: '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\nПошук за професією; знання рецепта не підтверджено.'
         local tally=scope and scope.orderDeliveryTallies[identity] and scope.orderDeliveryTallies[identity][selected]
         local progress=''

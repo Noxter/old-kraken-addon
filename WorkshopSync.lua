@@ -74,24 +74,25 @@ comm:RegisterHandler('WRGET',function(sender,_,payload)
     if jobs[jobKey] or size(jobs)>=10 then return end
     local chunks,chunk={},{}
     for _,r in ipairs(records) do
-        local fields={r.recipe,r.item,r.profession,r.seen,r.name,r.product}
+        local fields={r.recipe,r.item,r.profession,r.seen,r.name,r.product,r.deleted and 'D' or 'L'}
         local nextChunk={unpack(chunk)}; for _,v in ipairs(fields) do nextChunk[#nextChunk+1]=v end
         local probe={sender,f[2],string.format('%.0f',rev),999,999}; for _,v in ipairs(nextChunk) do probe[#probe+1]=v end
-        if #nextChunk>96 or #codec._pack(probe)>2300 then chunks[#chunks+1]=chunk; chunk=fields else chunk=nextChunk end
+        if #nextChunk>112 or #codec._pack(probe)>2300 then chunks[#chunks+1]=chunk; chunk=fields else chunk=nextChunk end
     end
     if #chunk>0 or #chunks==0 then chunks[#chunks+1]=chunk end
     jobs[jobKey]={target=sender,owner=f[2],rev=rev,chunks=chunks,pos=1,expires=GetTime()+21600}
 end)
 comm:RegisterHandler('WRPAGE',function(sender,_,payload)
     if not active or not text(sender,128) or sender==identity then return end
-    local f=codec._unpackFields(payload,101)
-    if not f or #f<5 or (#f-5)%6~=0 or f[1]~=identity or not text(f[2],128) then return end
+    local f=codec._unpackFields(payload,117)
+    if not f or #f<5 or (#f-5)%7~=0 or f[1]~=identity or not text(f[2],128) then return end
     local owner,rev,part,total=f[2],tonumber(f[3]),tonumber(f[4]),tonumber(f[5]); local pending=incoming[owner]
     if not pending or pending.provider~=sender or pending.rev~=rev or not int(part,1,5000) or not int(total,1,math.max(1,pending.count)) or part>total or (pending.total and pending.total~=total) or (#f==5 and pending.count>0) then return end
     if pending.parts[part] then return end
     local records={}
-    for i=6,#f,6 do
-        local r={recipe=tonumber(f[i]),item=tonumber(f[i+1]),profession=tonumber(f[i+2]),seen=tonumber(f[i+3]),name=f[i+4],product=f[i+5]}
+    for i=6,#f,7 do
+        if f[i+6]~='D' and f[i+6]~='L' then return end
+        local r={recipe=tonumber(f[i]),item=tonumber(f[i+1]),profession=tonumber(f[i+2]),seen=tonumber(f[i+3]),name=f[i+4],product=f[i+5],deleted=f[i+6]=='D' and true or nil}
         if not recipes:ValidateSnapshotRecord(r) then return end
         records[#records+1]=r
     end
@@ -106,9 +107,13 @@ comm:RegisterHandler('WRPAGE',function(sender,_,payload)
     local old=store.recipeSnapshotViews[owner]; local lastDirect=type(old)=='table' and tonumber(old.directRev) or 0
     lastDirect=lastDirect or 0
     if (sender==owner and rev<lastDirect) or (sender~=owner and type(old)=='table' and rev<=(tonumber(old.rev) or 0)) then incoming[owner]=nil; return end
-    if recipes:ImportSnapshot(owner,all,sender~=owner) then
+    local mayOverride=sender==owner and (type(old)~='table' or rev>=(tonumber(old.rev) or 0))
+    if recipes:ImportSnapshot(owner,all,sender~=owner,mayOverride) then
         store.recipeSnapshotViews[owner]={rev=rev,directRev=sender==owner and rev or lastDirect,relayed=sender~=owner}
-        if sender==owner then store.recipeDirectSnapshots[owner]={rev=rev,records=all} end
+        if sender==owner then store.recipeDirectSnapshots[owner]={rev=rev,records=all}
+        elseif type(store.recipeDirectSnapshots[owner])=='table' and (tonumber(store.recipeDirectSnapshots[owner].rev) or 0)<rev then
+            store.recipeDirectSnapshots[owner]=nil
+        end
     end
     incoming[owner]=nil
 end)
