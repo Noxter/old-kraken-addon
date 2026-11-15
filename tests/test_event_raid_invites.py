@@ -67,6 +67,22 @@ e.people['Waiting']='dps'; e.statuses.Waiting='pending'
 e.people['Already grouped']='tank'; e.statuses['Already grouped']='accepted'
 events:ShowEvent(key)
 assert(ui.inviteAll:IsShown())
+ui.roleButtons[1].scripts.OnClick()
+assert(ui.roleFilter=='tank')
+for _,row in ipairs(ui.signupRows) do if row:IsShown() then assert(e.people[row.member]=='tank') end end
+ui.roleButtons[3].scripts.OnClick()
+assert(ui.roleFilter=='dps')
+local foundReserve=false
+for _,row in ipairs(ui.signupRows) do
+    if row:IsShown() then
+        assert(e.people[row.member]=='dps')
+        if row.member=='Reserve' then foundReserve=true end
+        assert(row.roleStatus.text:find(':26:26:',1,true))
+    end
+end
+assert(foundReserve,'role filter must include reserve and pending applicants')
+ui.roleButtons[3].scripts.OnClick()
+assert(not ui.roleFilter)
 assert(not ui.activityCards:IsShown() and OldKrakenEventsDetailsScroll:IsShown())
 assert(ui.roleColumns[1].text:find('Already grouped',1,true))
 assert(ui.roleColumns[3].text:find('Accepted 1',1,true))

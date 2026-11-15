@@ -325,7 +325,10 @@ end
 function Events:InviteMember(key,name) return queueRaidInvites(key,{name}) end
 function Events:InviteAll(key)
     local e=events[key]; if not e then return false end
-    local names={}; for name in pairs(e.people) do names[#names+1]=name end; table.sort(names)
+    if window.filterEvent~=selected then window.filterEvent=selected; window.roleFilter=false end
+        local names={}; for name,role in pairs(e.people) do
+            if not window.roleFilter or role==window.roleFilter then names[#names+1]=name end
+        end; table.sort(names)
     return queueRaidInvites(key,names)
 end
 local raidInviteFrame=CreateFrame('Frame')
@@ -586,6 +589,9 @@ local function iconAction(button,row,x,texture,hint)
     end)
     button:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
 end
+local function largeRoleIcon(role,size)
+    return ((catalog.roleIcons[role] or '—'):gsub(':16:16:',':'..size..':'..size..':'))
+end
 local function roleColumnText(e,classes,role)
     local names={}
     for name,memberRole in pairs(e.people) do
@@ -593,7 +599,7 @@ local function roleColumnText(e,classes,role)
     end
     table.sort(names)
     local labels={tank='Танки',healer='Лікарі',dps='DPS',flex='Інші'}
-    local lines={(catalog.roleIcons[role] or '')..' |c'..roleColors[role]..labels[role]..' ('..#names..')|r'}
+    local lines={largeRoleIcon(role,24)..' |c'..roleColors[role]..labels[role]..' ('..#names..')|r'}
     for _,name in ipairs(names) do lines[#lines+1]=participantName(name,classes) end
     if #names==0 then lines[#lines+1]='|cff9ba9bc—|r' end
     return table.concat(lines,'\n'),#names
@@ -641,7 +647,10 @@ refresh=function()
     for _,row in ipairs(window.signupRows) do row:Hide() end
     if e and not e.cancelled then
         local classes=participantClasses()
-        local names={}; for name in pairs(e.people) do names[#names+1]=name end; table.sort(names)
+        if window.filterEvent~=selected then window.filterEvent=selected; window.roleFilter=false end
+        local names={}; for name,role in pairs(e.people) do
+            if not window.roleFilter or role==window.roleFilter then names[#names+1]=name end
+        end; table.sort(names)
         local pending=intents[selected]
         local lines={}
         for _,name in ipairs(names) do
@@ -660,15 +669,21 @@ refresh=function()
         for i,role in ipairs({'tank','healer','dps'}) do
             local column=window.roleColumns[i]
             column:ClearAllPoints(); column:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',(i-1)*window.detailsWidth/3,-8)
-            column:SetText(roleColumnText(e,classes,role)); column:Show()
+            local text=roleColumnText(e,classes,role)
+            column:SetText(text); column:Show()
+            local button=window.roleButtons[i]
+            button:SetSize(window.detailsWidth/3-7,math.max(30,column:GetStringHeight()))
+            button:SetShown(true)
+            if window.roleFilter==role then button:LockHighlight() else button:UnlockHighlight() end
             columnHeight=math.max(columnHeight,column:GetStringHeight())
         end
         local flexText,flexCount=roleColumnText(e,classes,'flex')
         window.roleFlex:ClearAllPoints(); window.roleFlex:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-columnHeight-18)
         window.roleFlex:SetText(flexText); window.roleFlex:SetShown(flexCount>0)
+        window.flexButton:SetShown(flexCount>0); window.flexButton:SetHeight(math.max(30,window.roleFlex:GetStringHeight()))
         local summaryHeight=columnHeight+18+(flexCount>0 and window.roleFlex:GetStringHeight()+8 or 0)
         window.participantHeader:ClearAllPoints(); window.participantHeader:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-summaryHeight-14)
-        window.participantHeader:SetText('Заявки та учасники'); window.participantHeader:Show()
+        window.participantHeader:SetText('Заявки та учасники'..(window.roleFilter and (' · '..roles[window.roleFilter]) or ' · усі')); window.participantHeader:Show()
         local height=window.detailsTitle:GetStringHeight()+8+window.details:GetStringHeight()+14+window.roleSummary:GetStringHeight()+summaryHeight+14+window.participantHeader:GetStringHeight()+8
         do
             for i,name in ipairs(names) do
@@ -676,7 +691,7 @@ refresh=function()
                 if not row then
                     row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth,32)
                     row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-174,26); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
-                    row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-168,-3); row.roleStatus:SetSize(24,26); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
+                    row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-168,-3); row.roleStatus:SetSize(28,28); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-118,30); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
                     row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
@@ -695,7 +710,7 @@ refresh=function()
                 end
                 row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*32)
                 local role=e.people[name]
-                row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(catalog.roleIcons[role] or '—')
+                row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(largeRoleIcon(role,26))
                 local tint=statusColors[e.statuses[name] or 'accepted'] or statusColors.pending
                 row.state:SetVertexColor(tonumber(tint:sub(3,4),16)/255,tonumber(tint:sub(5,6),16)/255,tonumber(tint:sub(7,8),16)/255)
                 row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
@@ -712,7 +727,7 @@ refresh=function()
         window.roleMenu:SetShown(canJoin)
         window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
     else
-        window.roleSummary:Hide(); window.roleFlex:Hide(); for _,column in ipairs(window.roleColumns) do column:Hide() end
+        window.roleSummary:Hide(); window.roleFlex:Hide(); window.flexButton:Hide(); for _,button in ipairs(window.roleButtons) do button:Hide() end; for _,column in ipairs(window.roleColumns) do column:Hide() end
         window.participantHeader:Hide(); window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
         window.details:SetText('Оберіть подію зі списку.'); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
         window.detailsContent:SetHeight(250)
@@ -787,13 +802,29 @@ local function createWindow(parent)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(detailsWidth,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
     f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true)
     f.roleSummary=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleSummary:SetWidth(detailsWidth); f.roleSummary:SetJustifyH('LEFT')
-    f.roleColumns={}
+    f.roleColumns={}; f.roleButtons={}
+    local function roleButton(column,role)
+        local button=CreateFrame('Button',nil,f.detailsContent)
+        button:SetPoint('TOPLEFT',column,'TOPLEFT',0,0)
+        button:SetHighlightTexture('Interface\\QuestFrame\\UI-QuestTitleHighlight')
+        button:SetScript('OnClick',function()
+            f.roleFilter=f.roleFilter~=role and role or false
+            scroll:SetVerticalScroll(0); refresh()
+        end)
+        button:SetScript('OnEnter',function(self)
+            if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText('Фільтр: '..roles[role]); GameTooltip:AddLine('Повторний клік — показати всіх',1,1,1); GameTooltip:Show() end
+        end)
+        button:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        return button
+    end
     for i=1,3 do
         local column=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight')
-        column:SetWidth(detailsWidth/3-7); column:SetJustifyH('LEFT'); column:SetWordWrap(false); column:SetSpacing(5)
+        column:SetWidth(detailsWidth/3-7); column:SetJustifyH('LEFT'); column:SetWordWrap(true); column:SetSpacing(7)
         f.roleColumns[i]=column
+        f.roleButtons[i]=roleButton(column,({'tank','healer','dps'})[i])
     end
     f.roleFlex=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleFlex:SetWidth(detailsWidth); f.roleFlex:SetJustifyH('LEFT')
+    f.flexButton=roleButton(f.roleFlex,'flex'); f.flexButton:SetWidth(detailsWidth)
     f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT')
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,-395,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
