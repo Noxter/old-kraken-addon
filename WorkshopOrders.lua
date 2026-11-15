@@ -934,14 +934,9 @@ local function createWindow(parent)
     end)
     local form=f
     if embedded then
-        form=CreateFrame('Frame','OldKrakenWorkshopOrderCreateFrame',UIParent,'BasicFrameTemplateWithInset')
-        table.insert(UISpecialFrames,'OldKrakenWorkshopOrderCreateFrame')
-        form:SetSize(720,320); form:SetPoint('CENTER'); form:SetClampedToScreen(true); form:EnableMouse(true)
-        form:SetFrameStrata('DIALOG'); form:SetToplevel(true)
-        OldKraken.UIStyle.Window(form)
-        if form.TitleText then form.TitleText:SetText('Нове замовлення') end
+        form=CreateFrame('Frame','OldKrakenWorkshopOrderCreateFrame',parent)
+        form:SetSize(720,320); form:SetPoint('TOPLEFT',parent,'TOPLEFT',0,-65); form:EnableMouse(true)
         f.createForm=form
-        parent:HookScript('OnHide',function() form:Hide() end)
     end
     local function formY(standalone,compact) return embedded and compact or standalone end
     local heading=form:CreateFontString(nil,'OVERLAY','GameFontNormal')
@@ -958,7 +953,7 @@ local function createWindow(parent)
     button(form,'Обрати рецепт',embedded and 570 or 560,formY(-438,-64),embedded and 130 or 160,function()
         if not OldKraken.WorkshopRecipes then showError(); return end
         OldKraken.WorkshopRecipes:Choose(function(r)
-            if not form:IsShown() or not professionNames[r.profession] then return end
+            if not professionNames[r.profession] then return end
             profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
             form.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe}
         end)
@@ -972,7 +967,7 @@ local function createWindow(parent)
         if not professionNames[profession] then print('Old Kraken: оберіть професію або рецепт.'); return end
         if create(form.item:GetText(),form.quantity:GetText(),form.reward:GetText(),form.note:GetText(),chosenRecipe) then
             form.item:SetText(''); form.note:SetText(''); profession=0; UIDropDownMenu_SetText(professionMenu,professionChoices[0])
-            if embedded then form:Hide() end
+            if embedded and OldKraken.Workshop then OldKraken.Workshop:Show('orders') end
             print('Old Kraken: замовлення збережено та поставлено в чергу.')
         else showError() end
     end,'primary')
@@ -996,14 +991,18 @@ function Orders:ShowRecipe(r)
     if type(r)~='table' or not professionNames[r.profession] or not int(r.recipe,1,100000000) or not int(r.item,0,100000000) then
         print('Old Kraken: замовлення для цієї професії недоступне.'); return
     end
-    self:Show(); if not active or not window then return end
+    connect(); if not active then return end
+    if OldKraken.UIHub and OldKraken.Workshop then
+        OldKraken.UIHub:ShowPage('workshop')
+    else self:Show() end
+    if not window then return end
     local form=window.orderForm
     if form~=window and not self:OpenCreateForm() then return end
     profession=r.profession
     UIDropDownMenu_SetText(window.professionMenu,professionNames[profession])
     form.item:SetText(r.product~='' and r.product or r.name)
     chosenRecipe={item=r.item,recipe=r.recipe}
-    form:Raise()
+    if not OldKraken.UIHub then form:Raise() end
 end
 function Orders:CreatePanel(parent)
     if not window then window=createWindow(parent) end
@@ -1017,7 +1016,11 @@ function Orders:OpenCreateForm()
         print('Old Kraken: форма нового замовлення недоступна; відкрийте вкладку замовлень у Hub.')
         return false
     end
-    window.createForm:Show()
+    if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Navigate('orderCreate')
+    else window.createForm:Show() end
     return true
+end
+function Orders:ShowCreatePanel(show)
+    if window and window.createForm then window.createForm:SetShown(show) end
 end
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() changed() end)

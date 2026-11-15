@@ -1,5 +1,5 @@
 -- Guild profession directory. Each character publishes only their own snapshot.
-local Workshop = {}
+local Workshop = {currentView='professions', navigationStack={}}
 OldKraken.Workshop = Workshop
 local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
 local professions = {
@@ -145,6 +145,8 @@ local function connect()
     end
     local key=realm..'\001'..guild
     if active and profile==key and identity==name then return end
+    Workshop.navigationStack={}; Workshop.currentView='professions'
+    if frame and frame.professionView and Workshop.SetView then Workshop:SetView('professions') end
     local db=OldKraken.DB
     if type(db.workshop)~='table' then db.workshop={} end
     if type(db.workshop.guilds)~='table' then db.workshop.guilds={} end
@@ -327,6 +329,11 @@ local function createWindow(parent)
             f.ordersView=CreateFrame('Frame',nil,f); f.ordersView:Hide()
         end
         content=f.professionView
+        if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.CreatePanel then
+            f.recipesView=OldKraken.WorkshopRecipes:CreatePanel(f)
+        else
+            f.recipesView=false
+        end
         f.professionTab=button(f,'Професії',18,-38,110,function() Workshop:Show('professions') end)
         f.ordersTab=button(f,'Замовлення',136,-38,120,function()
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
@@ -341,6 +348,8 @@ local function createWindow(parent)
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:OpenCreateForm() end
         end,'primary')
         f.newOrder:Hide()
+        f.back=button(f,'‹ Назад',570,-38,130,function() Workshop:Back() end)
+        f.back:Hide()
     end
     button(content,'Оновити',590,y(-43),120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
     f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-52))
@@ -378,18 +387,46 @@ end
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() if frame and frame:IsShown() then render() end end)
 function Workshop:SetView(view)
     if not frame or not frame.professionView then return end
-    local showOrders=view=='orders'
-    frame.professionView:SetShown(not showOrders)
-    if frame.ordersView then frame.ordersView:SetShown(showOrders) end
+    self.currentView=view
+    local showOrders=view=='orders' or view=='orderCreate'
+    if view=='recipes' then
+        for i=#self.navigationStack,1,-1 do
+            local previous=self.navigationStack[i].view
+            if previous=='orders' or previous=='orderCreate' then showOrders=true; break end
+            if previous=='professions' then break end
+        end
+    end
+    frame.professionView:SetShown(view=='professions')
+    if frame.ordersView then frame.ordersView:SetShown(view=='orders') end
+    if frame.recipesView then frame.recipesView:SetShown(view=='recipes') end
+    if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders.ShowCreatePanel then OldKraken.WorkshopOrders:ShowCreatePanel(view=='orderCreate') end
     frame.professionTab.activeBar:SetShown(not showOrders)
     frame.ordersTab.activeBar:SetShown(showOrders)
-    if frame.newOrder then frame.newOrder:SetShown(showOrders) end
-    if showOrders and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:RefreshEmbedded() end
+    if frame.newOrder then frame.newOrder:SetShown(view=='orders') end
+    if frame.back then frame.back:SetShown(#self.navigationStack>0) end
+    if view=='orders' and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:RefreshEmbedded() end
+    if view=='recipes' and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.RefreshPanel then OldKraken.WorkshopRecipes:RefreshPanel() end
+end
+function Workshop:Navigate(view)
+    local entry={view=self.currentView}
+    if entry.view=='recipes' and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.CaptureView then
+        entry.recipes=OldKraken.WorkshopRecipes:CaptureView()
+    end
+    self.navigationStack[#self.navigationStack+1]=entry
+    if #self.navigationStack>20 then table.remove(self.navigationStack,1) end
+    self:SetView(view)
+end
+function Workshop:Back()
+    local entry=table.remove(self.navigationStack)
+    if not entry then return end
+    self:SetView(entry.view)
+    if entry.recipes and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:RestoreView(entry.recipes) end
 end
 function Workshop:Show(view)
     connect(); if not active then print('Old Kraken: майстерня доступна після входу до гільдії.'); return end
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('workshop')
+        self.navigationStack={}
         self:SetView(view or 'professions')
     else
         if not frame then frame=createWindow() end

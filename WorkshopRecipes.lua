@@ -13,6 +13,8 @@ local frame,rows,offset,resultSet=nil,{},0,{}
 local PAGE_SIZE=10
 local selectRecipe,selectedEntry,viewOwner
 local professionContext, selectedMaster, tab, mastersOnline = nil, nil, 'recipes', false
+local restoringView=false
+local resultQuery
 local recipeChanged=false
 local scanStatus='Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
 local render, matches
@@ -309,6 +311,7 @@ local function resolveProduct(r)
     end
 end
 local function addCached(query)
+    resultQuery=query
     resultSet={}
     local limit=query:match('^prof:%d+$') and 5000 or 500
     for name,items in pairs(people) do
@@ -663,10 +666,17 @@ render=function()
     end
     resizeInfo()
 end
-local function createWindow()
-    local f=CreateFrame('Frame','OldKrakenWorkshopRecipesFrame',UIParent,'BasicFrameTemplateWithInset')
-    table.insert(UISpecialFrames,'OldKrakenWorkshopRecipesFrame'); f:SetSize(750,470); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
-    f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); OldKraken.UIStyle.Window(f)
+local function createWindow(parent)
+    local f
+    if parent then
+        f=CreateFrame('Frame','OldKrakenWorkshopRecipesFrame',parent)
+        f:SetSize(750,470); f:SetPoint('TOPLEFT',parent,'TOPLEFT',0,-65)
+    else
+        f=CreateFrame('Frame','OldKrakenWorkshopRecipesFrame',UIParent,'BasicFrameTemplateWithInset')
+        table.insert(UISpecialFrames,'OldKrakenWorkshopRecipesFrame'); f:SetSize(750,470); f:SetPoint('CENTER'); f:SetMovable(true); f:SetClampedToScreen(true)
+        f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); OldKraken.UIStyle.Window(f)
+    end
+    f:EnableMouse(true)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук рецептів') end
     local function changeTab(nextTab)
         tab=nextTab; viewOwner=nil
@@ -681,7 +691,7 @@ local function createWindow()
     f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(f.query)
     f.query:SetSize(300,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-74); f.query:SetAutoFocus(false)
     f.searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',455,-49)
-    f.query:SetScript('OnTextChanged',function() if professionContext then selectedEntry=nil; selectedMaster=nil; offset=0; render() end end)
+    f.query:SetScript('OnTextChanged',function() if professionContext and not restoringView then selectedEntry=nil; selectedMaster=nil; offset=0; render() end end)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local function submitSearch()
         if professionContext then offset=0; render(); f.query:ClearFocus(); return end
@@ -696,7 +706,9 @@ local function createWindow()
             f.infoScroll:SetVerticalScroll(0)
             if self.entry and professionContext and tab=='masters' and not selectRecipe then selectedMaster=self.entry; render()
             elseif self.entry and selectRecipe then
-                local callback=selectRecipe; selectRecipe=nil; f:Hide(); callback(self.entry.record)
+                local callback=selectRecipe; selectRecipe=nil
+                if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Back() else f:Hide() end
+                callback(self.entry.record)
             elseif self.entry then selectedEntry=self.entry; render() end
         end)
         rows[i].icon=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].icon:SetSize(21,21); rows[i].icon:SetPoint('LEFT',rows[i],'LEFT',3,0)
@@ -716,6 +728,7 @@ local function createWindow()
     f.order=button(f,'Замовити',570,-410,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
     f.masterRecipes=button(f,'Рецепти майстра',570,-410,160,function()
         if not selectedMaster then return end
+        if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Navigate('recipes') end
         viewOwner=selectedMaster.name; tab='recipes'; selectedEntry=nil; selectedMaster=nil; offset=0; f.query:SetText(''); render()
     end)
     button(f,'‹',20,-394,44,function() offset=offset-1; render() end)
@@ -723,12 +736,43 @@ local function createWindow()
     button(f,'›',130,-394,44,function() offset=offset+1; render() end)
     f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-438); f.status:SetWidth(410); f.status:SetJustifyH('LEFT')
     f.status:SetText(scanStatus)
-    f:SetScript('OnHide',function() selectRecipe=nil end)
+    if not parent then f:SetScript('OnHide',function() selectRecipe=nil end) end
     f:Hide(); return f
+end
+function Recipes:CreatePanel(parent)
+    if not frame then frame=createWindow(parent) end
+    return frame
+end
+function Recipes:RefreshPanel() render() end
+function Recipes:CaptureView()
+    return {profession=professionContext,master=selectedMaster,tab=tab,online=mastersOnline,
+        selected=selectedEntry,owner=viewOwner,selectRecipe=selectRecipe,offset=offset,
+        results=resultSet,resultQuery=resultQuery,activeQuery=activeQuery,query=frame and frame.query:GetText() or '',status=frame and frame.status:GetText() or ''}
+end
+function Recipes:RestoreView(state)
+    professionContext,selectedMaster,tab,mastersOnline=state.profession,state.master,state.tab,state.online
+    selectedEntry,viewOwner,selectRecipe,offset,resultSet,resultQuery=state.selected,state.owner,state.selectRecipe,state.offset,state.results,state.resultQuery
+    activeQuery=state.activeQuery and GetTime()<=state.activeQuery.untilTime and state.activeQuery or nil
+    if resultQuery then addCached(resultQuery) end
+    if selectedEntry then
+        local stored=people[selectedEntry.owner] and people[selectedEntry.owner][selectedEntry.record.recipe]
+        selectedEntry=validRecord(stored) and {owner=selectedEntry.owner,record=stored} or nil
+    end
+    if selectedMaster and professionContext and OldKraken.Workshop then
+        local previousName=selectedMaster.name; selectedMaster=nil
+        for _,master in ipairs(OldKraken.Workshop:GetProfessionMasters(professionContext)) do
+            if master.name==previousName then selectedMaster=master; break end
+        end
+    end
+    restoringView=true; frame.query:SetText(state.query or ''); restoringView=false
+    frame.status:SetText(state.status or ''); render()
 end
 function Recipes:Show()
     connect(); if not active then print('Old Kraken: пошук рецептів доступний членам гільдії.'); return end
-    if not frame then frame=createWindow() end
+    if OldKraken.UIHub and OldKraken.Workshop then
+        OldKraken.UIHub:ShowPage('workshop')
+        OldKraken.Workshop:Navigate('recipes')
+    elseif not frame then frame=createWindow() end
     professionContext,selectedMaster,tab,viewOwner,selectRecipe=nil,nil,'recipes',nil,nil
     frame:Show(); render()
 end
@@ -808,7 +852,7 @@ end
 function Recipes:Choose(callback)
     if type(callback)~='function' then return end
     self:Show(); if not active or not frame then return end
-    selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; offset=0
+    selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; resultQuery=nil; activeQuery=nil; offset=0
     for name,items in pairs(people) do
         if safeText(name,1,128) and type(items)=='table' then
             for _,r in pairs(items) do
