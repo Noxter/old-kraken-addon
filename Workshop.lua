@@ -232,7 +232,23 @@ local function button(parent,text,x,y,width,callback,variant)
 end
 render=function()
     if not frame then return end
-    frame.heading:SetText(scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути рецепти та майстрів.')
+    frame.heading:SetText(scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути майстрів.')
+    local pageCount = 1
+    frame.pageTotal = pageCount
+
+    if active and store and type(store.records)=='table' then
+        local total = 0
+        for _,record in pairs(store.records) do
+            if type(record)=='table' and type(record.list)=='table' then total = total + #record.list end
+        end
+        if total > 0 then pageCount = math.max(1, math.ceil(total / 12)) end
+    end
+    frame.pageTotal = pageCount
+    frame.pageIndex = math.max(1, math.min(frame.pageIndex or 1, pageCount))
+    if frame.page then frame.page:SetText(string.format('%d / %d', frame.pageIndex, pageCount)) end
+    if frame.previousPage then frame.previousPage:SetShown(pageCount > 1 and frame.pageIndex > 1) end
+    if frame.nextPage then frame.nextPage:SetShown(pageCount > 1 and frame.pageIndex < pageCount) end
+
     local summaries=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:GetProfessionSummaries() or {}
     for _,card in ipairs(frame.professionCards) do
         local summary=summaries[card.profession]
@@ -282,6 +298,16 @@ local function createWindow(parent)
     end
     button(content,'Оновити',590,y(-43),120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
     f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-52))
+    f.pageIndex=1
+    f.page=content:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.page:SetPoint('TOPLEFT',content,'TOPLEFT',418,y(-44)); f.page:SetWidth(64); f.page:SetText('1 / 1')
+    f.previousPage=button(content,'<',362,y(-42),24,function()
+        if f.pageIndex>1 then f.pageIndex=f.pageIndex-1; render() end
+    end)
+    f.previousPage:Hide()
+    f.nextPage=button(content,'>',494,y(-42),24,function()
+        if f.pageIndex<f.pageTotal then f.pageIndex=f.pageIndex+1; render() end
+    end)
+    f.nextPage:Hide()
     f.professionCards={}
     for i,p in ipairs(professions) do
         local entry=p; local col=(i-1)%3; local line=math.floor((i-1)/3)
@@ -299,8 +325,9 @@ local function createWindow(parent)
         local shade=card:CreateTexture(nil,'BACKGROUND',nil,2); shade:SetAllPoints(card); shade:SetColorTexture(0,0,0,0.4)
         local icon=card:CreateTexture(nil,'ARTWORK'); icon:SetSize(32,32); icon:SetPoint('LEFT',card,'LEFT',6,0); icon:SetTexture(image and image[1] or 134400)
         local name=card:CreateFontString(nil,'OVERLAY','GameFontNormal'); name:SetPoint('TOPLEFT',card,'TOPLEFT',45,-5); name:SetWidth(180); name:SetJustifyH('LEFT'); name:SetWordWrap(false); name:SetText(entry.name)
-        card.detail=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); card.detail:SetPoint('TOPLEFT',card,'TOPLEFT',45,-24); card.detail:SetWidth(180); card.detail:SetJustifyH('LEFT'); card.detail:SetWordWrap(false)
-        card:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(entry.name); GameTooltip:AddLine('Натисніть, щоб переглянути рецепти гільдії.',1,1,1,true); GameTooltip:Show() end end)
+        local detail=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); detail:SetPoint('TOPLEFT',card,'TOPLEFT',45,-24); detail:SetWidth(180); detail:SetJustifyH('LEFT'); detail:SetWordWrap(false)
+        card.detail=detail
+        card:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(entry.name); GameTooltip:AddLine('Натисніть, щоб переглянути майстрів'); GameTooltip:Show() end end)
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         f.professionCards[i]=card
     end
@@ -308,7 +335,7 @@ local function createWindow(parent)
         button(content,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
     end
     button(content,'Пошук рецептів',embedded and 20 or 175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
-    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',200,y(-321)); note:SetText('Відкрийте професії, щоб зчитати рецепти.')
+    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',200,y(-321)); note:SetText('Відкрийте професії, щоб переглянути майстрів.')
     content:HookScript('OnShow',render)
     f:Hide(); return f
 end
