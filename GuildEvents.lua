@@ -12,7 +12,7 @@ local codeStatus = {P='pending',A='accepted',R='reserve',D='rejected'}
 local active, identity, profile, storage = false, nil, nil, nil
 local events, directEvents, relayEvents, dirty, intents, newDirty, relayDirty = {}, {}, {}, {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
-local relayStats = {invalid_payload=0, rejected_relay_cancelled=0, rejected_relay_sender=0, rejected_relay_mismatch=0, rejected_relay_stale=0, rejected_relay_equivocation=0, rejected_direct_stale=0, rejected_direct_equivocation=0}
+local relayStats = {invalid_payload=0, rejected_relay_cancelled=0, rejected_relay_sender=0, rejected_relay_mismatch=0, rejected_relay_stale=0, rejected_relay_equivocation=0, rejected_direct_stale=0, rejected_direct_equivocation=0, rejected_capacity=0}
 local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
 local page = 1
 local EVENTS_PER_PAGE = 4
@@ -113,6 +113,7 @@ local function receiveEvent(sender, _, payload, isAnnouncement, isRelay, cancell
         if direct and (direct.when~=e.when or direct.kind~=e.kind or direct.title~=e.title
             or direct.description~=e.description or direct.size~=e.size or direct.activity~=e.activity) then relayStats.rejected_relay_mismatch=relayStats.rejected_relay_mismatch+1; return end
         local previous = relayEvents[key]
+        if not direct and not previous and not events[key] and count(events)>=100 then relayStats.rejected_capacity=relayStats.rejected_capacity+1; return end
         if previous then
             if previous.rev > e.rev then relayStats.rejected_relay_stale=relayStats.rejected_relay_stale+1; return end
             if previous.rev == e.rev and encode(previous) ~= payload then relayStats.rejected_relay_equivocation=relayStats.rejected_relay_equivocation+1; return end
@@ -139,8 +140,8 @@ local function receiveEvent(sender, _, payload, isAnnouncement, isRelay, cancell
             end
             return
         end
-    elseif count(directEvents) >= 100 then
-        return
+    elseif not events[key] and count(events) >= 100 then
+        relayStats.rejected_capacity=relayStats.rejected_capacity+1; return
     end
 
     e.relayed = nil
@@ -671,7 +672,7 @@ end
 function Events:PrintRelayDiagnostics()
     local s=self:GetRelayDiagnostics()
     print('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
-    for _,reason in ipairs({'invalid_payload','rejected_relay_cancelled','rejected_relay_sender','rejected_relay_mismatch','rejected_relay_stale','rejected_relay_equivocation','rejected_direct_stale','rejected_direct_equivocation'}) do
+    for _,reason in ipairs({'invalid_payload','rejected_relay_cancelled','rejected_relay_sender','rejected_relay_mismatch','rejected_relay_stale','rejected_relay_equivocation','rejected_direct_stale','rejected_direct_equivocation','rejected_capacity'}) do
         print('  '..reason..': '..s[reason])
     end
 end
