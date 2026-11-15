@@ -57,6 +57,10 @@ def client(name, records):
     return lua
 
 
+def pack(lua, values):
+    return lua.globals().OldKraken.GroupFinder._pack(lua.table_from(values))
+
+
 def send_packets(sender, receiver, packets):
     for packet in packets:
         handler = receiver.globals().handlers[packet["kind"]]
@@ -166,14 +170,14 @@ def test_relayed_snapshot_is_not_promoted_to_direct_authority():
 def test_invalid_snapshot_index_and_page_are_ignored():
     lua = client("Bob", [])
     codec = lua.globals().OldKraken.GroupFinder
-    invalid_index = codec._pack(["Mallory", "Alice", "7", "1"])
+    invalid_index = pack(lua, ["Mallory", "Alice", "7", "1"])
     lua.globals().handlers["WRIDX"]("Mallory Realm", "bad", invalid_index)
     assert lua.globals().imported["Alice"] is None
 
     # No index was accepted, so a page from an unrelated sender has no pending
     # transfer to attach to and must not import anything.
-    bad_page = codec._pack(["Bob", "Alice", "7", "1", "1", "123", "456", "171",
-                            "1700000000", "Recipe", "Potion", "L"])
+    bad_page = pack(lua, ["Bob", "Alice", "7", "1", "1", "123", "456", "171",
+                          "1700000000", "Recipe", "Potion", "L"])
     lua.globals().handlers["WRPAGE"]("Mallory Realm", "bad", bad_page)
     assert lua.globals().imported["Alice"] is None
 
