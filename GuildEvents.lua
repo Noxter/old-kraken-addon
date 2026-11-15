@@ -12,6 +12,7 @@ local codeStatus = {P='pending',A='accepted',R='reserve',D='rejected'}
 local active, identity, profile, storage = false, nil, nil, nil
 local events, directEvents, relayEvents, dirty, intents, newDirty, relayDirty = {}, {}, {}, {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
+local relayStats = {invalid_payload=0, rejected_relay_cancelled=0, rejected_relay_sender=0, rejected_relay_mismatch=0, rejected_relay_stale=0, rejected_relay_equivocation=0, rejected_direct_stale=0, rejected_direct_equivocation=0}
 local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
 local page = 1
 local EVENTS_PER_PAGE = 4
@@ -100,20 +101,21 @@ local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
 local function receiveEvent(sender, _, payload, isAnnouncement, isRelay, cancellationOnly)
     if not active then return end
     local e = decode(sender, payload, isRelay)
-    if not e then return end
+    if not e then relayStats.invalid_payload=relayStats.invalid_payload+1; return end
     local key = eventKey(e.owner,e.id)
 
     if isRelay then
         -- A relay is display-only: never accept cancellations or announcements
         -- through it, and never let it replace a directly received owner snapshot.
-        if cancellationOnly or isAnnouncement or e.cancelled or sender == e.owner or e.owner == identity then return end
+        if cancellationOnly or isAnnouncement or e.cancelled then relayStats.rejected_relay_cancelled=relayStats.rejected_relay_cancelled+1; return end
+        if sender == e.owner or e.owner == identity then relayStats.rejected_relay_sender=relayStats.rejected_relay_sender+1; return end
         local direct = directEvents[key]
         if direct and (direct.when~=e.when or direct.kind~=e.kind or direct.title~=e.title
-            or direct.description~=e.description or direct.size~=e.size or direct.activity~=e.activity) then return end
+            or direct.description~=e.description or direct.size~=e.size or direct.activity~=e.activity) then relayStats.rejected_relay_mismatch=relayStats.rejected_relay_mismatch+1; return end
         local previous = relayEvents[key]
         if previous then
-            if previous.rev > e.rev then return end
-            if previous.rev == e.rev and encode(previous) ~= payload then return end
+            if previous.rev > e.rev then relayStats.rejected_relay_stale=relayStats.rejected_relay_stale+1; return end
+            if previous.rev == e.rev and encode(previous) ~= payload then relayStats.rejected_relay_equivocation=relayStats.rejected_relay_equivocation+1; return end
         end
         e.relayed = true
         e.ownerRev = direct and direct.rev or 0
@@ -126,9 +128,9 @@ local function receiveEvent(sender, _, payload, isAnnouncement, isRelay, cancell
 
     local old = directEvents[key]
     if old then
-        if old.rev > e.rev then return end
+        if old.rev > e.rev then relayStats.rejected_direct_stale=relayStats.rejected_direct_stale+1; return end
         if old.rev == e.rev then
-            if encode(old) ~= payload then return end
+            if encode(old) ~= payload then relayStats.rejected_direct_equivocation=relayStats.rejected_direct_equivocation+1; return end
             local intent = intents[key]
             if intent and ((intent.role == 'leave' and not old.people[identity])
                 or (intent.role ~= 'leave' and old.people[identity] == intent.role and old.statuses[identity] ~= 'rejected')
@@ -660,6 +662,20 @@ if OldKraken.UIHub then
         return window
     end)
 end
+function Events:GetRelayDiagnostics()
+    local snapshot={}
+    for reason,value in pairs(relayStats) do snapshot[reason]=value end
+    return snapshot
+end
+
+function Events:PrintRelayDiagnostics()
+    local s=self:GetRelayDiagnostics()
+    print('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
+    for _,reason in ipairs({'invalid_payload','rejected_relay_cancelled','rejected_relay_sender','rejected_relay_mismatch','rejected_relay_stale','rejected_relay_equivocation','rejected_direct_stale','rejected_direct_equivocation'}) do
+        print('  '..reason..': '..s[reason])
+    end
+end
+
 function Events:AlertsEnabled()
     local settings=OldKraken.DB and OldKraken.DB.settings
     return type(settings)=='table' and settings.guildEventNotifications~=false
