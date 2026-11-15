@@ -265,6 +265,79 @@ function Events:Create(title, description, when, kind, size, activity)
     local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},statuses={},versions={},activity=activity}
     local key=eventKey(identity,id); events[key]=e; directEvents[key]=e; dirty[key]=true; newDirty[key]=true; save(); fire(); return true
 end
+local raidInvites
+local function alreadyGrouped(name)
+    return (type(UnitInRaid)=='function' and UnitInRaid(name)) or (type(UnitInParty)=='function' and UnitInParty(name))
+end
+local function canLeadInvites()
+    local size=type(GetNumGroupMembers)=='function' and GetNumGroupMembers() or 0
+    if not size or size==0 then return true end
+    if type(UnitIsGroupLeader)~='function' then return true end
+    return UnitIsGroupLeader('player') or (type(UnitIsGroupAssistant)=='function' and UnitIsGroupAssistant('player'))
+end
+function Events:PumpRaidInvites()
+    local job=raidInvites
+    if not job then return end
+    local e=events[job.key]
+    if not active or not e or e.owner~=identity or e.cancelled or e.kind~='raid' or GetTime()>job.expires then raidInvites=nil; return end
+    if type(InCombatLockdown)=='function' and InCombatLockdown() then return end
+    if not canLeadInvites() then raidInvites=nil; print('Old Kraken: для запрошень потрібні права лідера або помічника рейду.'); return end
+    local inRaid=type(IsInRaid)=='function' and IsInRaid()
+    local count=type(GetNumGroupMembers)=='function' and GetNumGroupMembers() or 0
+    if not inRaid and count and count>0 then
+        if not job.convertAt or GetTime()-job.convertAt>=5 then
+            local convert=C_PartyInfo and C_PartyInfo.ConvertToRaid or ConvertToRaid
+            if type(convert)~='function' then raidInvites=nil; print('Old Kraken: перетворіть групу на рейд вручну.'); return end
+            local ok,result=pcall(convert); job.convertAt=GetTime()
+            if not ok or result==false then raidInvites=nil; print('Old Kraken: не вдалося перетворити групу на рейд.'); end
+        end
+        return
+    end
+    if inRaid and count>=40 then raidInvites=nil; return end
+    if not inRaid and job.sentSolo>=4 then return end
+    while job.index<=#job.names do
+        local name=job.names[job.index]; job.index=job.index+1
+        if e.people[name] and e.statuses[name]=='accepted' and name~=identity and not alreadyGrouped(name) then
+            local invite=C_PartyInfo and C_PartyInfo.InviteUnit or InviteUnit
+            if type(invite)~='function' then raidInvites=nil; print('Old Kraken: API запрошень недоступний.'); return end
+            local ok,result=pcall(invite,name)
+            if not ok or result==false then raidInvites=nil; print('Old Kraken: не вдалося надіслати запрошення в рейд.'); return end
+            if not inRaid then job.sentSolo=job.sentSolo+1 end
+            return
+        end
+    end
+    if inRaid then raidInvites=nil end
+end
+local function queueRaidInvites(key,names)
+    local e=events[key]
+    if not active or not e or e.owner~=identity or e.cancelled or e.kind~='raid' or not canLeadInvites() then return false end
+    if raidInvites and raidInvites.key~=key then return false end
+    if not raidInvites then raidInvites={key=key,names={},seen={},index=1,sentSolo=0,expires=GetTime()+300} end
+    local added=0
+    for _,name in ipairs(names) do
+        if name~=identity and e.people[name] and e.statuses[name]=='accepted' and not alreadyGrouped(name) and not raidInvites.seen[name] then
+            raidInvites.names[#raidInvites.names+1]=name; raidInvites.seen[name]=true; added=added+1
+        end
+    end
+    Events:PumpRaidInvites()
+    return added>0
+end
+function Events:InviteMember(key,name) return queueRaidInvites(key,{name}) end
+function Events:InviteAll(key)
+    local e=events[key]; if not e then return false end
+    local names={}; for name in pairs(e.people) do names[#names+1]=name end; table.sort(names)
+    return queueRaidInvites(key,names)
+end
+local raidInviteFrame=CreateFrame('Frame')
+raidInviteFrame:RegisterEvent('GROUP_ROSTER_UPDATE')
+raidInviteFrame:SetScript('OnEvent',function() Events:PumpRaidInvites() end)
+local inviteElapsed=0
+raidInviteFrame:SetScript('OnUpdate',function(_,elapsed)
+    if not raidInvites then inviteElapsed=0; return end
+    inviteElapsed=inviteElapsed+elapsed
+    if inviteElapsed>=0.8 then inviteElapsed=0; Events:PumpRaidInvites() end
+end)
+
 function Events:Cancel(key)
     local e=events[key]; if not active or not e or e.owner~=identity or e.cancelled then return false end
     e.cancelled=true; e.rev=e.rev+1; dirty[key]=true; save(); fire(); return true
@@ -551,7 +624,7 @@ refresh=function()
             for i,name in ipairs(names) do
                 local row=window.signupRows[i]
                 if not row then
-                    row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth-10,72)
+                    row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth-10,100)
                     row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-15,18); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
                     row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',0,-18); row.roleStatus:SetSize(window.detailsWidth-15,16); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-15,34); row.hover:EnableMouse(true)
@@ -560,17 +633,20 @@ refresh=function()
                     row.accept=action(row,'Прийняти',0,-40,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,'primary')
                     row.reserve=action(row,'Резерв',100,-40,94,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end)
                     row.reject=action(row,'Відхилити',200,-40,104,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end)
+                    row.invite=action(row,'Інвайт у рейд',0,-68,194,function(self) Events:InviteMember(selected,self:GetParent().member) end,'primary')
                     window.signupRows[i]=row
                 end
-                row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*72)
+                row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*100)
                 local role=e.people[name]
                 row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(participantRoleStatus(role,e.statuses[name]))
                 row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
+                row.invite:SetShown(e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
                 row.accept:SetShown(name~=identity); row.reserve:SetShown(name~=identity); row.reject:SetShown(name~=identity); row:Show()
             end
-            height=height+#names*72
+            height=height+#names*100
         end
         window.detailsContent:SetHeight(math.max(250,height+8))
+        window.inviteAll:SetShown(own and e.kind=='raid')
         window.cancel:SetShown(e.owner==identity)
         local canJoin=not e.relayed and not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
         window.join:SetShown(canJoin)
@@ -578,7 +654,7 @@ refresh=function()
         window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
     else
         window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
-        window.details:SetText('Оберіть подію зі списку.'); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
+        window.details:SetText('Оберіть подію зі списку.'); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
         window.detailsContent:SetHeight(250)
     end
 end
@@ -652,6 +728,8 @@ local function createWindow(parent)
     f.join=action(f,'Записатися',605+shift,-325,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
     f.leave=action(f,'Виписатися',605+shift,-325,100,function() if selected then Events:Signup(selected,'leave') end end)
     f.cancel=action(f,'Скасувати',710+shift,-325,105,function() if selected then Events:Cancel(selected) end end)
+    f.inviteAll=action(f,'Запросити всіх у рейд',450+shift,-35,170,function() if selected then Events:InviteAll(selected) end end,'primary')
+    f.inviteAll:Hide()
     local heading=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); heading:SetPoint('TOPLEFT',f,'TOPLEFT',18,-358); heading:SetText('Створити подію')
     f.title=field(f,'Назва',18,-382,220,''); local getDate=datePicker(f)
     local hour,minute=0,0
@@ -670,7 +748,7 @@ local function createWindow(parent)
     UIDropDownMenu_Initialize(activityMenu,function(_,level)
         for _,entry in ipairs(catalog[currentKind] or {}) do
             local value=entry.value; local item=UIDropDownMenu_CreateInfo(); item.text=entry.label; item.value=value; item.checked=activity==value
-            item.func=function() activity=value; UIDropDownMenu_SetText(activityMenu,value~='' and activityLabels[value] or 'Не вибрано') end
+            item.func=function() activity=value; if currentKind=='raid' and value~='' then f.title:SetText(activityLabels[value]) end; UIDropDownMenu_SetText(activityMenu,value~='' and activityLabels[value] or 'Не вибрано') end
             UIDropDownMenu_AddButton(item,level)
         end
     end)
