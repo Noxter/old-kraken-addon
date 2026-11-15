@@ -62,8 +62,11 @@ def pack(lua, values):
 
 
 def send_packets(sender, receiver, packets):
-    for index in range(1, len(packets) + 1):
-        packet = packets[index]
+    if isinstance(packets, list):
+        iterable = packets
+    else:
+        iterable = (packets[index] for index in range(1, len(packets) + 1))
+    for packet in iterable:
         handler = receiver.globals().handlers[packet["kind"]]
         if handler:
             handler(sender.globals().player + " Realm", "GUILD", packet["payload"])
