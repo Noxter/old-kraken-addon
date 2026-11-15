@@ -269,24 +269,24 @@ function Finder:Prune()
     -- closed (or the listing no longer exists), old JOIN packets cannot be
     -- applied because ReceiveJoin also requires an existing open group.
     for versionKey in pairs(self.requestVersions) do
-        local id = versionKey:match('^([^\\001]+)\\001')
-        local group = id and self.groups[self.identity .. '\\001' .. id]
+        local id = versionKey:match('^([^\001]+)\001')
+        local group = id and self.groups[self.identity .. '\001' .. id]
         if not group or group.closed then
             self.requestVersions[versionKey] = nil
             changed = true
         end
     end
     for id in pairs(self.requests) do
-        local group = self.groups[self.identity .. '\\001' .. id]
+        local group = self.groups[self.identity .. '\001' .. id]
         if not group or group.closed then self.requests[id] = nil; changed = true end
     end
     for id in pairs(self.decisions) do
-        local group = self.groups[self.identity .. '\\001' .. id]
+        local group = self.groups[self.identity .. '\001' .. id]
         if not group or group.closed then self.decisions[id] = nil; changed = true end
     end
     for decisionKey in pairs(self.decisionSync) do
-        local id = decisionKey:match('^([^\\001]+)\\001')
-        local group = id and self.groups[self.identity .. '\\001' .. id]
+        local id = decisionKey:match('^([^\001]+)\001')
+        local group = id and self.groups[self.identity .. '\001' .. id]
         if not group or group.closed then self.decisionSync[decisionKey] = nil; changed = true end
     end
     return changed
