@@ -11,7 +11,11 @@ local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]
 local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.70,0.75,0.80},cancelled={1,0.42,0.38},expired={0.72,0.72,0.72}}
 local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
-local dirty,relayDirty,sequence,nextSync,lastQuery,nextDisplay={}, {},0,0,-60,0
+local dirty,relayDirty,sequence,nextSync,lastQueries,nextDisplay={}, {},0,0,{},0
+local requestDirty,paymentDirty,actionRelayDirty,paymentRelayDirty,resultDirty,resultRelayDirty={},{},{},{},{},{}
+local nextRelaySweep=0
+local lastSnapshotQuery=-60
+local RELAY_LIMIT,RELAY_TTL=1000,2592000
 local window,selected,offset,view,profession,materials,deadline,orderRows=nil,nil,0,'all',0,'customer',86400,{}
 local statusFilter,professionFilter='all',0
 local searchQuery=''
@@ -24,6 +28,30 @@ local function key(owner,id) return owner..'\001'..id end
 local function nameOK(s) return textOK(s,1,128) end
 local function idOK(s) return textOK(s,1,64) and s:match('^[%w%-]+$')~=nil end
 local function size(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
+local function relayKey(owner,id,actor) return key(owner,id)..'\001'..actor end
+local function validAction(action) return action=='offer' or action=='withdraw' or action=='delivered' end
+local function validReceipt(result) return result=='ok' or result=='state' or result=='stale' or result=='capacity' or result=='missing' end
+local function validRelay(entry,kind)
+    if type(entry)~='table' or not nameOK(entry.owner) or not nameOK(entry.actor) or entry.owner==entry.actor or not idOK(entry.id)
+        or not int(entry.stored,1,GetServerTime()+600) or GetServerTime()-entry.stored>RELAY_TTL then return false end
+    if kind=='payment' then return int(entry.assignment,0,2147483647) and int(entry.amount,1,1000000000) end
+    if not validAction(entry.action) or not int(entry.version,1,9000000000000000) or not int(entry.assignment,0,2147483647) then return false end
+    if kind=='result' then return validReceipt(entry.result) and int(entry.rev,0,2147483647) end
+    return true
+end
+local function putRelay(target,entry,kind)
+    if not validRelay(entry,kind) then return nil end
+    local k=relayKey(entry.owner,entry.id,entry.actor); local old=target[k]
+    if not old and size(target)>=RELAY_LIMIT then return nil end
+    if kind=='payment' then
+        if old and (old.assignment>entry.assignment or (old.assignment==entry.assignment and old.amount>=entry.amount)) then return k end
+    elseif old and old.version>=entry.version then return k end
+    target[k]=entry; return k
+end
+local function scheduleRelay(scheduled,k)
+    local due=GetTime()+math.random(2,20)
+    if type(scheduled[k])~='number' or due<scheduled[k] then scheduled[k]=due end
+end
 local function lower(text)
     text=text:lower():gsub('\208[\144-\175]',function(pair)
         local b=pair:byte(2); if b<=159 then return string.char(208,b+32) end; return string.char(209,b-32)
@@ -97,6 +125,7 @@ local function connect()
     local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
     if not name or not textOK(guild,1,128) or type(realm)~='string' or not OldKraken.DB then
         active,identity,profile,scope,own,observed,intents,dirty,relayDirty=false,nil,nil,nil,{}, {}, {}, {}, {}
+        requestDirty,paymentDirty,actionRelayDirty,paymentRelayDirty,resultDirty,resultRelayDirty={},{},{},{},{},{}
         if window then window:Hide() end; return
     end
     local guildKey=realm..'\001'..guild
@@ -105,10 +134,11 @@ local function connect()
     if type(db.workshop.guilds)~='table' then db.workshop.guilds={} end
     if type(db.workshop.guilds[guildKey])~='table' then db.workshop.guilds[guildKey]={} end
     scope=db.workshop.guilds[guildKey]
-    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays','orderDeliveryTallies'}) do if type(scope[field])~='table' then scope[field]={} end end
+    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays','orderDeliveryTallies','orderActionRelays','orderPaymentRelays','orderResults','orderResultRelays'}) do if type(scope[field])~='table' then scope[field]={} end end
     if type(scope.orderDeliveryTallies[name])~='table' then scope.orderDeliveryTallies[name]={} end
     active,identity,profile=true,name,guildKey
     own,observed,intents,dirty,relayDirty={}, {}, {}, {}, {}
+    requestDirty,paymentDirty,actionRelayDirty,paymentRelayDirty,resultDirty,resultRelayDirty={},{},{},{},{},{}
     local function loadOrders(source,target,requireOwner)
         if type(source)~='table' then return end
         for k,o in pairs(source) do
@@ -132,11 +162,21 @@ local function connect()
     end
     local stored=scope.orderIntents[name]
     if type(stored)=='table' then for k,v in pairs(stored) do
-        if type(k)=='string' and #k<194 and type(v)=='table' and (v.action=='offer' or v.action=='withdraw' or v.action=='delivered') and int(v.version,1,9000000000000000) then intents[k]={action=v.action,version=v.version,assignment=int(v.assignment,0,2147483647) and v.assignment or 0} end
+        if type(k)=='string' and #k<194 and type(v)=='table' and validAction(v.action) and int(v.version,1,9000000000000000) then
+            intents[k]={action=v.action,version=v.version,assignment=int(v.assignment,0,2147483647) and v.assignment or 0,receiptRev=int(v.receiptRev,1,2147483647) and v.receiptRev or nil}
+            requestDirty[k]=true
+        end
     end end
+    for _,config in ipairs({{scope.orderActionRelays,'action',actionRelayDirty},{scope.orderPaymentRelays,'payment',paymentRelayDirty},{scope.orderResults,'result',resultDirty},{scope.orderResultRelays,'result',resultRelayDirty}}) do
+        local entries,kind,scheduled=config[1],config[2],config[3]; local count=0
+        for k,entry in pairs(entries) do
+            if count>=RELAY_LIMIT or not validRelay(entry,kind) or k~=relayKey(entry.owner,entry.id,entry.actor) then entries[k]=nil
+            else count=count+1 end
+        end
+    end
     sequence=int(scope.orderSequences[name],0,9000000000000000) and scope.orderSequences[name] or 0
     for k in pairs(own) do dirty[k]=true end
-    nextSync,lastQuery=0,-60; persist(); changed()
+    nextSync,lastQueries,nextRelaySweep,lastSnapshotQuery=0,{},0,-60; persist(); changed()
 end
 local function create(item,qty,reward,note,recipe)
     qty,reward=tonumber(qty),tonumber(reward)
@@ -156,7 +196,7 @@ local function intent(k,action)
     if action=='offer' and (o.status~='open' or o.deadline<GetServerTime() or o.candidates[identity]) then return false end
     if action=='withdraw' and not ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity)) then return false end
     if action=='delivered' and not (o.status=='assigned' and o.worker==identity) then return false end
-    sequence=math.max(sequence+1,GetServerTime()*1000); intents[k]={action=action,version=sequence,assignment=o.assignment or 0}; nextSync=0; persist(); changed(); return true
+    sequence=math.max(sequence+1,GetServerTime()*1000); intents[k]={action=action,version=sequence,assignment=o.assignment or 0}; requestDirty[k]=true; nextSync=0; persist(); changed(); return true
 end
 local function ownerAction(k,action,actor)
     local o=own[k]; if not active or not o then return false end
@@ -272,6 +312,18 @@ local function sameOrder(a,b)
         and a.item==b.item and a.itemID==b.itemID and a.recipeID==b.recipeID
         and a.quantity==b.quantity and a.reward==b.reward and a.materials==b.materials and a.note==b.note
 end
+local function confirmPending(k,o,direct)
+    local pending=intents[k]
+    if not pending or not o then return end
+    local acknowledged=(o.acks[identity] or 0)>=pending.version
+    local relayedConfirmation=pending.receiptRev and o.rev>=pending.receiptRev and acknowledged
+    if not ((direct and (acknowledged or o.status=='deleted')) or relayedConfirmation) then return end
+    local applied=(pending.action=='offer' and (o.candidates[identity] or o.worker==identity))
+        or (pending.action=='withdraw' and not o.candidates[identity] and o.worker~=identity)
+        or (pending.action=='delivered' and (o.status=='delivered' or o.status=='done') and o.worker==identity)
+    intents[k]=nil; requestDirty[k]=nil
+    if not applied and not relayedConfirmation then notify('Дію щодо замовлення не виконано',o.item..' · стан змінився',k) end
+end
 local function receiveOrder(sender,payload,isRelay)
     if not active or not nameOK(sender) or sender==identity or type(payload)~='string' or #payload>2560 then return end
     local o=decode(payload,sender,isRelay); if not o or o.owner==identity or (isRelay and sender==o.owner) then return end
@@ -291,14 +343,16 @@ local function receiveOrder(sender,payload,isRelay)
         o.ownerRev=o.rev
     end
     if not previous and size(observed)>=100 then return end
-    if not isRelay then scope.orderRelays[k]=payload end
-    observed[k]=o
-    local pending=intents[k]
-    if not isRelay and pending and ((o.acks[identity] or 0)>=pending.version or o.status=='deleted') then
-        local applied=(pending.action=='offer' and o.candidates[identity]) or (pending.action=='withdraw' and not o.candidates[identity] and o.worker~=identity) or (pending.action=='delivered' and o.status=='delivered' and o.worker==identity)
-        intents[k]=nil
-        if not applied then notify('Дію щодо замовлення не виконано',o.item..' · стан змінився',k) end
+    if not isRelay then
+        scope.orderRelays[k]=payload
+        for relay,entry in pairs(scope.orderPaymentRelays) do
+            if entry.owner==o.owner and entry.id==o.id and (o.worker~=entry.actor or (o.assignment or 0)~=entry.assignment or (o.paidByWorker or 0)>=entry.amount or o.status=='done' or o.status=='cancelled' or o.status=='deleted') then
+                scope.orderPaymentRelays[relay]=nil; paymentRelayDirty[relay]=nil
+            end
+        end
     end
+    observed[k]=o
+    confirmPending(k,o,not isRelay)
     if not isRelay and not previous and o.status=='open' and o.rev==1 and GetServerTime()-o.created<=120 then
         local settings=OldKraken.DB and OldKraken.DB.settings
         local matches,manual=canCraft(o)
@@ -316,37 +370,129 @@ local function receiveOrder(sender,payload,isRelay)
 end
 comm:RegisterHandler('WORDER',function(sender,_,payload) receiveOrder(sender,payload,false) end)
 comm:RegisterHandler('WORELAY',function(sender,_,payload) receiveOrder(sender,payload,true) end)
-comm:RegisterHandler('WOREQ',function(sender,_,payload)
-    if not active or not nameOK(sender) or sender==identity then return end
-    local f=codec._unpackFields(payload,5); if not f or (#f~=4 and #f~=5) or f[1]~=identity or not idOK(f[2]) then return end
-    local action,version=f[3],tonumber(f[4]); if (action~='offer' and action~='withdraw' and action~='delivered') or not int(version,1,9000000000000000) then return end
-    local assignment=tonumber(f[5] or 0); if not int(assignment,0,2147483647) then return end
-    local function reject(reason) comm:SendProtocol('WOERROR',codec._pack({identity,f[2],sender,string.format('%.0f',version),reason})) end
-    local k=key(identity,f[2]); local o=own[k]; if not o then reject('missing'); return end
-    if (o.acks[sender] or 0)>=version then dirty[k]=true; return end
-    if (action=='delivered' or (action=='withdraw' and o.status=='assigned' and o.worker==sender)) and assignment~=(o.assignment or 0) then reject('stale'); return end
-    if not o.acks[sender] and size(o.acks)>=20 then reject('capacity'); return end
+local function resultPayload(entry)
+    return codec._pack({entry.owner,entry.id,entry.actor,entry.action,string.format('%.0f',entry.version),entry.assignment,entry.result,entry.rev})
+end
+local function rememberResult(request,result,rev)
+    local entry={owner=identity,id=request.id,actor=request.actor,action=request.action,version=request.version,
+        assignment=request.assignment,result=result,rev=rev or 0,stored=GetServerTime()}
+    local k=putRelay(scope.orderResults,entry,'result')
+    if k and scope.orderResults[k].version==entry.version then resultDirty[k]=true
+    else comm:SendProtocol('WORESULT',resultPayload(entry)) end
+end
+local function applyRequest(request)
+    local sender,action,version,assignment=request.actor,request.action,request.version,request.assignment
+    local k=key(identity,request.id); local o=own[k]
+    local resultKey=relayKey(identity,request.id,sender)
+    local previousResult=scope.orderResults[resultKey]
+    if previousResult and previousResult.version==version then
+        if previousResult.action==action and previousResult.assignment==assignment then resultDirty[resultKey]=true; if o then dirty[k]=true end end
+        return
+    end
+    if not o then rememberResult(request,'missing'); return end
+    if (o.acks[sender] or 0)>=version then
+        dirty[k]=true
+        -- An older saved order can contain an acknowledgement without its
+        -- original outcome. Do not invent a failure for an already applied action.
+        return
+    end
+    -- Do not mutate the order unless its result can be retained for delivery.
+    if not previousResult and size(scope.orderResults)>=RELAY_LIMIT then rememberResult(request,'capacity',o.rev); return end
+    if (action=='delivered' or (action=='withdraw' and o.status=='assigned' and o.worker==sender)) and assignment~=(o.assignment or 0) then rememberResult(request,'stale',o.rev); return end
+    if not o.acks[sender] and size(o.acks)>=20 then rememberResult(request,'capacity',o.rev); return end
     local prevStatus,prevWorker,wasCandidate,prevAck,prevPaid,prevAssignment=o.status,o.worker,o.candidates[sender],o.acks[sender],o.paidByWorker,o.assignment
-    if action=='offer' and o.status=='open' and o.deadline>=GetServerTime() and size(o.candidates)<20 then o.candidates[sender]=true
-    elseif action=='withdraw' and o.status=='open' then o.candidates[sender]=nil
-    elseif action=='withdraw' and o.status=='assigned' and o.worker==sender then o.status,o.worker,o.paidByWorker,o.assignment='open',nil,0,0; o.candidates[sender]=nil
-    elseif action=='delivered' and o.status=='assigned' and o.worker==sender then o.status='delivered' end
+    local applied=false
+    if action=='offer' and o.status=='open' and o.deadline>=GetServerTime() and size(o.candidates)<20 then o.candidates[sender]=true; applied=true
+    elseif action=='withdraw' and o.status=='open' then o.candidates[sender]=nil; applied=true
+    elseif action=='withdraw' and o.status=='assigned' and o.worker==sender then o.status,o.worker,o.paidByWorker,o.assignment='open',nil,0,0; o.candidates[sender]=nil; applied=true
+    elseif action=='delivered' and o.status=='assigned' and o.worker==sender then o.status='delivered'; applied=true end
     o.acks[sender]=version; o.rev=o.rev+1
-    if not fits(o) then o.status,o.worker,o.candidates[sender],o.acks[sender],o.paidByWorker,o.assignment,o.rev=prevStatus,prevWorker,wasCandidate,prevAck,prevPaid,prevAssignment,o.rev-1; reject('capacity'); return end
-    dirty[k]=true; persist(); changed()
+    if not fits(o) then o.status,o.worker,o.candidates[sender],o.acks[sender],o.paidByWorker,o.assignment,o.rev=prevStatus,prevWorker,wasCandidate,prevAck,prevPaid,prevAssignment,o.rev-1; rememberResult(request,'capacity',o.rev); return end
+    dirty[k]=true; rememberResult(request,applied and 'ok' or 'state',o.rev); persist(); changed()
     if action=='offer' and not wasCandidate and o.candidates[sender] then notify('Майстер пропонує допомогу',sender..' · '..o.item,k)
     elseif action=='delivered' and prevStatus=='assigned' and o.status=='delivered' then notify('Майстер позначив передачу',sender..' · '..o.item,k)
     elseif action=='withdraw' and prevWorker==sender and o.status=='open' then notify('Майстер відмовився',sender..' · '..o.item,k) end
+end
+local function decodeAction(actor,f,offset)
+    local owner,id,action,version,assignment=f[offset],f[offset+1],f[offset+2],tonumber(f[offset+3]),tonumber(f[offset+4] or 0)
+    local entry={owner=owner,id=id,actor=actor,action=action,version=version,assignment=assignment,stored=GetServerTime()}
+    return validRelay(entry,'action') and entry or nil
+end
+comm:RegisterHandler('WOREQ',function(sender,_,payload)
+    if not active or not nameOK(sender) or sender==identity then return end
+    local f=codec._unpackFields(payload,5); if not f or (#f~=4 and #f~=5) then return end
+    local request=decodeAction(sender,f,1); if not request then return end
+    if request.owner==identity then applyRequest(request)
+    else
+        local k=relayKey(request.owner,request.id,request.actor); local result=scope.orderResultRelays[k]
+        if result and result.version==request.version and result.action==request.action and result.assignment==request.assignment then scheduleRelay(resultRelayDirty,k)
+        else k=putRelay(scope.orderActionRelays,request,'action'); if k then scheduleRelay(actionRelayDirty,k) end end
+    end
 end)
+comm:RegisterHandler('WOACT',function(sender,_,payload)
+    if not active or not nameOK(sender) or sender==identity then return end
+    local f=codec._unpackFields(payload,6); if not f or #f~=6 or f[1]~=identity or f[3]==sender then return end
+    local request=decodeAction(f[3],{f[1],f[2],f[4],f[5],f[6]},1)
+    if request then applyRequest(request) end
+end)
+local function applyPayment(entry)
+    local k=key(identity,entry.id); local o=own[k]
+    if not o or o.worker~=entry.actor or entry.assignment~=(o.assignment or 0) or (o.status~='assigned' and o.status~='delivered') or not int(entry.amount,1,o.reward*10000) then return end
+    if entry.amount<=(o.paidByWorker or 0) then dirty[k]=true; return end
+    local old=o.paidByWorker; o.paidByWorker=entry.amount; o.rev=o.rev+1
+    if not fits(o) then o.paidByWorker=old; o.rev=o.rev-1; return end
+    dirty[k]=true; persist(); changed()
+end
 comm:RegisterHandler('WOPAY',function(sender,_,payload)
     if not active or not nameOK(sender) or sender==identity then return end
-    local f=codec._unpackFields(payload,4)
-    if not f or #f~=4 or f[1]~=identity or not idOK(f[2]) then return end
-    local o=own[key(identity,f[2])]; local assignment,amount=tonumber(f[3]),tonumber(f[4])
-    if not o or o.worker~=sender or assignment~=(o.assignment or 0) or (o.status~='assigned' and o.status~='delivered') or not int(amount,0,o.reward*10000) or amount<=(o.paidByWorker or 0) then return end
-    local old=o.paidByWorker; o.paidByWorker=amount; o.rev=o.rev+1
-    if not fits(o) then o.paidByWorker=old; o.rev=o.rev-1; return end
-    dirty[key(identity,o.id)]=true; persist(); changed()
+    local f=codec._unpackFields(payload,4); if not f or #f~=4 then return end
+    local entry={owner=f[1],id=f[2],actor=sender,assignment=tonumber(f[3]),amount=tonumber(f[4]),stored=GetServerTime()}
+    if not validRelay(entry,'payment') then return end
+    if entry.owner==identity then applyPayment(entry)
+    else local k=putRelay(scope.orderPaymentRelays,entry,'payment'); if k then scheduleRelay(paymentRelayDirty,k) end end
+end)
+comm:RegisterHandler('WOPAYR',function(sender,_,payload)
+    if not active or not nameOK(sender) or sender==identity then return end
+    local f=codec._unpackFields(payload,5); if not f or #f~=5 or f[1]~=identity or f[3]==sender then return end
+    local entry={owner=f[1],id=f[2],actor=f[3],assignment=tonumber(f[4]),amount=tonumber(f[5]),stored=GetServerTime()}
+    if validRelay(entry,'payment') then applyPayment(entry) end
+end)
+local function decodeResult(payload)
+    local f=codec._unpackFields(payload,8); if not f or #f~=8 then return nil end
+    local entry={owner=f[1],id=f[2],actor=f[3],action=f[4],version=tonumber(f[5]),assignment=tonumber(f[6]),result=f[7],rev=tonumber(f[8]),stored=GetServerTime()}
+    if not validRelay(entry,'result') or (entry.result=='ok' and entry.rev<1) then return nil end
+    return entry
+end
+local function receiveResult(entry)
+    local k=key(entry.owner,entry.id); local pending=intents[k]
+    if not pending or pending.version~=entry.version or pending.action~=entry.action or (pending.assignment or 0)~=entry.assignment then return end
+    if entry.result=='ok' then
+        pending.receiptRev=entry.rev; nextSync=0
+        confirmPending(k,observed[k],false)
+    else
+        intents[k]=nil; requestDirty[k]=nil
+        local message=entry.result=='capacity' and 'Досягнуто ліміту учасників або розміру даних'
+            or (entry.result=='stale' and 'Призначення майстра змінилося' or 'Замовлення більше недоступне або його стан змінився')
+        notify('Дію щодо замовлення не виконано',message,k)
+    end
+    persist(); changed()
+end
+comm:RegisterHandler('WORESULT',function(sender,_,payload)
+    if not active or not nameOK(sender) or sender==identity then return end
+    local entry=decodeResult(payload); if not entry or sender~=entry.owner then return end
+    if entry.actor==identity then receiveResult(entry); return end
+    local k=putRelay(scope.orderResultRelays,entry,'result')
+    if k then
+        scheduleRelay(resultRelayDirty,k)
+        local request=scope.orderActionRelays[k]
+        if request and request.version<=entry.version then scope.orderActionRelays[k]=nil; actionRelayDirty[k]=nil end
+    end
+end)
+comm:RegisterHandler('WORESR',function(sender,_,payload)
+    if not active or not nameOK(sender) or sender==identity then return end
+    local entry=decodeResult(payload)
+    if not entry or entry.actor~=identity or sender==entry.owner then return end
+    receiveResult(entry)
 end)
 comm:RegisterHandler('WOERROR',function(sender,_,payload)
     if not active then return end
@@ -354,28 +500,63 @@ comm:RegisterHandler('WOERROR',function(sender,_,payload)
     if not f or #f~=5 or sender~=f[1] or f[3]~=identity or (f[5]~='capacity' and f[5]~='missing' and f[5]~='stale') or not idOK(f[2]) then return end
     local k=key(sender,f[2]); local pending=intents[k]
     if not pending or tonumber(f[4])~=pending.version then return end
-    intents[k]=nil; persist(); changed()
+    intents[k]=nil; requestDirty[k]=nil; persist(); changed()
     notify('Дію щодо замовлення не виконано',f[5]=='capacity' and 'Досягнуто ліміту учасників або розміру даних' or 'Замовлення більше недоступне',k)
 end)
 comm:RegisterHandler('WOQUERY',function(sender,_,payload)
-    if not active or payload~='' or sender==identity then return end
-    local now=GetTime(); if now-lastQuery<30 then return end; lastQuery=now
-    for k in pairs(own) do dirty[k]=true end
-    for k in pairs(scope.orderRelays) do relayDirty[k]=true end
+    if not active or payload~='' or not nameOK(sender) or sender==identity then return end
+    local now=GetTime(); if lastQueries[sender] and now-lastQueries[sender]<30 then return end
+    if not lastQueries[sender] and size(lastQueries)>=1000 then
+        for name,seen in pairs(lastQueries) do if now-seen>180 then lastQueries[name]=nil end end
+        if size(lastQueries)>=1000 then return end
+    end
+    lastQueries[sender]=now
+    -- Full snapshots are guild broadcasts; suppress duplicate full replays
+    -- while still serving actor-specific queued actions for every requester.
+    if now-lastSnapshotQuery>=30 then
+        lastSnapshotQuery=now
+        for k in pairs(own) do dirty[k]=true end
+        for k in pairs(scope.orderRelays) do relayDirty[k]=true end
+    end
+    for k,entry in pairs(scope.orderActionRelays) do if entry.owner==sender then scheduleRelay(actionRelayDirty,k) end end
+    for k,entry in pairs(scope.orderPaymentRelays) do if entry.owner==sender then scheduleRelay(paymentRelayDirty,k) end end
+    for k,entry in pairs(scope.orderResults) do if entry.owner==identity and entry.actor==sender then resultDirty[k]=true end end
+    for k,entry in pairs(scope.orderResultRelays) do if entry.actor==sender then scheduleRelay(resultRelayDirty,k) end end
 end)
 
 local listener=CreateFrame('Frame')
 for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE'}) do pcall(listener.RegisterEvent,listener,event) end
 listener:SetScript('OnEvent',function() connect() end)
+local function pumpRelay(scheduled,entries,kind,validation,encodeEntry)
+    if #comm.queue>8 then return end
+    local now=GetTime()
+    for k,due in pairs(scheduled) do
+        local entry=entries[k]
+        if not validRelay(entry,validation) then scheduled[k]=nil; entries[k]=nil
+        elseif due==true or (type(due)=='number' and now>=due) then
+            if comm:SendProtocol(kind,encodeEntry(entry)) then scheduled[k]=nil end
+            return
+        end
+    end
+end
 if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
     connect(); if not active then return end
     local now=GetTime(); if now>=nextSync then
         if comm:SendProtocol('WOQUERY','') then nextSync=now+180 end
-        for k,pending in pairs(intents) do local o=observed[k]; if o then comm:SendProtocol('WOREQ',codec._pack({o.owner,o.id,pending.action,string.format('%.0f',pending.version),pending.assignment or 0})) end end
+        for k in pairs(intents) do requestDirty[k]=true end
         for k,tally in pairs(scope.orderDeliveryTallies[identity]) do
             local o=observed[k]
             if o and o.worker==identity and type(tally)=='table' and tally.worker==identity and (tally.assignment or 0)==(o.assignment or 0) and int(tally.money,1,o.reward*10000) and tally.money>(o.paidByWorker or 0) and (o.status=='assigned' or o.status=='delivered') then
-                comm:SendProtocol('WOPAY',codec._pack({o.owner,o.id,o.assignment or 0,tally.money}))
+                paymentDirty[k]=true
+            end
+        end
+    end
+    if now>=nextRelaySweep then
+        nextRelaySweep=now+180
+        for _,config in ipairs({{scope.orderActionRelays,'action',actionRelayDirty},{scope.orderPaymentRelays,'payment',paymentRelayDirty},{scope.orderResults,'result',resultDirty},{scope.orderResultRelays,'result',resultRelayDirty}}) do
+            local entries,kind,scheduled=config[1],config[2],config[3]
+            for k,entry in pairs(entries) do
+                if not validRelay(entry,kind) then entries[k]=nil; scheduled[k]=nil end
             end
         end
     end
@@ -385,12 +566,33 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     finalizeExchanges()
     if expired then persist(); changed() end
     if now>=nextDisplay then nextDisplay=now+30; changed() end
-    local k=next(dirty); if k then local o=own[k]; if not o or comm:SendProtocol('WORDER',encode(o)) then dirty[k]=nil end end
+    if #comm.queue<=8 then
+        for requestKey in pairs(requestDirty) do
+            local pending,o=intents[requestKey],observed[requestKey]
+            if not pending then requestDirty[requestKey]=nil
+            elseif o then
+                if comm:SendProtocol('WOREQ',codec._pack({o.owner,o.id,pending.action,string.format('%.0f',pending.version),pending.assignment or 0})) then requestDirty[requestKey]=nil end
+                break
+            end
+        end
+    end
+    local paymentKey=next(paymentDirty)
+    if paymentKey and #comm.queue<=8 then
+        local o,tally=observed[paymentKey],scope.orderDeliveryTallies[identity][paymentKey]
+        if not o or type(tally)~='table' or o.worker~=identity or tally.worker~=identity or (tally.assignment or 0)~=(o.assignment or 0)
+            or (o.status~='assigned' and o.status~='delivered') or not int(tally.money,1,o.reward*10000) or tally.money<=(o.paidByWorker or 0) then paymentDirty[paymentKey]=nil
+        elseif comm:SendProtocol('WOPAY',codec._pack({o.owner,o.id,o.assignment or 0,tally.money})) then paymentDirty[paymentKey]=nil end
+    end
+    local k=next(dirty); if k and #comm.queue<=8 then local o=own[k]; if not o or comm:SendProtocol('WORDER',encode(o)) then dirty[k]=nil end end
     local relayKey=next(relayDirty)
     if relayKey and #comm.queue<=8 then
         local payload=scope.orderRelays[relayKey]
         if not payload or comm:SendProtocol('WORELAY',payload) then relayDirty[relayKey]=nil end
     end
+    pumpRelay(resultDirty,scope.orderResults,'WORESULT','result',resultPayload)
+    pumpRelay(actionRelayDirty,scope.orderActionRelays,'WOACT','action',function(e) return codec._pack({e.owner,e.id,e.actor,e.action,string.format('%.0f',e.version),e.assignment}) end)
+    pumpRelay(paymentRelayDirty,scope.orderPaymentRelays,'WOPAYR','payment',function(e) return codec._pack({e.owner,e.id,e.actor,e.assignment,e.amount}) end)
+    pumpRelay(resultRelayDirty,scope.orderResultRelays,'WORESR','result',resultPayload)
 end) end
 
 local function button(parent,label,x,y,width,callback,variant)
@@ -569,7 +771,7 @@ refresh=function()
             progress='\nОбмін: речі '..tostring(tally.items or 0)..'/'..o.quantity..' · оплата '..math.floor(money/10000)..'з '..math.floor(money%10000/100)..'с '..(money%100)..'м / '..o.reward..'з'
             if #mats>0 then progress=progress..'\nМатеріали: '..table.concat(mats,', ') end
         end
-        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..(o.relayed and '\nСтан отримано через гільдію; може бути застарілим.' or '')..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..progress..'\n'..o.note..(pending and '\nОчікується відповідь замовника' or ''))
+        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..(o.relayed and '\nСтан отримано через гільдію; може бути застарілим.' or '')..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..progress..'\n'..o.note..(pending and (pending.receiptRev and '\nПідтверджено; очікується оновлення стану.' or '\nОчікується підтвердження замовника; дія передається через гільдію.') or ''))
         window.detailsContent:SetHeight(math.max(132,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
         window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending)
