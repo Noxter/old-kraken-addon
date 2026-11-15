@@ -10,8 +10,9 @@ local statusColors = {pending='ffffc36b', accepted='ff69dc8c', reserve='ff66b3ff
 local statusCode = {pending='P',accepted='A',reserve='R',rejected='D'}
 local codeStatus = {P='pending',A='accepted',R='reserve',D='rejected'}
 local active, identity, profile, storage = false, nil, nil, nil
-local events, dirty, intents, newDirty, relayDirty = {}, {}, {}, {}, {}
+local events, directEvents, relayEvents, dirty, intents, newDirty, relayDirty = {}, {}, {}, {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
+local relayStats = {invalid_payload=0, rejected_relay_cancelled=0, rejected_relay_sender=0, rejected_relay_mismatch=0, rejected_relay_stale=0, rejected_relay_equivocation=0, rejected_direct_stale=0, rejected_direct_equivocation=0, rejected_capacity=0}
 local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
 local refresh
 local page = 1
@@ -95,7 +96,7 @@ end
 local function save()
     if not storage then return end
     storage.owned, storage.observed, storage.intents, storage.sequence = {}, {}, {}, sequence
-    for key, e in pairs(events) do
+    for key, e in pairs(directEvents) do
         if e.owner == identity then storage.owned[key] = e else storage.observed[key] = e end
     end
     for key, intent in pairs(intents) do storage.intents[key] = intent end
@@ -140,44 +141,69 @@ local function fire() OldKraken:Fire('GUILD_EVENTS_CHANGED') end
 
 local function receiveEvent(sender, _, payload, isAnnouncement, isRelay, cancellationOnly)
     if not active then return end
-    local e = decode(sender, payload, isRelay); if not e then return end
-    if cancellationOnly and not e.cancelled then return end
+    local e = decode(sender, payload, isRelay)
+    if not e then relayStats.invalid_payload=relayStats.invalid_payload+1; return end
     local key = eventKey(e.owner,e.id)
-    local old = events[key]
+
     if isRelay then
-        if not old or old.owner==identity or old.cancelled or e.rev<=old.rev
-            or old.when~=e.when or old.kind~=e.kind or old.title~=e.title
-            or old.description~=e.description or old.size~=e.size or old.activity~=e.activity then return end
-        e.relayed=true
-        e.ownerRev=old.ownerRev or (not old.relayed and old.rev or 0)
-    elseif old and old.relayed then
-        -- Ignore owner snapshots older than the last direct owner revision.
-        if e.rev < (old.ownerRev or 0) then return end
-        if not e.cancelled then storage.cancelledSeen[key]=nil end
-        old=nil
-    end
-    if old and old.rev > e.rev then return end
-    if old and old.rev == e.rev then
-        if not isRelay and e.owner~=identity then storage.relays[key]=payload end
-        local intent = intents[key]
-        if intent and ((intent.role == 'leave' and not old.people[identity]) or (intent.role ~= 'leave' and old.people[identity] == intent.role and old.statuses[identity] ~= 'rejected') or old.cancelled) then
-            intents[key] = nil; save(); fire()
+        -- A relay is display-only: never accept cancellations or announcements
+        -- through it, and never let it replace a directly received owner snapshot.
+        if cancellationOnly or isAnnouncement or e.cancelled then relayStats.rejected_relay_cancelled=relayStats.rejected_relay_cancelled+1; return end
+        if sender == e.owner or e.owner == identity then relayStats.rejected_relay_sender=relayStats.rejected_relay_sender+1; return end
+        local direct = directEvents[key]
+        if direct and (direct.when~=e.when or direct.kind~=e.kind or direct.title~=e.title
+            or direct.description~=e.description or direct.size~=e.size or direct.activity~=e.activity) then relayStats.rejected_relay_mismatch=relayStats.rejected_relay_mismatch+1; return end
+        local previous = relayEvents[key]
+        if not direct and not previous and not events[key] and count(events)>=100 then relayStats.rejected_capacity=relayStats.rejected_capacity+1; return end
+        if previous then
+            if previous.rev > e.rev then relayStats.rejected_relay_stale=relayStats.rejected_relay_stale+1; return end
+            if previous.rev == e.rev and encode(previous) ~= payload then relayStats.rejected_relay_equivocation=relayStats.rejected_relay_equivocation+1; return end
         end
+        e.relayed = true
+        e.ownerRev = direct and direct.rev or 0
+        relayEvents[key] = e
+        storage.relays[key] = payload
+        if not direct then events[key] = e end
+        fire()
         return
     end
-    if not old and not events[key] and count(events) >= 100 then return end
-    if e.owner == identity and old then e.versions = old.versions end
-    if not isRelay then e.ownerRev=e.rev end
-    events[key] = e
-    if not isRelay and e.owner~=identity then
-        storage.relays[key]=payload
+
+    local old = directEvents[key]
+    if old then
+        if old.rev > e.rev then relayStats.rejected_direct_stale=relayStats.rejected_direct_stale+1; return end
+        if old.rev == e.rev then
+            if encode(old) ~= payload then relayStats.rejected_direct_equivocation=relayStats.rejected_direct_equivocation+1; return end
+            local intent = intents[key]
+            if intent and ((intent.role == 'leave' and not old.people[identity])
+                or (intent.role ~= 'leave' and old.people[identity] == intent.role and old.statuses[identity] ~= 'rejected')
+                or old.cancelled) then
+                intents[key] = nil; save(); fire()
+            end
+            return
+        end
+    elseif not events[key] and count(events) >= 100 then
+        relayStats.rejected_capacity=relayStats.rejected_capacity+1; return
     end
+
+    e.relayed = nil
+    e.ownerRev = e.rev
+    e.versions = old and old.versions or nil
+    directEvents[key] = e
+    events[key] = e
+    -- Any direct owner snapshot supersedes the cached relay, even if its
+    -- untrusted revision number is larger than the owner's current revision.
+    relayEvents[key], storage.relays[key] = nil, nil
+
     local intent = intents[key]
-    if intent and (not isRelay or e.cancelled) and ((intent.role == 'leave' and not e.people[identity]) or (intent.role ~= 'leave' and e.people[identity] == intent.role and e.statuses[identity] ~= 'rejected') or e.cancelled) then intents[key] = nil end
+    if intent and ((intent.role == 'leave' and not e.people[identity])
+        or (intent.role ~= 'leave' and e.people[identity] == intent.role and e.statuses[identity] ~= 'rejected')
+        or e.cancelled) then intents[key] = nil end
+
     if e.cancelled and e.owner~=identity and e.people[identity] and e.statuses[identity]~='rejected' and not storage.cancelledSeen[key] then
         storage.cancelledSeen[key]=e.when+172800
         OldKraken:Fire('GUILD_EVENTS_CANCELLED',key,e)
     end
+    if not e.cancelled then storage.cancelledSeen[key]=nil end
     save(); fire()
     if isAnnouncement and not old and e.owner~=identity and not e.cancelled then
         local created=tonumber(e.id:match('^(%d+)%-'))
@@ -237,7 +263,7 @@ function Events:Create(title, description, when, kind, size, activity)
     sequence=sequence+1
     local id=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
     local e={id=id,owner=identity,rev=1,when=when,kind=kind,size=size,cancelled=false,title=title,description=description,people={},statuses={},versions={},activity=activity}
-    local key=eventKey(identity,id); events[key]=e; dirty[key]=true; newDirty[key]=true; save(); fire(); return true
+    local key=eventKey(identity,id); events[key]=e; directEvents[key]=e; dirty[key]=true; newDirty[key]=true; save(); fire(); return true
 end
 function Events:Cancel(key)
     local e=events[key]; if not active or not e or e.owner~=identity or e.cancelled then return false end
@@ -245,7 +271,7 @@ function Events:Cancel(key)
 end
 function Events:Signup(key, role)
     local e=events[key]
-    if not active or not e or e.cancelled or (role~='leave' and not roles[role]) then return false end
+    if not active or not e or e.relayed or e.cancelled or (role~='leave' and not roles[role]) then return false end
     if role~='leave' and e.owner==identity and e.statuses[identity]~='accepted' and acceptedCount(e)>=e.size then return false end
     sequence=math.max(sequence+1,GetServerTime()*1000)
     local intent={role=role,version=sequence}; intents[key]=intent
@@ -267,7 +293,7 @@ local function connect()
     local name, guild = character(), type(GetGuildInfo)=='function' and GetGuildInfo('player')
     local realm = type(GetRealmName)=='function' and GetRealmName() or ''
     if not name or not validText(guild,1,128) or type(realm)~='string' or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
-        active=false; events,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}; selected=nil
+        active=false; events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}; selected=nil
         if window then window:Hide() end
         return
     end
@@ -282,14 +308,14 @@ local function connect()
     if type(storage.cancelledSeen)~='table' then storage.cancelledSeen={} end
     if type(storage.relays)~='table' then storage.relays={} end
     for k,expiry in pairs(storage.cancelledSeen) do if type(expiry)~='number' or expiry<GetServerTime() then storage.cancelledSeen[k]=nil end end
-    events,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}
+    events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}
     sequence=type(storage.sequence)=='number' and storage.sequence or 0
     if type(storage.owned)=='table' then
         for k,e in pairs(storage.owned) do
             if type(e)=='table' and e.owner==identity and type(e.people)=='table' then
                 local ok,payload=pcall(encode,e)
                 local valid=ok and decode(identity,payload)
-                if valid and k==eventKey(identity,valid.id) then valid.versions=type(e.versions)=='table' and e.versions or {}; events[k]=valid; dirty[k]=true end
+                if valid and k==eventKey(identity,valid.id) then valid.versions=type(e.versions)=='table' and e.versions or {}; events[k]=valid; directEvents[k]=valid; dirty[k]=true end
             end
         end
     end
@@ -300,16 +326,25 @@ local function connect()
                 local ok,payload=pcall(encode,e)
                 local valid=ok and decode(e.owner,payload)
                 if valid and k==eventKey(valid.owner,valid.id) then
-                    valid.relayed=e.relayed==true
-                    valid.ownerRev=valid.relayed and (type(e.ownerRev)=='number' and math.max(0,math.min(valid.rev,e.ownerRev)) or 0) or valid.rev
-                    events[k]=valid
+                    if e.relayed==true then
+                        valid.relayed=true; valid.ownerRev=0; relayEvents[k]=valid
+                        if not events[k] then events[k]=valid end
+                        storage.relays[k]=storage.relays[k] or payload
+                    else
+                        valid.ownerRev=valid.rev; directEvents[k]=valid; events[k]=valid
+                    end
                 end
             end
         end
     end
     for k,payload in pairs(storage.relays) do
         local e=type(payload)=='string' and decode(nil,payload,true)
-        if not e or e.owner==identity or k~=eventKey(e.owner,e.id) then storage.relays[k]=nil end
+        if not e or e.owner==identity or k~=eventKey(e.owner,e.id) then storage.relays[k]=nil
+        else
+            e.relayed=true; e.ownerRev=directEvents[k] and directEvents[k].rev or 0
+            relayEvents[k]=e
+            if not directEvents[k] then events[k]=e end
+        end
     end
     if type(storage.intents)=='table' then
         for k,v in pairs(storage.intents) do
@@ -332,7 +367,7 @@ if C_Timer and C_Timer.NewTicker then
         if name~=identity or not guild or (type(GetRealmName)=='function' and (GetRealmName()..'\001'..guild..'\001'..name)~=profile) then active=false; connect(); return end
         local removed = false
         for key,e in pairs(events) do
-            if e.when < GetServerTime()-172800 then events[key],dirty[key],intents[key],newDirty[key],relayDirty[key],storage.relays[key]=nil,nil,nil,nil,nil,nil; removed=true end
+            if e.when < GetServerTime()-172800 then events[key],directEvents[key],relayEvents[key],dirty[key],intents[key],newDirty[key],relayDirty[key],storage.relays[key]=nil,nil,nil,nil,nil,nil,nil,nil; removed=true end
         end
         if removed then save(); fire() end
         local now=GetTime()
@@ -537,10 +572,10 @@ refresh=function()
         end
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.cancel:SetShown(e.owner==identity)
-        local canJoin=not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
+        local canJoin=not e.relayed and not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
         window.join:SetShown(canJoin)
         window.roleMenu:SetShown(canJoin)
-        window.leave:SetShown((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected'))
+        window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
     else
         window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
         window.details:SetText('Оберіть подію зі списку.'); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
@@ -678,6 +713,20 @@ if OldKraken.UIHub then
         return window
     end)
 end
+function Events:GetRelayDiagnostics()
+    local snapshot={}
+    for reason,value in pairs(relayStats) do snapshot[reason]=value end
+    return snapshot
+end
+
+function Events:PrintRelayDiagnostics()
+    local s=self:GetRelayDiagnostics()
+    print('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
+    for _,reason in ipairs({'invalid_payload','rejected_relay_cancelled','rejected_relay_sender','rejected_relay_mismatch','rejected_relay_stale','rejected_relay_equivocation','rejected_direct_stale','rejected_direct_equivocation','rejected_capacity'}) do
+        print('  '..reason..': '..s[reason])
+    end
+end
+
 function Events:AlertsEnabled()
     local settings=OldKraken.DB and OldKraken.DB.settings
     return type(settings)=='table' and settings.guildEventNotifications~=false
