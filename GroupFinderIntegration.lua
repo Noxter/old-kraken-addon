@@ -61,6 +61,10 @@ local function saveOwned()
     storage.pendingVersions, storage.pendingRoles = {}, {}
     for key, value in pairs(finder.pendingVersions) do storage.pendingVersions[key] = value end
     for key, value in pairs(finder.pendingRoles) do storage.pendingRoles[key] = value end
+    storage.roleCapabilities={}
+    for name,available in pairs(finder.roleCapabilities or {}) do
+        storage.roleCapabilities[name]={tank=available.tank==true,healer=available.healer==true,dps=available.dps==true}
+    end
     storage.requests = {}
     for id, requests in pairs(finder.requests) do
         local owned = finder.groups[finder.identity .. '\001' .. id]
@@ -322,6 +326,11 @@ frame:SetScript('OnEvent', function(_, event)
     storage = OldKraken.DB.groupFinder[key]
     if type(storage) ~= 'table' then storage = {}; OldKraken.DB.groupFinder[key] = storage end
     finder:Initialize(identity, function(kind, payload) return comm:SendProtocol(kind, payload) end)
+    for name,available in pairs(type(storage.roleCapabilities)=='table' and storage.roleCapabilities or {}) do
+        if type(name)=='string' and type(available)=='table' and type(available.tank)=='boolean' and type(available.healer)=='boolean' and type(available.dps)=='boolean' then
+            finder.roleCapabilities[name]={tank=available.tank,healer=available.healer,dps=available.dps}
+        end
+    end
     -- Short-name requests and decisions cannot identify a unique character.
     if identity ~= name and storage.identityFormat ~= 2 then
         local migrated = {}

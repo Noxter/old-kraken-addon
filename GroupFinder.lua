@@ -43,37 +43,57 @@ local roleCode = { ['']='U', tank='T', healer='H', dps='D', flex='F' }
 local codeRole = { U='', T='tank', H='healer', D='dps', F='flex' }
 local MAX_GROUPS = 100
 local GROUP_TTL = 3600
-local roleClasses = {
-    tank={WARRIOR=true,PALADIN=true,DRUID=true},
-    healer={PRIEST=true,PALADIN=true,DRUID=true,SHAMAN=true},
-}
-local classCache,classesDirty={},true
-local function plainString(value)
-    return not (type(issecretvalue)=='function' and issecretvalue(value)) and type(value)=='string'
-end
-function Finder:CanPerformRole(name,role)
-    if role=='dps' or role=='flex' then return true end
-    if not roleClasses[role] then return false end
-    local class
-    if name==self.identity and type(UnitClass)=='function' then
-        local _,token=UnitClass('player'); if plainString(token) then class=token end
+local function roleResult(ok,tank,healer,dps)
+    for _,value in pairs({tank=tank,healer=healer,dps=dps}) do
+        if type(issecretvalue)=='function' and issecretvalue(value) then return nil end
     end
-    if not class and classesDirty and type(GetNumGuildMembers)=='function' and type(GetGuildRosterInfo)=='function' then
-        classCache={}; classesDirty=false
-        for i=1,(tonumber(GetNumGuildMembers()) or 0) do
-            local member,_,_,_,_,_,_,_,_,_,token=GetGuildRosterInfo(i)
-            if plainString(member) and plainString(token) then classCache[member]=token end
+    if ok and type(tank)=='boolean' and type(healer)=='boolean' and type(dps)=='boolean' then
+        return {tank=tank,healer=healer,dps=dps}
+    end
+end
+function Finder:GetGameRoles(name)
+    local unit=name==self.identity and 'player' or nil
+    if not unit and type(UnitExists)=='function' and UnitExists(name) then unit=name end
+    if not unit and type(UnitName)=='function' then
+        for i=1,44 do
+            local candidate=i<=4 and ('party'..i) or ('raid'..(i-4))
+            if type(UnitExists)=='function' and UnitExists(candidate) then
+                local first,second=UnitName(candidate)
+                if first==name or (type(first)=='string' and type(second)=='string' and (first..' '..second==name or first..'-'..second==name)) then unit=candidate; break end
+            end
         end
     end
-    class=class or classCache[name]
-    if class then return roleClasses[role][class]==true end
-    -- Keep pure model consumers usable without WoW's character APIs.
-    return type(UnitClass)~='function' and type(GetGuildRosterInfo)~='function'
+    if unit and type(UnitGetAvailableRoles)=='function' then
+        local result=roleResult(pcall(UnitGetAvailableRoles,unit))
+        if result then return result end
+    end
+    if unit=='player' and C_LFGList and type(C_LFGList.GetAvailableRoles)=='function' then
+        return roleResult(pcall(C_LFGList.GetAvailableRoles))
+    end
 end
-if type(CreateFrame)=='function' then
-    local classEvents=CreateFrame('Frame')
-    classEvents:RegisterEvent('GUILD_ROSTER_UPDATE'); classEvents:RegisterEvent('PLAYER_GUILD_UPDATE')
-    classEvents:SetScript('OnEvent',function() classesDirty=true end)
+function Finder:CanPerformRole(name,role)
+    if role~='tank' and role~='healer' and role~='dps' and role~='flex' then return false end
+    local available=self:GetGameRoles(name) or (self.roleCapabilities and self.roleCapabilities[name])
+    if available then
+        if role=='flex' then return available.tank or available.healer or available.dps end
+        return available[role]==true
+    end
+    -- No class assumptions when a game API exists but supplied no usable data.
+    return type(UnitGetAvailableRoles)~='function' and not (C_LFGList and type(C_LFGList.GetAvailableRoles)=='function')
+end
+function Finder:PreferredRole()
+    for _,role in ipairs({'dps','tank','healer'}) do if self:CanPerformRole(self.identity,role) then return role end end
+    return ''
+end
+function Finder:RoleCapabilityCode()
+    local available=self:GetGameRoles(self.identity)
+    if not available then return nil end
+    return (available.tank and '1' or '0')..(available.healer and '1' or '0')..(available.dps and '1' or '0')
+end
+local function applicationFields(self,owner,id,role,version)
+    local fields={owner,id,role,'apply',string.format('%.0f',version)}
+    local code=self:RoleCapabilityCode(); if code then fields[6]=code end
+    return pack(fields)
 end
 
 local function countGroups(groups)
@@ -117,7 +137,7 @@ function Finder:RoleAvailable(group, role, exclude)
 end
 
 function Finder:Initialize(identity, send)
-    classesDirty=true; classCache={}
+    self.roleCapabilities={}
     assert(validText(identity, 1, 128) and type(send) == 'function')
     self.identity, self.send = identity, send
     self.groups, self.requests, self.pending, self.syncPending, self.requestVersions = {}, {}, {}, {}, {}
@@ -334,7 +354,7 @@ function Finder:Apply(owner, id, role)
         or not self:RoleAvailable(group, role) then return false end
     for _, member in ipairs(group.members) do if member == self.identity then return false end end
     self.requestSequence = math.max(self.requestSequence + 1, GetServerTime() * 1000)
-    if not self.send('JOIN', pack({owner, id, role, 'apply', string.format('%.0f', self.requestSequence)})) then return false end
+    if not self.send('JOIN', applicationFields(self,owner,id,role,self.requestSequence)) then return false end
     self.pending[key] = 'pending'
     self.pendingVersions[key], self.pendingRoles[key] = self.requestSequence, role
     return true
@@ -359,8 +379,8 @@ function Finder:Withdraw(owner, id)
 end
 
 function Finder:ReceiveJoin(sender, payload)
-    local f = unpackFields(payload, 5)
-    if not f or #f ~= 5 then return false end
+    local f = unpackFields(payload, 6)
+    if not f or (#f ~= 5 and #f ~= 6) then return false end
     local owner, id, role, action, version = unpack(f)
     version = tonumber(version)
     local group = self.groups[owner .. '\001' .. id]
@@ -372,6 +392,15 @@ function Finder:ReceiveJoin(sender, payload)
     local versionKey = id .. '\001' .. sender
     if self.requestVersions[versionKey] and self.requestVersions[versionKey] >= version then return false end
     if not self.requestVersions[versionKey] and countGroups(self.requestVersions) >= 2000 then return false end
+    if f[6] and not f[6]:match('^[01][01][01]$') then return false end
+    if action=='apply' and f[6] then
+        local reported={tank=f[6]:sub(1,1)=='1',healer=f[6]:sub(2,2)=='1',dps=f[6]:sub(3,3)=='1'}
+        local available=self:GetGameRoles(sender) or reported
+        if role=='flex' then
+            if not (available.tank or available.healer or available.dps) then return false end
+        elseif not available[role] then return false end
+        self.roleCapabilities[sender]=available
+    end
     if action=='apply' and not self:CanPerformRole(sender,role) then return false end
     if action == 'apply' and self.requests[id] and self.requests[id][sender] == nil
         and countGroups(self.requests[id]) >= 200 then return false end
@@ -528,7 +557,7 @@ function Finder:RetryPending()
     local owner, id = key:match('^([^\001]+)\001(.+)$')
     local version, role = self.pendingVersions[key], self.pendingRoles[key]
     if self.pending[key] == 'pending' and owner and id and version and role
-        and not self.send('JOIN', pack({owner, id, role, 'apply', string.format('%.0f', version)})) then return false end
+        and not self.send('JOIN', applicationFields(self,owner,id,role,version)) then return false end
     self.retryIndex = self.retryIndex + 1
     return false
 end

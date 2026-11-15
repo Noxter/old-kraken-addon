@@ -300,7 +300,7 @@ end
 
 refresh=function()
     if not window or not window:IsShown() then return end
-    if not Finder:CanPerformRole(Finder.identity,role) then role='dps'; UIDropDownMenu_SetText(window.roleButton,roleLabel(role)) end
+    if not Finder:CanPerformRole(Finder.identity,role) then role=Finder:PreferredRole(); UIDropDownMenu_SetText(window.roleButton,roleLabel(role)) end
     window.alertButton:SetText(Finder:GroupAlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local lines = {}
     for key, group in pairs(Finder.groups or {}) do
