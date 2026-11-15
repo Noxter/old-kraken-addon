@@ -30,6 +30,51 @@ local SORT_LABELS = {
 }
 
 local settings
+local addonView = false
+local addonFilter = 'all'
+
+local function HasAddon(name)
+    local comm = OldKraken.Communication
+    return comm and comm.HasRosterAddon and comm:HasRosterAddon(name)
+end
+
+local copyFrame, memberMenu
+local function CopyName(name)
+    if not copyFrame then
+        copyFrame = CreateFrame('Frame', 'OldKrakenCopyNameFrame', UIParent, 'BasicFrameTemplateWithInset')
+        copyFrame:SetSize(330, 100); copyFrame:SetPoint('CENTER'); copyFrame:SetFrameStrata('DIALOG')
+        table.insert(UISpecialFrames, 'OldKrakenCopyNameFrame')
+        if copyFrame.TitleText then copyFrame.TitleText:SetText("Скопіювати ім'я — Ctrl+C") end
+        local edit = CreateFrame('EditBox', nil, copyFrame, 'InputBoxTemplate')
+        edit:SetSize(280, 26); edit:SetPoint('CENTER'); edit:SetAutoFocus(false)
+        edit:SetScript('OnEscapePressed', function() copyFrame:Hide() end)
+        edit:SetScript('OnEnterPressed', function() copyFrame:Hide() end)
+        copyFrame.edit = edit
+    end
+    copyFrame:Show(); copyFrame.edit:SetText(name); copyFrame.edit:SetFocus(); copyFrame.edit:HighlightText()
+end
+
+local function ShowMemberMenu(row)
+    local member = row.member
+    if not member then return end
+    if GameTooltip then GameTooltip:Hide() end
+    if not memberMenu then memberMenu = CreateFrame('Frame', 'OldKrakenRosterMemberMenu', UIParent, 'UIDropDownMenuTemplate') end
+    UIDropDownMenu_Initialize(memberMenu, function(_, level)
+        local title = UIDropDownMenu_CreateInfo()
+        title.text = member.name; title.isTitle = true; title.notCheckable = true
+        UIDropDownMenu_AddButton(title, level)
+        local function Action(text, callback, disabled)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = text; info.notCheckable = true; info.disabled = disabled
+            info.func = function() CloseDropDownMenus(); callback() end
+            UIDropDownMenu_AddButton(info, level)
+        end
+        Action('Запросити в групу', function() OldKraken:InvitePlayer(member.name) end, not member.isOnline)
+        Action('Шепнути', function() ChatFrame_SendTell(member.name) end, not member.isOnline)
+        Action("Скопіювати ім'я", function() CopyName(member.name) end)
+    end, 'MENU')
+    ToggleDropDownMenu(1, nil, memberMenu, 'cursor', 0, 0)
+end
 
 local function GetSettings()
     if not OldKraken.DB then
@@ -89,6 +134,11 @@ local function MatchesFilters(member)
         return false
     end
 
+    if addonView and addonFilter ~= 'all' then
+        local installed = HasAddon(member.name)
+        if addonFilter == 'yes' and not installed then return false end
+        if addonFilter == 'unknown' and installed then return false end
+    end
     return true
 end
 
@@ -255,6 +305,34 @@ local function CreateRosterWindow(parent)
     end)
     frame.classDropdown = classDropdown
 
+    frame.viewButtons = {}
+    for i, label in ipairs({'Учасники', 'Аддон'}) do
+        local isAddon = i == 2
+        local tab = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+        OldKraken.UIStyle.Button(tab); tab:SetSize(100, 22)
+        tab:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18 + (i-1)*104, -8)
+        tab:SetText(label)
+        tab:SetScript('OnClick', function()
+            addonView = isAddon; frame.scrollFrame:SetVerticalScroll(0)
+            if isAddon and OldKraken.Communication.RequestRosterPresence then OldKraken.Communication:RequestRosterPresence() end
+            Roster:Render()
+        end)
+        frame.viewButtons[i] = tab
+    end
+    local filter = CreateFrame('Frame', 'OldKrakenRosterAddonFilter', frame, 'UIDropDownMenuTemplate')
+    OldKraken.UIStyle.Dropdown(filter); filter:SetPoint('TOPLEFT', frame, 'TOPLEFT', 570, -36)
+    UIDropDownMenu_SetWidth(filter, 200)
+    UIDropDownMenu_Initialize(filter, function(_, level)
+        for _, entry in ipairs({{'all','Усі'}, {'yes','Встановлено'}, {'unknown','Не підтверджено'}}) do
+            local value, label = entry[1], entry[2]
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label; info.checked = addonFilter == value
+            info.func = function() addonFilter = value; UIDropDownMenu_SetText(filter, label); Roster:Render() end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    UIDropDownMenu_SetText(filter, 'Усі'); frame.addonFilter = filter
+
     local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -72)
     summary:SetJustifyH("LEFT")
@@ -266,8 +344,8 @@ local function CreateRosterWindow(parent)
     CreateColumnHeader(frame, "КЛАС", "class", 350, 90)
     CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 444, 140)
     CreateColumnHeader(frame, "ПРОФЕСІЇ", nil, 588, 80)
-    CreateColumnHeader(frame, "СТАТУС", nil, 672, 70)
-    CreateColumnHeader(frame, "ДІЯ", nil, 746, 84)
+    frame.addonHeader = CreateColumnHeader(frame, "АДДОН", nil, 672, 174)
+
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -132)
@@ -294,7 +372,9 @@ local function CreateRosterWindow(parent)
 end
 
 local function CreateRow(index, parent)
-    local row = CreateFrame("Frame", nil, parent)
+    local row = CreateFrame("Button", nil, parent)
+    row:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+    row:SetScript('OnClick', ShowMemberMenu)
     row:SetSize(CONTENT_WIDTH, ROW_HEIGHT)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
     if index % 2 == 0 then
@@ -304,12 +384,14 @@ local function CreateRow(index, parent)
     end
 
     local columns = {
-        { x = 6, width = 170 },
+        { x = 22, width = 154 },
         { x = 180, width = 105 },
         { x = 289, width = 45 },
         { x = 338, width = 90 },
         { x = 432, width = 140 },
         { x = 660, width = 70 },
+        { x = 660, width = 174 },
+
     }
 
     row.cells = {}
@@ -322,13 +404,19 @@ local function CreateRow(index, parent)
         cell:SetWordWrap(false)
         row.cells[cellIndex] = cell
     end
+    row.onlineDot = row:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    row.onlineDot:SetPoint('LEFT', row, 'LEFT', 6, 0)
+    row.onlineDot:SetWidth(14)
+    row.onlineDot:SetHeight(ROW_HEIGHT)
     row.cellHovers = {}
-    for _, cellIndex in ipairs({1, 2, 4, 5}) do
-        local hover = CreateFrame('Frame', nil, row)
+    for _, cellIndex in ipairs({1, 2, 4, 5, 7}) do
+        local hover = CreateFrame('Button', nil, row)
+        hover:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+        hover:SetScript('OnClick', function() ShowMemberMenu(row) end)
         hover:SetAllPoints(row.cells[cellIndex]); hover:EnableMouse(true)
         hover:SetScript('OnEnter', function(self)
             if GameTooltip and self.fullText and self.fullText ~= '' then
-                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(self.fullText, 1, 1, 1, true); GameTooltip:Show()
+                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(self.fullText); GameTooltip:Show()
             end
         end)
         hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
@@ -360,37 +448,6 @@ local function CreateRow(index, parent)
         icon:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         icon:Hide(); row.professions[i]=icon
     end
-
-    local inviteButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    OldKraken.UIStyle.Button(inviteButton, "primary")
-    inviteButton:SetSize(76, 18)
-    inviteButton:SetPoint("LEFT", row, "LEFT", 734, 0)
-    inviteButton:SetText("Інвайт")
-    inviteButton:SetScript("OnClick", function(self)
-        if self.memberName and self.online then
-            OldKraken:InvitePlayer(self.memberName)
-        end
-    end)
-    inviteButton:SetScript("OnEnter", function(self)
-        if GameTooltip and self.memberName then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(self.online and ("Запросити " .. self.memberName .. " у групу") or "Гравець офлайн")
-            GameTooltip:Show()
-        end
-    end)
-    inviteButton:SetScript("OnLeave", function()
-        if GameTooltip then GameTooltip:Hide() end
-    end)
-    row.inviteButton = inviteButton
-
-    local offlineStatus = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    offlineStatus:SetPoint("CENTER", inviteButton, "CENTER")
-    offlineStatus:SetWidth(76)
-    offlineStatus:SetJustifyH("CENTER")
-    offlineStatus:SetText("Офлайн")
-    offlineStatus:SetTextColor(0.63, 0.67, 0.73)
-    offlineStatus:Hide()
-    row.offlineStatus = offlineStatus
 
     rowFrames[index] = row
     return row
@@ -435,7 +492,17 @@ function Roster:Render()
     end
     table.sort(filteredData, SortMembers)
 
+    rosterFrame.addonFilter:SetShown(addonView)
+    rosterFrame.addonHeader:SetShown(addonView)
+
+    rosterFrame.viewButtons[1]:SetEnabled(addonView)
+    rosterFrame.viewButtons[2]:SetEnabled(not addonView)
     UpdateSummary()
+    if addonView then
+        local comm = OldKraken.Communication
+        local version = comm and comm.GetLocalVersion and comm:GetLocalVersion() or '?'
+        rosterFrame.summaryText:SetText('Ваша версія: ' .. version .. ' | Помаранчева — старіша за вашу; блакитна — новіша; сіра — невідома.')
+    end
     UpdateFilterButtonLabels()
 
     local content = rosterFrame.contentFrame
@@ -443,14 +510,43 @@ function Roster:Render()
 
     for index, member in ipairs(filteredData) do
         local row = rowFrames[index] or CreateRow(index, content)
+        row.member = member
         local cells = row.cells
 
+        cells[7]:SetShown(addonView)
+
+        row.cellHovers[7]:SetShown(addonView)
+
+        if HasAddon(member.name) then cells[7]:SetTextColor(0.25, 1, 0.25) else cells[7]:SetTextColor(0.7, 0.7, 0.7) end
+        local comm = OldKraken.Communication
+        local version = comm and comm.GetRosterVersion and comm:GetRosterVersion(member.name)
+        local comparison = version and comm.CompareVersions and comm:CompareVersions(version, comm:GetLocalVersion())
+        local dot = HasAddon(member.name) and '|cff40ff40●|r' or '|cffa6adb8○|r'
+        cells[7]:SetText(dot .. ' (' .. (version or '?') .. ')')
+        local versionStatus = 'Версію не передано; оновіть аддон учасника та натисніть «Оновити».'
+        if comparison == -1 then
+            cells[7]:SetTextColor(1, 0.55, 0.15); versionStatus = 'Застаріла: версія старіша за вашу.'
+        elseif comparison == 1 then
+            cells[7]:SetTextColor(0.3, 0.8, 1); versionStatus = 'Новіша за вашу версію.'
+        elseif comparison == 0 then
+            cells[7]:SetTextColor(0.25, 1, 0.25); versionStatus = 'Така сама версія, як у вас.'
+        else
+            cells[7]:SetTextColor(0.7, 0.7, 0.7)
+            if version then versionStatus = 'Не вдалося порівняти номер версії.' end
+        end
+        row.cellHovers[7].fullText = (version or 'Невідомо') .. '\n' .. versionStatus
         cells[1]:SetText(SafeText(member.name))
         cells[2]:SetText(SafeText(member.rank))
         cells[3]:SetText(SafeText(member.level))
         cells[4]:SetText(SafeText(member.class))
         cells[5]:SetText(SafeText(member.zone))
-        cells[6]:SetText(member.isOnline and "Онлайн" or "Офлайн")
+        cells[6]:Hide()
+        row.onlineDot:SetText(member.isOnline and '●' or '○')
+        if member.isOnline then
+            row.onlineDot:SetTextColor(0.25, 1, 0.25)
+        else
+            row.onlineDot:SetTextColor(0.65, 0.68, 0.72)
+        end
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
         row.cellHovers[4].fullText = SafeText(member.class)
@@ -472,11 +568,6 @@ function Roster:Render()
         end
 
         row:Show()
-        row.inviteButton.memberName = member.name
-        row.inviteButton.online = member.isOnline
-        row.inviteButton:SetEnabled(member.isOnline)
-        row.inviteButton:SetShown(member.isOnline)
-        row.offlineStatus:SetShown(not member.isOnline)
         local professions=OldKraken.Workshop and OldKraken.Workshop:GetMemberProfessions(member.name) or {}
         for i,icon in ipairs(row.professions) do
             local profession=professions[i]
@@ -528,6 +619,7 @@ function Roster:RequestUpdate()
         return
     end
 
+    if OldKraken.Communication.RequestRosterPresence then OldKraken.Communication:RequestRosterPresence() end
     if C_GuildInfo and C_GuildInfo.GuildRoster then
         C_GuildInfo.GuildRoster()
     elseif GuildRoster then
@@ -578,6 +670,9 @@ eventFrame:SetScript("OnEvent", function()
     end
 end)
 if type(OldKraken.On)=='function' then
+    OldKraken:On('ROSTER_ADDON_CHANGED',function()
+        if rosterFrame and rosterFrame:IsShown() then Roster:Render() end
+    end)
     OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function()
         if rosterFrame and rosterFrame:IsShown() then Roster:Render() end
     end)

@@ -7,7 +7,7 @@ local partyDirty = true
 local nextPartyCheck = 0
 local soloSince = nil
 local diagnostics = { received = 0, accepted = 0, rejected = 0 }
-local lastBump = {}
+local REANNOUNCE_DELAY = 300
 
 local function profileKey(name, guild)
     local realm = GetRealmName and GetRealmName() or ''
@@ -141,14 +141,23 @@ comm:RegisterHandler('BUMP', function(sender, _, payload)
     if group and not group.closed and finder:GroupAlertsEnabled() then OldKraken:Fire('GROUP_FINDER_NEW', group) end
 end)
 
-function finder:Reannounce(id)
+function finder:GetReannounceRemaining(id)
     local group = active and self.groups[self.identity .. '\001' .. id]
-    if not group or group.closed or group.hidden then return false, 'group' end
-    local now = GetTime()
-    local left = (lastBump[id] or -300) + 300 - now
+    if not group or group.closed or group.hidden then return nil end
+    local now = GetServerTime()
+    storage.lastBump = storage.lastBump or {}
+    local created = tonumber(id:match('^(%d+)%-')) or now
+    local previous = tonumber(storage.lastBump[id]) or created
+    return math.max(0, math.ceil(previous + REANNOUNCE_DELAY - now))
+end
+
+function finder:Reannounce(id)
+    local left = self:GetReannounceRemaining(id)
+    if left == nil then return false, 'group' end
     if left > 0 then return false, 'cooldown', math.ceil(left) end
+    local group = self.groups[self.identity .. '\001' .. id]
     if not comm:SendProtocol('BUMP', self:EncodeGroup(group)) then return false, 'queue' end
-    lastBump[id] = now
+    storage.lastBump[id] = GetServerTime()
     return true
 end
 comm:RegisterHandler('JOIN', function(sender, _, payload)

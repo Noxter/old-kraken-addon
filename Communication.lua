@@ -255,6 +255,73 @@ function Communication:SendTest()
     end
 end
 
+-- Presence is evidence of installation during this session, never evidence of absence.
+Communication.rosterPresence = {}
+Communication.rosterVersions = {}
+function Communication:GetLocalVersion()
+    local getter = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+    return (getter and getter('OldKraken', 'Version')) or OldKraken.version or 'unknown'
+end
+local function VersionParts(version)
+    if type(version) ~= 'string' then return end
+    local major, minor, patch, suffix = version:match('^(%d+)%.(%d+)%.(%d+)(.*)$')
+    if not major then return end
+    suffix = suffix:match('^([^+]*)')
+    local stage, number = 3, 0
+    if suffix ~= '' then
+        local label, revision = suffix:match('^%-([a-z]+)%.?(%d*)$')
+        stage = ({alpha=0, beta=1, rc=2})[label]
+        if not stage then return end
+        number = tonumber(revision) or 0
+    end
+    return {tonumber(major), tonumber(minor), tonumber(patch), stage, number}
+end
+function Communication:CompareVersions(left, right)
+    local a, b = VersionParts(left), VersionParts(right)
+    if not a or not b then return nil end
+    for i=1,#a do
+        if a[i] < b[i] then return -1 end
+        if a[i] > b[i] then return 1 end
+    end
+    return 0
+end
+local function PresenceKey(name)
+    if type(name) ~= 'string' then return '' end
+    local realm = GetRealmName and GetRealmName() or ''
+    if not name:find('-', 1, true) then name = name .. '-' .. realm end
+    return (name:gsub('%s+', ''))
+end
+function Communication:HasRosterAddon(name)
+    local guild = GetGuildInfo and GetGuildInfo('player') or ''
+    if self.presenceGuild ~= guild then
+        self.rosterPresence = {}
+        self.rosterVersions = {}
+        self.presenceGuild = guild
+        self.lastPresenceQuery = nil
+    end
+    return PresenceKey(name) == PresenceKey(PlayerName()) or self.rosterPresence[PresenceKey(name)] == true
+end
+function Communication:GetRosterVersion(name)
+    self:HasRosterAddon(name)
+    if PresenceKey(name) == PresenceKey(PlayerName()) then return self:GetLocalVersion() end
+    return self.rosterVersions[PresenceKey(name)]
+end
+function Communication:RequestRosterPresence()
+    if not self.ready or not IsInGuild() then return end
+    local now = GetTime()
+    if self.lastPresenceQuery and now - self.lastPresenceQuery < 30 then return end
+    if self:QueueMessage('OKP^QUERY') then self.lastPresenceQuery = now end
+end
+function Communication:RecordRosterPresence(sender, version)
+    self:HasRosterAddon(sender) -- Reset evidence when the player's guild changes.
+    local key = PresenceKey(sender)
+    if not self.rosterPresence[key] or (version and self.rosterVersions[key] ~= version) then
+        self.rosterPresence[key] = true
+        if version then self.rosterVersions[key] = version end
+        if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+    end
+end
+
 function Communication:OnAddonMessage(prefix, message, channel, sender)
     if not IsOurMessagePrefix(prefix) or channel ~= "GUILD" or type(message) ~= "string" then
         return
@@ -266,6 +333,22 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
 
     if #message > 240 then
         self.stats.invalid = self.stats.invalid + 1
+        return
+    end
+
+    self:RecordRosterPresence(sender)
+    if message == 'OKP^QUERY' then
+        local now = GetTime()
+        if not self.lastPresenceReply or now - self.lastPresenceReply >= 10 then
+            if self:QueueMessage('OKP^HERE^' .. self:GetLocalVersion()) then self.lastPresenceReply = now end
+        end
+        return
+    elseif message == 'OKP^HERE' then return
+    elseif message:sub(1, 9) == 'OKP^HERE^' then
+        local version = message:sub(10)
+        if #version <= 48 and version:match('^[%w%.%+%-]+$') then
+            self:RecordRosterPresence(sender, version)
+        end
         return
     end
 
@@ -376,6 +459,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         Communication.ready = ok and registered ~= false
         if Communication.ready then
             Print("Префікс OLDKRKN зареєстровано.")
+            Communication:RequestRosterPresence()
         else
             Print("Не вдалося зареєструвати префікс OLDKRKN: " .. tostring(registered))
         end

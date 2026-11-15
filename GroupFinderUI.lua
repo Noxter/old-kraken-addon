@@ -13,6 +13,17 @@ local category, role = 'dungeon', 'dps'
 local filterCategory, filterRole, filterFree = 'all', '', false
 local dungeon, filterDungeon = '', ''
 local catalog = OldKraken.ActivityCatalog
+local function UpdateReannounceButton(control)
+    local group = selected and Finder.groups[selected]
+    local remaining = group and Finder.GetReannounceRemaining and Finder:GetReannounceRemaining(group.id)
+    if remaining and remaining > 0 then
+        control:SetText(string.format('Анонс через %02d:%02d', math.floor(remaining / 60), remaining % 60))
+        control:SetEnabled(false)
+    else
+        control:SetText('Оновити набір')
+        control:SetEnabled(remaining == 0)
+    end
+end
 local dungeonOptions = catalog.dungeon
 local dungeonLabels, dungeonLevels = {}, {}
 for _, options in ipairs({catalog.dungeon, catalog.raid}) do
@@ -513,6 +524,7 @@ refresh=function()
     window.applicationActionButton:SetShown(not showingRequests and tab == 'applications' and g and g.owner ~= Finder.identity and pending ~= nil)
     window.cancelButton:SetShown(canManage and not showingRequests)
     window.bumpButton:SetShown(canManage and not showingRequests)
+    UpdateReannounceButton(window.bumpButton)
     local roleLabelY = tab == 'create' and -330 or -313
     window.roleLabel:ClearAllPoints(); window.roleLabel:SetPoint('TOPLEFT', window, 'TOPLEFT', 550, roleLabelY)
     window.roleButton:ClearAllPoints(); window.roleButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 534, roleLabelY - 14)
@@ -860,6 +872,13 @@ local function createWindow(parent)
         if ok then print('Old Kraken: повторне оголошення додано до черги гільдії.')
         elseif reason == 'cooldown' then print('Old Kraken: повторити оголошення можна через ' .. seconds .. ' с.')
         else print('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.') end
+        UpdateReannounceButton(f.bumpButton)
+    end)
+    f.bumpButton:SetScript('OnUpdate', function(self, elapsed)
+        self.countdownElapsed = (self.countdownElapsed or 0) + elapsed
+        if self.countdownElapsed < 0.25 then return end
+        self.countdownElapsed = 0
+        UpdateReannounceButton(self)
     end)
     for _, item in ipairs({{f.cancelButton, 'Закрити набір: оголошення зникне з відкритих груп.'}, {f.bumpButton, 'Повторно сповістити гільдію про набір. Інтервал — 5 хвилин.'}}) do
         local control, help = item[1], item[2]
