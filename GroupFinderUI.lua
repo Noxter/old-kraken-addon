@@ -750,10 +750,10 @@ local function createWindow(parent)
         remove:Hide()
         f.deleteButtons[i] = remove
     end
-    f.previousPageButton = button(f, '‹', 18, -313, 68, function() offset=math.max(0, offset-CARDS_PER_PAGE); refresh() end, 32)
-    f.nextPageButton = button(f, '›', 130, -313, 68, function() if f.visible and offset+CARDS_PER_PAGE < #f.visible then offset=offset+CARDS_PER_PAGE end; refresh() end, 32)
+    f.previousPageButton = button(f, '‹', 18, -313, 80, function() offset=math.max(0, offset-CARDS_PER_PAGE); refresh() end, 36)
+    f.nextPageButton = button(f, '›', 116, -313, 80, function() if f.visible and offset+CARDS_PER_PAGE < #f.visible then offset=offset+CARDS_PER_PAGE end; refresh() end, 36)
     f.listPage = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.listPage:SetPoint('TOPLEFT', f, 'TOPLEFT', 86, -323)
+    f.listPage:SetPoint('TOPLEFT', f, 'TOPLEFT', 96, -323)
     f.listPage:SetWidth(44); f.listPage:SetJustifyH('CENTER')
     f.detailsScroll = CreateFrame('ScrollFrame', nil, f, 'UIPanelScrollFrameTemplate')
     f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.detailsScroll:SetSize(300, 175)
