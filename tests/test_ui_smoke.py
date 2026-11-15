@@ -162,10 +162,10 @@ assert(not ui.previousPageButton:IsShown() and not ui.nextPageButton:IsShown() a
 
 selectTab('create')
 local function selectActivityCard(value)
-    ui.dungeonButton.scripts.OnClick()
     local picker=assert(ui.activityPicker)
+    assert(picker:IsShown())
     for _,card in ipairs(picker.cards) do
-        if card.entry and card.entry.value==value then card.scripts.OnClick(card); assert(not picker:IsShown()); return end
+        if card.entry and card.entry.value==value then card.scripts.OnClick(card); assert(picker:IsShown()); return end
     end
     error('Activity card not found: '..value)
 end

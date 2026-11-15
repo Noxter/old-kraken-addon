@@ -549,10 +549,14 @@ refresh=function()
     window.requestsButton:SetText(showingRequests and '← До деталей' or ('Заявки: ' .. requestCount))
     window.requestsButton:SetShown(tab ~= 'create' and (haveOwned or showingRequests))
     for _, control in ipairs(window.filterControls) do control:SetShown(tab == 'all') end
-    window.dungeonButton:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
+    window.dungeonSelection:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
     window.dungeonLabel:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
     window.dungeonLabel:SetText(category == 'raid' and 'Рейд' or 'Підземелля')
-    if window.activityPicker and (tab~='create' or (category~='dungeon' and category~='raid')) then window.activityPicker:Hide() end
+    if window.activityPicker then
+        local show=tab=='create' and (category=='dungeon' or category=='raid')
+        window.activityPicker:SetShown(show)
+        if show then window.UpdateActivityCards() end
+    end
     for _, box in ipairs(window.createFields) do
         if tab == 'create' then box:Show(); box.label:Show() else box:Hide(); box.label:Hide() end
     end
@@ -826,8 +830,7 @@ local function createWindow(parent)
             if category ~= previousCategory then
                 if autoDungeonTitle and f.titleBox:GetText() == autoDungeonTitle then f.titleBox:SetText('') end
                 autoDungeonTitle=nil
-                dungeon=''; f.dungeonButton:SetText('Обрати підземелля…')
-                if f.activityPicker then f.activityPicker:Hide() end
+                dungeon=''; f.dungeonSelection:SetText('Без конкретного підземелля')
             end
             if category == 'dungeon' then
                 f.maxBox:SetText('5')
@@ -855,51 +858,66 @@ local function createWindow(parent)
         if recommended then
             f.minBox:SetText(tostring(recommended.min)); f.maxLevelBox:SetText(tostring(recommended.max))
         end
-        f.dungeonButton:SetText(dungeonLabels[value] or 'Обрати підземелля…')
-        if f.activityPicker then f.activityPicker:Hide() end
+        f.dungeonSelection:SetText(value~='' and dungeonLabels[value] or 'Без конкретного підземелля')
+        f.UpdateActivityCards()
     end
-    f.dungeonButton = button(f, 'Обрати підземелля…', 460, -408, 260, function()
-        if f.activityPicker and f.activityPicker:IsShown() then f.activityPicker:Hide(); return end
-        if not f.activityPicker then
-            local picker=CreateFrame('Frame','OldKrakenActivityPicker',f,'BackdropTemplate')
-            picker:SetSize(840,455); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-62)
-            picker:SetFrameStrata('DIALOG'); picker:SetFrameLevel((tonumber((f:GetFrameLevel())) or 0)+20)
-            picker:EnableMouse(true)
-            picker:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
-            picker:SetBackdropColor(0.035,0.04,0.05,1); picker:SetBackdropBorderColor(0.65,0.49,0.18,1)
-            table.insert(UISpecialFrames,'OldKrakenActivityPicker')
-            picker.heading=picker:CreateFontString(nil,'OVERLAY','GameFontNormalLarge')
-            picker.heading:SetPoint('TOPLEFT',picker,'TOPLEFT',14,-14); picker.heading:SetText('Куди йдемо?')
-            local hint=picker:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-            hint:SetPoint('TOPLEFT',picker,'TOPLEFT',185,-18); hint:SetText('Підсвічено — під ваш рівень. Натисніть картку для вибору.')
-            button(picker,'×',800,-8,28,function() picker:Hide() end)
-            button(picker,'Без конкретного підземелля',14,-45,260,function() selectActivity('') end)
-            local scroll=CreateFrame('ScrollFrame','OldKrakenActivityPickerScroll',picker,'UIPanelScrollFrameTemplate')
-            scroll:SetPoint('TOPLEFT',picker,'TOPLEFT',14,-80); scroll:SetSize(790,356)
-            scroll:EnableMouseWheel(true)
-            local content=CreateFrame('Frame',nil,scroll); content:SetSize(790,1); scroll:SetScrollChild(content)
-            scroll:SetScript('OnMouseWheel',function(self,delta)
-                local maximum=math.max(0,(tonumber((content:GetHeight())) or 0)-(tonumber((self:GetHeight())) or 356))
-                self:SetVerticalScroll(math.max(0,math.min(maximum,(tonumber((self:GetVerticalScroll())) or 0)-delta*70)))
-            end)
-            picker.scroll=scroll; picker.content=content; picker.cards={}
-            f.activityPicker=picker
-            f:HookScript('OnHide',function() picker:Hide() end)
-        end
-        local picker=f.activityPicker
+    -- An inline, clipped three-column grid. No popup or additional click is needed.
+    local picker=CreateFrame('Frame',nil,f)
+    picker:SetSize(840,245); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-64)
+    picker:EnableMouse(true); picker:EnableMouseWheel(true)
+    local background=picker:CreateTexture(nil,'BACKGROUND')
+    background:SetAllPoints(picker); background:SetColorTexture(0.035,0.04,0.05,1)
+    picker.heading=picker:CreateFontString(nil,'OVERLAY','GameFontNormal')
+    picker.heading:SetPoint('TOPLEFT',picker,'TOPLEFT',10,-9)
+    local hint=picker:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+    hint:SetPoint('TOPLEFT',picker,'TOPLEFT',160,-11)
+    hint:SetText('Підсвічено під ваш рівень · прокрутка коліщатком')
+    picker.clear=button(picker,'Без конкретного підземелля',605,-5,225,function() selectActivity('') end)
+    local clip=CreateFrame('Frame',nil,picker)
+    clip:SetPoint('TOPLEFT',picker,'TOPLEFT',6,-36); clip:SetSize(808,202)
+    if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
+    local content=CreateFrame('Frame',nil,clip)
+    content:SetPoint('TOPLEFT',clip,'TOPLEFT',0,0); content:SetSize(808,1)
+    picker.clip=clip; picker.content=content; picker.cards={}; picker.offset=0
+    function picker:ScrollTo(value)
+        local maximum=math.max(0,(self.fullHeight or 0)-202)
+        self.offset=math.max(0,math.min(maximum,value or 0))
+        content:ClearAllPoints(); content:SetPoint('TOPLEFT',clip,'TOPLEFT',0,self.offset)
+    end
+    local function scrollActivities(_,delta) picker:ScrollTo(picker.offset-delta*70) end
+    picker:SetScript('OnMouseWheel',scrollActivities)
+    clip:EnableMouseWheel(true); clip:SetScript('OnMouseWheel',scrollActivities)
+    f.activityPicker=picker
+    picker:Hide()
+    f.dungeonSelection=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+    f.dungeonSelection:SetPoint('TOPLEFT',f,'TOPLEFT',460,-408)
+    f.dungeonSelection:SetSize(350,30); f.dungeonSelection:SetJustifyH('LEFT')
+    f.dungeonSelection:SetText('Без конкретного підземелля')
+    f.UpdateActivityCards=function()
         picker.heading:SetText(category=='raid' and 'Оберіть рейд' or 'Куди йдемо?')
         local level=type(UnitLevel)=='function' and tonumber((UnitLevel('player'))) or 0
         level=level or 0
         local count=0
+        local firstFit,selectedIndex
         for _,entry in ipairs(catalog[category] or catalog.dungeon) do
             if entry.value~='' then
                 count=count+1
                 local card=picker.cards[count]
                 if not card then
-                    card=CreateFrame('Button',nil,picker.content,'BackdropTemplate')
-                    card:SetSize(256,64)
-                    card:SetPoint('TOPLEFT',picker.content,'TOPLEFT',((count-1)%3)*264,-math.floor((count-1)/3)*70)
-                    card:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
+                    card=CreateFrame('Button',nil,picker.content)
+                    card:SetSize(258,64)
+                    card:SetPoint('TOPLEFT',picker.content,'TOPLEFT',((count-1)%3)*270,-math.floor((count-1)/3)*70)
+                    card.fill=card:CreateTexture(nil,'BACKGROUND'); card.fill:SetAllPoints(card)
+                    card.edges={}
+                    for _,side in ipairs({'TOP','BOTTOM','LEFT','RIGHT'}) do
+                        local edge=card:CreateTexture(nil,'OVERLAY')
+                        if side=='TOP' or side=='BOTTOM' then
+                            edge:SetPoint(side..'LEFT',card,side..'LEFT',0,0); edge:SetPoint(side..'RIGHT',card,side..'RIGHT',0,0); edge:SetHeight(1)
+                        else
+                            edge:SetPoint('TOP'..side,card,'TOP'..side,0,0); edge:SetPoint('BOTTOM'..side,card,'BOTTOM'..side,0,0); edge:SetWidth(1)
+                        end
+                        card.edges[#card.edges+1]=edge
+                    end
                     card.art=card:CreateTexture(nil,'ARTWORK'); card.art:SetPoint('TOPLEFT',card,'TOPLEFT',1,-1); card.art:SetSize(62,62)
                     card.title=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
                     card.title:SetPoint('TOPLEFT',card,'TOPLEFT',71,-8); card.title:SetSize(177,28); card.title:SetJustifyH('LEFT')
@@ -907,6 +925,7 @@ local function createWindow(parent)
                     card.levels:SetPoint('BOTTOMLEFT',card,'BOTTOMLEFT',71,7); card.levels:SetSize(177,16); card.levels:SetJustifyH('LEFT')
                     local hover=card:CreateTexture(nil,'HIGHLIGHT'); hover:SetAllPoints(card); hover:SetColorTexture(1,0.8,0.3,0.12)
                     card:SetHighlightTexture(hover)
+                    card:EnableMouseWheel(true); card:SetScript('OnMouseWheel',scrollActivities)
                     card:SetScript('OnClick',function(self) if self.entry then selectActivity(self.entry.value) end end)
                     card:SetScript('OnEnter',function(self)
                         if GameTooltip and self.entry then
@@ -918,23 +937,33 @@ local function createWindow(parent)
                     card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
                     picker.cards[count]=card
                 end
-                local fits=entry.min and entry.max and level>=entry.min and level<=entry.max
+                local fits=level==0 or (entry.min and entry.max and level>=entry.min-2 and level<=entry.max+2)
+                if fits and not firstFit then firstFit=count end
+                if entry.value==dungeon then selectedIndex=count end
                 card.entry=entry; card.fitsLevel=fits and true or false
                 catalog.SetArtwork(card.art,entry.value); card.art:SetDesaturated(not fits); card.art:SetAlpha(fits and 1 or 0.65)
                 card.title:SetText(entry.label)
                 card.title:SetTextColor(fits and 1 or 0.8,fits and 0.91 or 0.8,fits and 0.65 or 0.8)
                 card.levels:SetText(entry.min..'–'..entry.max..(fits and '  |cff69dc8cпід ваш рівень|r' or ''))
-                card:SetBackdropColor(fits and 0.16 or 0.06,fits and 0.12 or 0.065,0.06,1)
-                if entry.value==dungeon then card:SetBackdropBorderColor(1,0.75,0.2,1)
-                elseif fits then card:SetBackdropBorderColor(0.65,0.49,0.18,1)
-                else card:SetBackdropBorderColor(0.23,0.25,0.28,1) end
+                card.fill:SetColorTexture(fits and 0.16 or 0.06,fits and 0.12 or 0.065,0.06,1)
+                card.selected=entry.value==dungeon
+                local r,g,b=0.23,0.25,0.28
+                if card.selected then r,g,b=1,0.75,0.2
+                elseif fits then r,g,b=0.65,0.49,0.18 end
+                for _,edge in ipairs(card.edges) do edge:SetColorTexture(r,g,b,1) end
                 card:Show()
             end
         end
         for i=count+1,#picker.cards do picker.cards[i].entry=nil; picker.cards[i]:Hide() end
-        picker.content:SetHeight(math.max(1,math.ceil(count/3)*70))
-        picker.scroll:SetVerticalScroll(0); picker:Show()
-    end)
+        picker.fullHeight=math.max(1,math.ceil(count/3)*70)
+        picker.content:SetHeight(picker.fullHeight)
+        if picker.category~=category then
+            local target=selectedIndex or firstFit
+            picker.offset=target and math.max(0,math.floor((target-1)/3)*70-70) or 0
+            picker.category=category
+        end
+        picker:ScrollTo(picker.offset)
+    end
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
     f.createButton = button(f, 'Створити', 550, -455, 150, function()
