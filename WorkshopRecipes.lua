@@ -46,12 +46,14 @@ local function connect()
     local name=myName(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
     local realm=type(GetRealmName)=='function' and GetRealmName()
     if not name or not safeText(guild,1,128) or not usable(realm,'string') or not OldKraken.DB then
+        if Recipes.CancelPicker then Recipes:CancelPicker() end
         active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts={},{}
         tabStates={}
         if frame then frame:Hide() end; return
     end
     local k=realm..'\001'..guild
     if active and identity==name and profile==k then return end
+    if Recipes.CancelPicker then Recipes:CancelPicker() end
     tabStates={}
     local db=OldKraken.DB; if type(db.workshop)~='table' then db.workshop={} end
     if type(db.workshop.recipeCatalog)~='table' then db.workshop.recipeCatalog={} end
@@ -598,6 +600,7 @@ render=function()
     if frame.embedded and OldKraken.Workshop then OldKraken.Workshop:UpdateTabs() end
     if frame.embedded then frame.context:SetText(selectRecipe and 'Оберіть рецепт для замовлення' or (professionContext and professionNames[professionContext] or (mastersView and 'Усі професії' or 'Усі рецепти'))) end
     frame.masterRecipes:SetShown(mastersView and selectedMaster~=nil)
+    frame.cancelPick:SetShown(selectRecipe~=nil)
     frame.onlineOnly:SetShown(mastersView and true or false)
     if mastersView then
         frame.onlineOnly:SetText(mastersOnline and 'Лише онлайн: так' or 'Лише онлайн: ні')
@@ -766,7 +769,7 @@ local function createWindow(parent)
             f.infoScroll:SetVerticalScroll(0)
             if self.entry and tab=='masters' and not selectRecipe then selectedMaster=self.entry; render()
             elseif self.entry and selectRecipe then
-                local callback=selectRecipe; selectRecipe=nil
+                local callback=selectRecipe; Recipes:CancelPicker()
                 if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Back() else f:Hide() end
                 callback(self.entry.record)
             elseif self.entry then selectedEntry=self.entry; render() end
@@ -788,7 +791,7 @@ local function createWindow(parent)
     f.order=button(f,'Замовити',570,-410,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
     f.masterRecipes=button(f,'Рецепти майстра',570,-410,160,function()
         if not selectedMaster then return end
-        if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Navigate('recipes') end
+        if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Navigate('recipes',true) end
         local masterProfession=selectedMaster.profession
         viewOwner=selectedMaster.name; tab='recipes'; selectedEntry=nil; selectedMaster=nil; offset=0; f.query:SetText(''); render()
         if not professionContext then professionContext=masterProfession; search('prof:'..professionContext); render() end
@@ -798,7 +801,12 @@ local function createWindow(parent)
     button(f,'›',130,-394,44,function() offset=offset+1; render() end)
     f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-438); f.status:SetWidth(410); f.status:SetJustifyH('LEFT')
     f.status:SetText(scanStatus)
-    if not parent then f:SetScript('OnHide',function() selectRecipe=nil end) end
+    f.cancelPick=button(f,'Скасувати вибір',570,-438,145,function()
+        if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Back()
+        else Recipes:CancelPicker(); f:Hide() end
+    end)
+    f.cancelPick:Hide()
+    if not parent then f:SetScript('OnHide',function() Recipes:CancelPicker() end) end
     f:Hide(); return f
 end
 function Recipes:CreatePanel(parent)
@@ -806,6 +814,8 @@ function Recipes:CreatePanel(parent)
     return frame
 end
 function Recipes:RefreshPanel() render() end
+function Recipes:IsPicking() return selectRecipe~=nil end
+function Recipes:CancelPicker() selectRecipe=nil end
 function Recipes:GetTab() return selectRecipe and 'recipes' or tab end
 function Recipes:SelectTab(nextTab)
     if nextTab~='recipes' and nextTab~='masters' then return end
@@ -816,18 +826,19 @@ function Recipes:SelectTab(nextTab)
         restoringView=true; frame.query:SetText(''); restoringView=false
         if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     end
-    selectRecipe=nil
+    self:CancelPicker()
     switchTab(nextTab)
     render()
 end
 function Recipes:CaptureView()
     return {profession=professionContext,master=selectedMaster,tab=tab,online=mastersOnline,
-        selected=selectedEntry,owner=viewOwner,selectRecipe=selectRecipe,offset=offset,
+        selected=selectedEntry,owner=viewOwner,offset=offset,
         results=resultSet,resultQuery=resultQuery,activeQuery=activeQuery,query=frame and frame.query:GetText() or '',status=frame and frame.status:GetText() or ''}
 end
 function Recipes:RestoreView(state)
     professionContext,selectedMaster,tab,mastersOnline=state.profession,state.master,state.tab,state.online
-    selectedEntry,viewOwner,selectRecipe,offset,resultSet,resultQuery=state.selected,state.owner,state.selectRecipe,state.offset,state.results,state.resultQuery
+    selectedEntry,viewOwner,offset,resultSet,resultQuery=state.selected,state.owner,state.offset,state.results,state.resultQuery
+    self:CancelPicker()
     activeQuery=state.activeQuery and GetTime()<=state.activeQuery.untilTime and state.activeQuery or nil
     if resultQuery then addCached(resultQuery) end
     if selectedEntry then
@@ -845,11 +856,13 @@ function Recipes:RestoreView(state)
     if tab=='recipes' and not professionContext then addCached('',textFilter(state.query)) end
     frame.status:SetText(state.status or ''); render()
 end
-function Recipes:Show()
+function Recipes:Show(forceNavigation)
     connect(); if not active then print('Old Kraken: пошук рецептів доступний членам гільдії.'); return end
     if OldKraken.UIHub and OldKraken.Workshop then
         OldKraken.UIHub:ShowPage('workshop')
-        OldKraken.Workshop:Navigate('recipes')
+        if OldKraken.Workshop.currentView=='recipes' and not forceNavigation and not selectRecipe then frame:Show(); render(); return end
+        self:CancelPicker()
+        OldKraken.Workshop:Navigate('recipes',forceNavigation)
     elseif not frame then frame=createWindow() end
     professionContext,selectedMaster,tab,viewOwner,selectRecipe=nil,nil,'recipes',nil,nil
     restoringView=true; frame.query:SetText(''); restoringView=false
@@ -911,9 +924,12 @@ function Recipes:GetProfessionSummaries()
     end
     return result
 end
-function Recipes:ShowProfession(profession)
+function Recipes:ShowProfession(profession,forceNavigation)
     if not professionNames[profession] then return end
-    self:Show(); if not active or not frame then return end
+    if not forceNavigation and OldKraken.Workshop and OldKraken.Workshop.currentView=='recipes' and professionContext==profession and tab=='recipes' and not viewOwner and not selectRecipe then
+        self:Show(); return
+    end
+    self:Show(true); if not active or not frame then return end
     selectRecipe=nil; selectedEntry=nil; viewOwner=nil; professionContext=profession; selectedMaster=nil; tab='recipes'; mastersOnline=false
     if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     frame.query:SetText('')
@@ -922,7 +938,7 @@ function Recipes:ShowProfession(profession)
 end
 function Recipes:ShowMemberProfession(name,profession)
     if not safeText(name,1,128) or not professionNames[profession] then return end
-    self:ShowProfession(profession)
+    self:ShowProfession(profession,true)
     if active and frame then
         viewOwner=name; selectedEntry=nil
         frame.status:SetText(name..' · '..professionNames[profession]..': збережені рецепти; список може бути неповним.')
@@ -971,7 +987,7 @@ function Recipes:Knows(itemID,recipeID)
     return false
 end
 function Recipes:ShowMasters(itemID,recipeID)
-    self:Show(); if not active or not frame then return end
+    self:Show(true); if not active or not frame then return end
     selectRecipe=nil; selectedEntry=nil; viewOwner=nil
     local query=itemID>0 and ('item:'..itemID) or ('recipe:'..recipeID)
     frame.query:SetText(query); frame.status:SetText('Відомі майстри; дата показує останнє зчитування рецепта.')

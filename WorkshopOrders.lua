@@ -21,6 +21,8 @@ local statusFilter,professionFilter='all',0
 local searchQuery=''
 local chosenRecipe
 local refresh
+local saveDraft,restoreDraft,clearDraft
+local restoringDraft=false
 
 local function textOK(s,min,max) return type(s)=='string' and #s>=min and #s<=max and not s:find('[%z\1-\31\127]') end
 local function int(n,min,max) return type(n)=='number' and n==n and n%1==0 and n>=min and n<=max end
@@ -134,7 +136,7 @@ local function connect()
     if type(db.workshop.guilds)~='table' then db.workshop.guilds={} end
     if type(db.workshop.guilds[guildKey])~='table' then db.workshop.guilds[guildKey]={} end
     scope=db.workshop.guilds[guildKey]
-    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays','orderDeliveryTallies','orderActionRelays','orderPaymentRelays','orderResults','orderResultRelays'}) do if type(scope[field])~='table' then scope[field]={} end end
+    for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays','orderDeliveryTallies','orderActionRelays','orderPaymentRelays','orderResults','orderResultRelays','orderDrafts'}) do if type(scope[field])~='table' then scope[field]={} end end
     if type(scope.orderDeliveryTallies[name])~='table' then scope.orderDeliveryTallies[name]={} end
     active,identity,profile=true,name,guildKey
     own,observed,intents,dirty,relayDirty={}, {}, {}, {}, {}
@@ -176,7 +178,9 @@ local function connect()
     end
     sequence=int(scope.orderSequences[name],0,9000000000000000) and scope.orderSequences[name] or 0
     for k in pairs(own) do dirty[k]=true end
-    nextSync,lastQueries,nextRelaySweep,lastSnapshotQuery=0,{},0,-60; persist(); changed()
+    nextSync,lastQueries,nextRelaySweep,lastSnapshotQuery=0,{},0,-60; persist()
+    if window and restoreDraft then restoreDraft() end
+    changed()
 end
 local function create(item,qty,reward,note,recipe)
     qty,reward=tonumber(qty),tonumber(reward)
@@ -614,6 +618,36 @@ local function dropdown(parent,name,x,y,width,values,labels,get,set)
     end)
     UIDropDownMenu_SetText(f,labels[get()]); return f
 end
+saveDraft=function()
+    if restoringDraft or not active or not scope or not identity or not window or not window.orderForm then return end
+    local form=window.orderForm
+    scope.orderDrafts[identity]={item=form.item:GetText() or '',quantity=form.quantity:GetText() or '',
+        reward=form.reward:GetText() or '',note=form.note:GetText() or '',profession=profession,
+        materials=materials,deadline=deadline,recipe=chosenRecipe and {item=chosenRecipe.item,recipe=chosenRecipe.recipe} or nil}
+end
+restoreDraft=function()
+    if not active or not window or not window.orderForm then return end
+    local draft=type(scope.orderDrafts[identity])=='table' and scope.orderDrafts[identity] or {}
+    local function value(v,default) return type(v)=='string' and v or default end
+    local form=window.orderForm
+    restoringDraft=true
+    profession=professionNames[draft.profession] and draft.profession or 0
+    materials=materialNames[draft.materials] and draft.materials or 'customer'
+    deadline=deadlineNames[draft.deadline] and draft.deadline or 86400
+    form.item:SetText(value(draft.item,'')); form.quantity:SetText(value(draft.quantity,'1'))
+    form.reward:SetText(value(draft.reward,'0')); form.note:SetText(value(draft.note,''))
+    local recipe=draft.recipe
+    chosenRecipe=type(recipe)=='table' and int(recipe.item,0,100000000) and int(recipe.recipe,1,100000000)
+        and {item=recipe.item,recipe=recipe.recipe} or nil
+    UIDropDownMenu_SetText(window.professionMenu,professionNames[profession] or 'Оберіть професію')
+    UIDropDownMenu_SetText(window.materialsMenu,materialNames[materials])
+    UIDropDownMenu_SetText(window.deadlineMenu,deadlineNames[deadline])
+    restoringDraft=false
+end
+clearDraft=function()
+    if active and scope and identity then scope.orderDrafts[identity]=nil end
+    restoreDraft()
+end
 local function showError() print('Old Kraken: дію не виконано. Оновіть дані або перевірте стан замовлення.') end
 StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_CANCEL={
     text='Скасувати замовлення «%s»?', button1='Скасувати', button2='Назад',
@@ -944,10 +978,11 @@ local function createWindow(parent)
     form.item=input(form,'Предмет або посилання',18,formY(-420,-64),embedded and 350 or 300,'')
     form.quantity=input(form,'Кількість',embedded and 380 or 335,formY(-420,-64),65,'1')
     form.reward=input(form,'Винагорода (зол.)',embedded and 465 or 420,formY(-420,-64),embedded and 90 or 120,'0')
-    form.item:SetScript('OnTextChanged',function() chosenRecipe=nil end)
+    form.item:SetScript('OnTextChanged',function() if not restoringDraft then chosenRecipe=nil; saveDraft() end end)
     form.note=input(form,'Коментар',18,formY(-475,-115),360,'')
+    for _,field in ipairs({form.quantity,form.reward,form.note}) do field:SetScript('OnTextChanged',saveDraft) end
     local professionChoices={[0]='Оберіть професію'}; for id,name in pairs(professionNames) do professionChoices[id]=name end
-    local professionMenu=dropdown(form,'OldKrakenOrderProfession',400,formY(-492,-132),embedded and 155 or 170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v end)
+    local professionMenu=dropdown(form,'OldKrakenOrderProfession',400,formY(-492,-132),embedded and 155 or 170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v; saveDraft() end)
     f.professionMenu=professionMenu
     f.orderForm=form
     button(form,'Обрати рецепт',embedded and 570 or 560,formY(-438,-64),embedded and 130 or 160,function()
@@ -956,17 +991,18 @@ local function createWindow(parent)
             if not professionNames[r.profession] then return end
             profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
             form.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe}
+            saveDraft()
         end)
     end)
     local profLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); profLabel:SetPoint('TOPLEFT',form,'TOPLEFT',400,formY(-475,-115)); profLabel:SetText('Професія')
-    dropdown(form,'OldKrakenOrderMaterials',embedded and 570 or 580,formY(-492,-132),embedded and 130 or 140,{'customer','crafter','mixed'},materialNames,function() return materials end,function(v) materials=v end)
+    f.materialsMenu=dropdown(form,'OldKrakenOrderMaterials',embedded and 570 or 580,formY(-492,-132),embedded and 130 or 140,{'customer','crafter','mixed'},materialNames,function() return materials end,function(v) materials=v; saveDraft() end)
     local matLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); matLabel:SetPoint('TOPLEFT',form,'TOPLEFT',embedded and 570 or 580,formY(-475,-115)); matLabel:SetText('Ресурси')
-    dropdown(form,'OldKrakenOrderDeadline',18,formY(-550,-197),150,{3600,21600,86400,604800},deadlineNames,function() return deadline end,function(v) deadline=v end)
+    f.deadlineMenu=dropdown(form,'OldKrakenOrderDeadline',18,formY(-550,-197),150,{3600,21600,86400,604800},deadlineNames,function() return deadline end,function(v) deadline=v; saveDraft() end)
     local dueLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); dueLabel:SetPoint('TOPLEFT',form,'TOPLEFT',18,formY(-533,-180)); dueLabel:SetText('Термін')
     button(form,'Опублікувати',embedded and 530 or 650,formY(-548,-197),160,function()
         if not professionNames[profession] then print('Old Kraken: оберіть професію або рецепт.'); return end
         if create(form.item:GetText(),form.quantity:GetText(),form.reward:GetText(),form.note:GetText(),chosenRecipe) then
-            form.item:SetText(''); form.note:SetText(''); profession=0; UIDropDownMenu_SetText(professionMenu,professionChoices[0])
+            clearDraft()
             if embedded and OldKraken.Workshop then OldKraken.Workshop:Show('orders') end
             print('Old Kraken: замовлення збережено та поставлено в чергу.')
         else showError() end
@@ -983,7 +1019,7 @@ function Orders:Show(k)
         OldKraken.Workshop:Show('orders')
         return
     end
-    if not window then window=createWindow() end
+    if not window then window=createWindow(); restoreDraft() end
     window:Show(); refresh()
 end
 function Orders:SupportsProfession(id) return professionNames[id]~=nil end
@@ -1002,10 +1038,11 @@ function Orders:ShowRecipe(r)
     UIDropDownMenu_SetText(window.professionMenu,professionNames[profession])
     form.item:SetText(r.product~='' and r.product or r.name)
     chosenRecipe={item=r.item,recipe=r.recipe}
+    saveDraft()
     if not OldKraken.UIHub then form:Raise() end
 end
 function Orders:CreatePanel(parent)
-    if not window then window=createWindow(parent) end
+    if not window then window=createWindow(parent); restoreDraft() end
     return window
 end
 function Orders:RefreshEmbedded()

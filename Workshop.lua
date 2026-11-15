@@ -356,6 +356,12 @@ local function createWindow(parent)
         f.newOrder:Hide()
         f.back=button(f,'‹ Назад',570,-38,130,function() Workshop:Back() end)
         f.back:Hide()
+        f:HookScript('OnHide',function()
+            local recipes=OldKraken.WorkshopRecipes
+            if recipes and recipes.IsPicking and recipes:IsPicking() then
+                if Workshop.currentView=='recipes' then Workshop:Back() else recipes:CancelPicker() end
+            end
+        end)
     end
     button(content,'Оновити',590,y(-43),120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
     f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-52))
@@ -402,6 +408,9 @@ function Workshop:UpdateTabs()
 end
 function Workshop:SetView(view)
     if not frame or not frame.professionView then return end
+    if self.currentView=='recipes' and view~='recipes' and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.CancelPicker then
+        OldKraken.WorkshopRecipes:CancelPicker()
+    end
     self.currentView=view
     frame.professionView:SetShown(view=='professions')
     if frame.ordersView then frame.ordersView:SetShown(view=='orders') end
@@ -413,7 +422,8 @@ function Workshop:SetView(view)
     if view=='orders' and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:RefreshEmbedded() end
     if view=='recipes' and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.RefreshPanel then OldKraken.WorkshopRecipes:RefreshPanel() end
 end
-function Workshop:Navigate(view)
+function Workshop:Navigate(view,force)
+    if self.currentView==view and not force then return false end
     local entry={view=self.currentView}
     if entry.view=='recipes' and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.CaptureView then
         entry.recipes=OldKraken.WorkshopRecipes:CaptureView()
@@ -421,8 +431,12 @@ function Workshop:Navigate(view)
     self.navigationStack[#self.navigationStack+1]=entry
     if #self.navigationStack>20 then table.remove(self.navigationStack,1) end
     self:SetView(view)
+    return true
 end
 function Workshop:Back()
+    if self.currentView=='recipes' and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.CancelPicker then
+        OldKraken.WorkshopRecipes:CancelPicker()
+    end
     local entry=table.remove(self.navigationStack)
     if not entry then return end
     self:SetView(entry.view)
