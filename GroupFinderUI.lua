@@ -1059,7 +1059,7 @@ local function createWindow(parent)
     end)
     for _, item in ipairs({{f.cancelButton, 'Закрити набір: оголошення зникне з відкритих груп.'}, {f.bumpButton, 'Повторно сповістити гільдію про набір. Інтервал — 5 хвилин.'}}) do
         local control, help = item[1], item[2]
-        control:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(help, 1, 1, 1, true); GameTooltip:Show() end end)
+        control:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(help); GameTooltip:Show() end end)
         control:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     end
     return f
