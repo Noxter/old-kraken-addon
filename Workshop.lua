@@ -335,13 +335,19 @@ local function createWindow(parent)
             f.recipesView=false
         end
         f.professionTab=button(f,'Професії',18,-38,110,function() Workshop:Show('professions') end)
-        f.ordersTab=button(f,'Замовлення',136,-38,120,function()
+        f.recipeTab=button(f,'Рецепти',136,-38,110,function()
+            if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('recipes') end
+        end)
+        f.masterTab=button(f,'Майстри',254,-38,110,function()
+            if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('masters') end
+        end)
+        f.ordersTab=button(f,'Замовлення',372,-38,120,function()
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
         end)
-        for _,tab in ipairs({f.professionTab,f.ordersTab}) do
+        for _,tab in ipairs({f.professionTab,f.recipeTab,f.masterTab,f.ordersTab}) do
             tab.activeBar=tab:CreateTexture(nil,'ARTWORK')
             tab.activeBar:SetPoint('BOTTOMLEFT',tab,'BOTTOMLEFT',2,1)
-            tab.activeBar:SetSize(tab==f.professionTab and 106 or 116,2)
+            tab.activeBar:SetSize(tab==f.ordersTab and 116 or 106,2)
             tab.activeBar:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
         end
         f.newOrder=button(f.ordersView or f,'Нове замовлення',720,-38,150,function()
@@ -379,29 +385,29 @@ local function createWindow(parent)
     if not embedded then
         button(content,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
     end
-    button(content,'Пошук рецептів',embedded and 20 or 175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
-    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',200,y(-321)); note:SetText('Відкрийте професії, щоб переглянути майстрів.')
+    if not embedded then button(content,'Пошук рецептів',175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end) end
+    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 20 or 200,y(-321)); note:SetText('Відкрийте професії, щоб переглянути майстрів.')
     content:HookScript('OnShow',render)
     f:Hide(); return f
 end
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() if frame and frame:IsShown() then render() end end)
+function Workshop:UpdateTabs()
+    if not frame or not frame.professionView then return end
+    local view=self.currentView
+    local recipeTab=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.GetTab and OldKraken.WorkshopRecipes:GetTab() or 'recipes'
+    frame.professionTab.activeBar:SetShown(view=='professions')
+    frame.recipeTab.activeBar:SetShown(view=='recipes' and recipeTab=='recipes')
+    frame.masterTab.activeBar:SetShown(view=='recipes' and recipeTab=='masters')
+    frame.ordersTab.activeBar:SetShown(view=='orders' or view=='orderCreate')
+end
 function Workshop:SetView(view)
     if not frame or not frame.professionView then return end
     self.currentView=view
-    local showOrders=view=='orders' or view=='orderCreate'
-    if view=='recipes' then
-        for i=#self.navigationStack,1,-1 do
-            local previous=self.navigationStack[i].view
-            if previous=='orders' or previous=='orderCreate' then showOrders=true; break end
-            if previous=='professions' then break end
-        end
-    end
     frame.professionView:SetShown(view=='professions')
     if frame.ordersView then frame.ordersView:SetShown(view=='orders') end
     if frame.recipesView then frame.recipesView:SetShown(view=='recipes') end
     if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders.ShowCreatePanel then OldKraken.WorkshopOrders:ShowCreatePanel(view=='orderCreate') end
-    frame.professionTab.activeBar:SetShown(not showOrders)
-    frame.ordersTab.activeBar:SetShown(showOrders)
+    self:UpdateTabs()
     if frame.newOrder then frame.newOrder:SetShown(view=='orders') end
     if frame.back then frame.back:SetShown(#self.navigationStack>0) end
     if view=='orders' and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:RefreshEmbedded() end
