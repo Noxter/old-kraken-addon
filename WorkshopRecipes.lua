@@ -396,11 +396,35 @@ local function button(parent,label,x,y,width,callback,variant)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(label); b:SetScript('OnClick',callback); return b
 end
 local function onlineIndex()
-    local result={}; if type(GetNumGuildMembers)~='function' or type(GetGuildRosterInfo)~='function' then return result end
-    local ok,n=pcall(GetNumGuildMembers); if not ok or not integer(n,0,10000) then return result end
-    for i=1,n do local success,name,_,_,_,_,_,_,_,online=pcall(GetGuildRosterInfo,i)
-        if success and usable(name,'string') and usable(online,'boolean') then result[name]=online end end
-    return result
+    local result,classes={},{}
+    if type(UnitClass)=='function' and identity then
+        local ok,_,class=pcall(UnitClass,'player')
+        if ok and usable(class,'string') then classes[identity]=class end
+    end
+    if type(GetNumGuildMembers)~='function' or type(GetGuildRosterInfo)~='function' then return result,classes end
+    local ok,n=pcall(GetNumGuildMembers); if not ok or not integer(n,0,10000) then return result,classes end
+    for i=1,n do
+        local success,name,_,_,_,_,_,_,_,online,_,class=pcall(GetGuildRosterInfo,i)
+        if success and usable(name,'string') then
+            if usable(online,'boolean') then result[name]=online end
+            if usable(class,'string') then classes[name]=class end
+        end
+    end
+    return result,classes
+end
+local function playerLabel(name,classes)
+    local class=classes[name]
+    local color=type(RAID_CLASS_COLORS)=='table' and class and RAID_CLASS_COLORS[class]
+    if usable(color,'table') and usable(color.r,'number') and usable(color.g,'number') and usable(color.b,'number')
+        and color.r>=0 and color.r<=1 and color.g>=0 and color.g<=1 and color.b>=0 and color.b<=1 then
+        return string.format('|cff%02x%02x%02x%s|r',math.floor(color.r*255),math.floor(color.g*255),math.floor(color.b*255),name)
+    end
+    return '|cffffffff'..name..'|r'
+end
+local function statusLabel(name,online)
+    if name==identity or online[name]==true then return '|cff4cde80онлайн|r' end
+    if online[name]==false then return '|cff999999офлайн|r' end
+    return '|cff999999невідомо|r'
 end
 local function recipeIcon(r)
     local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
@@ -437,7 +461,7 @@ local function resizeInfo()
 end
 render=function()
     if not frame or not frame:IsShown() then return end
-    local online=onlineIndex(); local list={}; local grouped={}
+    local online,classes=onlineIndex(); local list={}; local grouped={}
     local mastersView=professionContext and tab=='masters' and not selectRecipe
     local filter=professionContext and lower((frame.query:GetText() or ''):match('^%s*(.-)%s*$')) or ''
     if not mastersView then filter=filter:match('item:(%d+)') or filter end
@@ -471,11 +495,11 @@ render=function()
         for i,row in ipairs(rows) do
             local entry=list[offset*PAGE_SIZE+i]
             if entry then
-                row.entry=entry; row.icon:SetTexture(icon); row.name:SetText(entry.name)
+                row.entry=entry; row.icon:SetTexture(icon); row.name:SetText(playerLabel(entry.name,classes))
                 local level=entry.rank and entry.maximum and (entry.rank..'/'..entry.maximum) or 'рівень невідомий'
-                local state=(entry.name==identity or online[entry.name]==true) and 'онлайн' or (online[entry.name]==false and 'офлайн' or 'статус невідомий')
+                local state=statusLabel(entry.name,online)
                 local stale=integer(entry.timestamp,1,GetServerTime()+600) and GetServerTime()-entry.timestamp>604800
-                row.meta:SetText(level..' · '..state..(entry.native and ' · ігровий API' or '')..(stale and ' · застаріло' or ''))
+                row.meta:SetText(level..' · '..state..(stale and ' · застаріло' or ''))
                 if selectedMaster and selectedMaster.name==entry.name then row:LockHighlight() else row:UnlockHighlight() end
                 row:Show()
             else row.entry=nil; row:UnlockHighlight(); row:Hide() end
@@ -483,14 +507,14 @@ render=function()
         frame.detailIcon:SetShown(selectedMaster~=nil); frame.order:Hide()
         frame.whisper:SetShown(selectedMaster~=nil and selectedMaster.name~=identity and online[selectedMaster.name]==true)
         if selectedMaster then
-            frame.detailIcon:SetTexture(icon); frame.detailTitle:SetText(selectedMaster.name)
+            frame.detailIcon:SetTexture(icon); frame.detailTitle:SetText(playerLabel(selectedMaster.name,classes))
             local level=selectedMaster.rank and selectedMaster.maximum and (selectedMaster.rank..'/'..selectedMaster.maximum) or 'невідомий'
-            local state=(selectedMaster.name==identity or online[selectedMaster.name]==true) and 'онлайн' or (online[selectedMaster.name]==false and 'офлайн' or 'невідомо')
+            local state=statusLabel(selectedMaster.name,online)
             local updated=integer(selectedMaster.timestamp,1,GetServerTime()+600) and date('%d.%m.%Y %H:%M',selectedMaster.timestamp) or 'невідомо'
             frame.detailInfo:SetText(professionNames[professionContext]..'\nРівень: '..level..'\nСтатус: '..state..'\nОновлено: '..updated)
-            frame.detailReagents:SetText(selectedMaster.native and 'Професія отримана з ігрового API; рівень і рецепти не підтверджені.' or 'Дані можуть бути застарілими. Рецепти доступні, якщо майстер їх зчитав.')
+            frame.detailReagents:SetText('')
         else
-            frame.detailTitle:SetText('Оберіть майстра'); frame.detailInfo:SetText('Тут показані власники професії, зокрема без зчитаних рецептів.'); frame.detailReagents:SetText('')
+            frame.detailTitle:SetText('Оберіть майстра'); frame.detailInfo:SetText('Виберіть майстра зі списку.'); frame.detailReagents:SetText('')
         end
         resizeInfo(); return
     end
@@ -515,7 +539,7 @@ render=function()
             local r=entry.record; row.entry=entry
             row.icon:SetTexture(recipeIcon(r))
             row.name:SetText(r.product~='' and r.product or r.name)
-            row.meta:SetText(entry.owner..' · '..professionNames[r.profession]..' · '..(online[entry.owner] and 'онлайн' or 'офлайн / невідомо'))
+            row.meta:SetText(playerLabel(entry.owner,classes)..' · '..professionNames[r.profession]..' · '..statusLabel(entry.owner,online))
             if selectedEntry and selectedEntry.owner==entry.owner and selectedEntry.record.recipe==r.recipe then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row.entry=nil; row:UnlockHighlight(); row:Hide() end
@@ -528,7 +552,7 @@ render=function()
         frame.detailTitle:SetText(r.product~='' and r.product or r.name)
         local masters=Recipes:FindMasters(r.item,r.recipe); local names={}
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
-        for i=1,math.min(#masters,8) do local m=masters[i]; names[#names+1]=m.name..(online[m.name] and ' · онлайн' or ' · офлайн / невідомо') end
+        for i=1,math.min(#masters,8) do local m=masters[i]; names[#names+1]=playerLabel(m.name,classes)..' · '..statusLabel(m.name,online) end
         frame.detailInfo:SetText(professionNames[r.profession]..'\nЗбережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..'\n'..(#names>0 and table.concat(names,'\n') or 'Немає даних')..(#masters>8 and '\n…' or ''))
         frame.detailReagents:SetText(reagentText(r))
     else
