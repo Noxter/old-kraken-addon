@@ -5,6 +5,8 @@ local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
 local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
 local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}
 local statuses = {pending='Очікує', accepted='Прийнято', reserve='Резерв', rejected='Відхилено'}
+local roleColors = {tank='ff66b3ff', healer='ff69dc8c', dps='ffff7a6e', flex='ffffd06a'}
+local statusColors = {pending='ffffc36b', accepted='ff69dc8c', reserve='ff66b3ff', rejected='ffff7a6e'}
 local statusCode = {pending='P',accepted='A',reserve='R',rejected='D'}
 local codeStatus = {P='pending',A='accepted',R='reserve',D='rejected'}
 local active, identity, profile, storage = false, nil, nil, nil
@@ -38,6 +40,9 @@ local function validID(s) return validText(s, 1, 64) and s:match('^[%w%-]+$') ~=
 local function count(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
 local function acceptedCount(e)
     local n=0; for name in pairs(e.people) do if (e.statuses[name] or 'accepted')=='accepted' then n=n+1 end end; return n
+end
+local function participantLabel(name,role,status)
+    return (catalog.roleIcons[role] or '')..' |cff9bcaff'..name..'|r · |c'..(roleColors[role] or 'ffb5b5b5')..(roles[role] or role)..'|r · |c'..(statusColors[status] or 'ffb5b5b5')..(statuses[status] or 'Невідомо')..'|r'
 end
 local function character()
     if type(UnitName) ~= 'function' then return nil end
@@ -453,11 +458,15 @@ local function refresh()
         local lines={}
         for _,name in ipairs(names) do
             local role=e.people[name]
-            lines[#lines+1]=(catalog.roleIcons[role] or '')..' '..name..' — '..(roles[role] or role)..' · '..statuses[e.statuses[name]]
+            lines[#lines+1]=participantLabel(name,role,e.statuses[name])
         end
         local own=e.owner==identity
-        window.details:SetText(e.title..'\n'..kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')..' · '..date('%d.%m.%Y %H:%M',e.when)..'\nАвтор: '..e.owner..' · прийнято '..acceptedCount(e)..'/'..e.size..(e.relayed and '\nСтан отримано через гільдію' or '')..'\n'..e.description..'\n\n'..(own and 'Заявки та учасники:' or 'Заявки та учасники:\n'..(#lines>0 and table.concat(lines,'\n') or 'Поки немає'))..(pending and '\n\nОчікується доставка автору' or ''))
-        local height=window.details:GetStringHeight()+8
+        window.detailsTitle:SetText(e.title); window.detailsTitle:Show()
+        window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsTitle,'BOTTOMLEFT',0,-8)
+        local description=e.description~='' and ('\n\n|cff9ba9bcОпис:|r\n'..e.description) or ''
+        local activity=kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')
+        window.details:SetText('|cff9ba9bcПодія:|r '..activity..'\n|cff9ba9bcДата:|r |cffffd35a'..date('%d.%m.%Y %H:%M',e.when)..'|r\n|cff9ba9bcАвтор:|r |cff9bcaff'..e.owner..'|r\n|cff9ba9bcПрийнято:|r |cff69dc8c'..acceptedCount(e)..'/'..e.size..'|r'..(e.relayed and '\n|cffffc36bСтан отримано через гільдію|r' or '')..description..'\n\n|cffffd35aЗаявки та учасники:|r'..(own and '' or '\n'..(#lines>0 and table.concat(lines,'\n') or '|cff9ba9bcПоки немає|r'))..(pending and '\n\n|cffffc36bОчікується доставка автору|r' or ''))
+        local height=window.detailsTitle:GetStringHeight()+8+window.details:GetStringHeight()+8
         if own then
             for i,name in ipairs(names) do
                 local row=window.signupRows[i]
@@ -471,7 +480,7 @@ local function refresh()
                 end
                 row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*58)
                 local role=e.people[name]
-                row.label:SetText((catalog.roleIcons[role] or '')..' '..name..' · '..roles[role]..' · '..statuses[e.statuses[name]])
+                row.label:SetText(participantLabel(name,role,e.statuses[name]))
                 row.accept:SetShown(name~=identity); row.reserve:SetShown(name~=identity); row.reject:SetShown(name~=identity); row:Show()
             end
             height=height+#names*58
@@ -483,6 +492,7 @@ local function refresh()
         window.roleMenu:SetShown(canJoin)
         window.leave:SetShown((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected'))
     else
+        window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
         window.details:SetText('Оберіть подію зі списку.'); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
         window.detailsContent:SetHeight(250)
     end
@@ -551,7 +561,8 @@ local function createWindow(parent)
     f.nextPage=action(f,'›',263+(embedded and 5 or 0),-310,45,function() page=page+1; refresh() end)
     local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,-66); scroll:SetSize(detailsWidth,250)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(detailsWidth,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
-    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true)
+    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,-325,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
     f.join=action(f,'Записатися',605+shift,-325,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
     f.leave=action(f,'Виписатися',605+shift,-325,100,function() if selected then Events:Signup(selected,'leave') end end)

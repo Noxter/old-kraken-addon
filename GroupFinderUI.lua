@@ -384,8 +384,10 @@ refresh=function()
     local g = tab ~= 'create' and selected and Finder.groups[selected]
     if g then
         local applicationStatus = Finder.pending[selected]
-        window.details:SetText(string.format('%s — %s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСтатус: %s%s\nСклад:',
-            g.title, (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category], playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role),
+        local activity = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category]
+        local activityLine = activity and activity ~= g.title and ('\n|cff9ba9bc' .. activity .. '|r') or ''
+        window.details:SetText(string.format('|cffffd35a%s|r%s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСтатус: %s%s\nСклад:',
+            g.title, activityLine, playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role),
             g.description, g.closed and 'Закрито' or 'Відкрито',
             applicationStatus and (' | Заявка: ' .. (pendingLabels[applicationStatus] or applicationStatus)) or ''))
     else window.details:SetText('Виберіть оголошення у списку.') end
@@ -501,6 +503,9 @@ refresh=function()
     window.applicationActionButton:SetShown(not showingRequests and tab == 'applications' and g and g.owner ~= Finder.identity and pending ~= nil)
     window.cancelButton:SetShown(canManage and not showingRequests)
     window.bumpButton:SetShown(canManage and not showingRequests)
+    local roleLabelY = tab == 'create' and -330 or -313
+    window.roleLabel:ClearAllPoints(); window.roleLabel:SetPoint('TOPLEFT', window, 'TOPLEFT', 550, roleLabelY)
+    window.roleButton:ClearAllPoints(); window.roleButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 534, roleLabelY - 14)
     window.roleButton:SetShown(tab == 'create' or canApply)
     window.roleLabel:SetShown(tab == 'create' or canApply)
     local requestCount, haveOwned = 0, false
