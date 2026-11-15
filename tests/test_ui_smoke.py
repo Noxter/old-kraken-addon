@@ -5,6 +5,7 @@ root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
 OldKraken = {name = 'OldKraken', listeners = {}}; UIParent = {GetWidth=function() return 0 end}; StaticPopupDialogs = {}; UISpecialFrames = {}
+function UnitLevel() return 20 end
 OldKraken.UIStyle = {
     Colors = {
         brandGold = {0.88, 0.69, 0.32, 1},
@@ -261,3 +262,6 @@ assert(guildEvents.opened == 'raid-key')
 assert(alertSoundCalls == 1)
 ''')
 print('UI smoke checks passed')
+
+
+lua.execute('function UnitLevel() return 18 end')

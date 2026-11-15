@@ -42,18 +42,18 @@ OldKraken.UIHub:ShowPage('events')
 local events=OldKraken.GuildEvents
 local ui=OldKrakenEventsFrame
 ui.title:SetText('Old title')
-ui.activityButton.scripts.OnClick(); for _,card in ipairs(ui.activityCards.cards) do if type(card.entry)=='table' and card.entry.value=='onyxia' then card.scripts.OnClick(card) end end
+ui:SetCreationMode(true); for _,card in ipairs(ui.activityCards.cards) do if type(card.entry)=='table' and card.entry.value=='onyxia' then card.scripts.OnClick(card) end end
 assert(ui.title:GetText()=='Лігво Оніксії (Ony)')
 selectOption(ui.kindMenu,'dungeon')
-ui.activityButton.scripts.OnClick()
+ui:SetCreationMode(true)
 assert(ui.activityCards:IsShown() and #ui.activityCards.cards==#OldKraken.ActivityCatalog.dungeon-1)
 ui.activityCards.scripts.OnMouseWheel(ui.activityCards,-1)
 assert(ui.activityCards.offset==70)
 for _,card in ipairs(ui.activityCards.cards) do if type(card.entry)=='table' and card.entry.value=='wc' then card.scripts.OnClick(card) end end
-assert(ui.title:GetText()=='Печери Стогонів (WC)' and not ui.activityCards:IsShown())
+assert(ui.title:GetText()=='Печери Стогонів (WC)' and ui.activityCards:IsShown())
 local allocated=#createdFrames
 selectOption(ui.kindMenu,'raid')
-ui.activityButton.scripts.OnClick()
+ui:SetCreationMode(true)
 local shown=0
 for _,card in ipairs(ui.activityCards.cards) do if card:IsShown() and card.entry then shown=shown+1 end end
 assert(shown==#OldKraken.ActivityCatalog.raid-1 and #createdFrames==allocated)
@@ -67,6 +67,14 @@ e.people['Waiting']='dps'; e.statuses.Waiting='pending'
 e.people['Already grouped']='tank'; e.statuses['Already grouped']='accepted'
 events:ShowEvent(key)
 assert(ui.inviteAll:IsShown())
+assert(not ui.activityCards:IsShown() and OldKrakenEventsDetailsScroll:IsShown())
+assert(ui.roleColumns[1].text:find('Already grouped',1,true))
+assert(ui.roleColumns[3].text:find('Accepted 1',1,true))
+assert(not ui.roleColumns[3].text:find('Reserve',1,true))
+assert(not ui.roleColumns[3].text:find('Waiting',1,true))
+for _,row in ipairs(ui.signupRows) do
+    assert(row.height==32 and row.accept.width==24 and row.accept.text=='')
+end
 assert(events:InviteAll(key))
 for i=1,10 do events:PumpRaidInvites() end
 assert(#invites==4 and conversions==0,'solo must not exceed four initial invitations')

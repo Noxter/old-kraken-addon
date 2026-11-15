@@ -483,7 +483,7 @@ local function field(parent, label, x, y, width, value)
     local caption=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); caption:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); caption:SetText(label)
     local box=CreateFrame('EditBox',nil,parent,'InputBoxTemplate'); OldKraken.UIStyle.Input(box)
     box:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); box:SetSize(width,22); box:SetAutoFocus(false); box:SetText(value or '')
-    box:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return box
+    box.label=caption; box:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return box
 end
 local function selectMenu(parent,name,x,y,width,values,labels,get,set)
     local f=CreateFrame('Frame',name,parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
@@ -534,7 +534,9 @@ local function datePicker(parent)
     local caption=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall')
     caption:SetPoint('TOPLEFT',parent,'TOPLEFT',255,-449); caption:SetText('Дата')
     local button=action(parent,'Обрати дату',255,-467,125,function() end)
+    parent.dateButton=button; parent.dateCaption=caption
     local popup=CreateFrame('Frame',nil,parent,'BackdropTemplate')
+    parent.datePopup=popup
     popup:SetSize(242,250); popup:SetPoint('BOTTOMLEFT',button,'TOPLEFT',0,4)
     popup:SetFrameLevel(parent:GetFrameLevel()+20); popup:EnableMouse(true)
     popup:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
@@ -576,8 +578,41 @@ local function datePicker(parent)
     parent:HookScript('OnHide',function() popup:Hide() end)
     return function() return chosen end
 end
+local function iconAction(button,row,x,texture,hint)
+    button:ClearAllPoints(); button:SetPoint('TOPLEFT',row,'TOPLEFT',x,-3); button:SetSize(24,24); button:SetText('')
+    button.art=button:CreateTexture(nil,'ARTWORK'); button.art:SetSize(19,19); button.art:SetPoint('CENTER',button,'CENTER',0,0); button.art:SetTexture(texture)
+    button:SetScript('OnEnter',function(self)
+        if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(hint); GameTooltip:AddLine(row.member or '',1,1,1); GameTooltip:Show() end
+    end)
+    button:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+end
+local function roleColumnText(e,classes,role)
+    local names={}
+    for name,memberRole in pairs(e.people) do
+        if memberRole==role and (e.statuses[name] or 'accepted')=='accepted' then names[#names+1]=name end
+    end
+    table.sort(names)
+    local labels={tank='Танки',healer='Лікарі',dps='DPS',flex='Інші'}
+    local lines={(catalog.roleIcons[role] or '')..' |c'..roleColors[role]..labels[role]..' ('..#names..')|r'}
+    for _,name in ipairs(names) do lines[#lines+1]=participantName(name,classes) end
+    if #names==0 then lines[#lines+1]='|cff9ba9bc—|r' end
+    return table.concat(lines,'\n'),#names
+end
 refresh=function()
     if not window then return end
+    window.eventsTab:SetEnabled(window.creationMode)
+    window.createTab:SetEnabled(not window.creationMode)
+    for _,control in ipairs(window.formControls) do control:SetShown(window.creationMode) end
+    if window.creationMode then
+        for _,control in ipairs(window.viewControls) do control:Hide() end
+        for _,row in ipairs(rows) do row:Hide() end
+        if catalog[currentKind] then window:ShowActivityCards() else window.activityCards:Hide() end
+        return
+    end
+    for _,control in ipairs(window.viewControls) do control:Show() end
+    if window.datePopup then window.datePopup:Hide() end
+    window.activityCards:Hide()
+
     window.alertButton:SetText(Events:AlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local list={}
     for key,e in pairs(events) do if not e.cancelled and e.when>=GetServerTime()-172800 then list[#list+1]={key=key,event=e} end end
@@ -618,32 +653,56 @@ refresh=function()
         window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsTitle,'BOTTOMLEFT',0,-8)
         local description=e.description~='' and ('\n\n|cff9ba9bcОпис:|r\n'..e.description) or ''
         local activity=kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')
-        window.details:SetText('|cff9ba9bcПодія:|r '..activity..'\n|cff9ba9bcДата:|r |cffffd35a'..date('%d.%m.%Y %H:%M',e.when)..'|r\n|cff9ba9bcАвтор:|r |cff9bcaff'..e.owner..'|r\n|cff9ba9bcПрийнято:|r |cff69dc8c'..acceptedCount(e)..'/'..e.size..'|r'..(e.relayed and '\n|cffffc36bСтан отримано через гільдію|r' or '')..description..'\n\n|cffffd35aЗаявки та учасники:|r'..(own and '' or '\n'..(#lines>0 and table.concat(lines,'\n') or '|cff9ba9bcПоки немає|r'))..(pending and '\n\n|cffffc36bОчікується доставка автору|r' or ''))
-        local height=window.detailsTitle:GetStringHeight()+8+window.details:GetStringHeight()+8
-        if own then
+        window.details:SetText('|cff9ba9bcПодія:|r '..activity..'\n|cff9ba9bcДата:|r |cffffd35a'..date('%d.%m.%Y %H:%M',e.when)..'|r\n|cff9ba9bcАвтор:|r |cff9bcaff'..e.owner..'|r\n|cff9ba9bcПрийнято:|r |cff69dc8c'..acceptedCount(e)..'/'..e.size..'|r'..(e.relayed and '\n|cffffc36bСтан отримано через гільдію|r' or '')..description..(pending and '\n\n|cffffc36bОчікується доставка автору|r' or ''))
+        window.roleSummary:ClearAllPoints(); window.roleSummary:SetPoint('TOPLEFT',window.details,'BOTTOMLEFT',0,-14)
+        window.roleSummary:SetText('Склад за ролями'); window.roleSummary:Show()
+        local columnHeight=0
+        for i,role in ipairs({'tank','healer','dps'}) do
+            local column=window.roleColumns[i]
+            column:ClearAllPoints(); column:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',(i-1)*window.detailsWidth/3,-8)
+            column:SetText(roleColumnText(e,classes,role)); column:Show()
+            columnHeight=math.max(columnHeight,column:GetStringHeight())
+        end
+        local flexText,flexCount=roleColumnText(e,classes,'flex')
+        window.roleFlex:ClearAllPoints(); window.roleFlex:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-columnHeight-18)
+        window.roleFlex:SetText(flexText); window.roleFlex:SetShown(flexCount>0)
+        local summaryHeight=columnHeight+18+(flexCount>0 and window.roleFlex:GetStringHeight()+8 or 0)
+        window.participantHeader:ClearAllPoints(); window.participantHeader:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-summaryHeight-14)
+        window.participantHeader:SetText('Заявки та учасники'); window.participantHeader:Show()
+        local height=window.detailsTitle:GetStringHeight()+8+window.details:GetStringHeight()+14+window.roleSummary:GetStringHeight()+summaryHeight+14+window.participantHeader:GetStringHeight()+8
+        do
             for i,name in ipairs(names) do
                 local row=window.signupRows[i]
                 if not row then
-                    row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth-10,100)
-                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-15,18); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
-                    row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',0,-18); row.roleStatus:SetSize(window.detailsWidth-15,16); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
-                    row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-15,34); row.hover:EnableMouse(true)
+                    row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth,32)
+                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-174,26); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
+                    row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-168,-3); row.roleStatus:SetSize(24,26); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
+                    row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-118,30); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
                     row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
                     row.accept=action(row,'Прийняти',0,-40,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,'primary')
                     row.reserve=action(row,'Резерв',100,-40,94,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end)
                     row.reject=action(row,'Відхилити',200,-40,104,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end)
                     row.invite=action(row,'Інвайт у рейд',0,-68,194,function(self) Events:InviteMember(selected,self:GetParent().member) end,'primary')
+                    local left=window.detailsWidth-112
+                    iconAction(row.accept,row,left,'Interface\\RaidFrame\\ReadyCheck-Ready','Прийняти учасника')
+                    iconAction(row.reserve,row,left+28,'Interface\\RaidFrame\\ReadyCheck-Waiting','Перевести в резерв')
+                    iconAction(row.reject,row,left+56,'Interface\\RaidFrame\\ReadyCheck-NotReady','Відхилити заявку')
+                    iconAction(row.invite,row,left+84,'Interface\\Buttons\\UI-PlusButton-Up','Запросити в рейд')
+                    row.state= row:CreateTexture(nil,'ARTWORK'); row.state:SetSize(15,15); row.state:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-140,-7)
+                    row.state:SetTexture('Interface\\AddOns\\OldKraken\\Media\\RoleSlot.tga')
                     window.signupRows[i]=row
                 end
-                row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*100)
+                row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*32)
                 local role=e.people[name]
-                row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(participantRoleStatus(role,e.statuses[name]))
+                row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(catalog.roleIcons[role] or '—')
+                local tint=statusColors[e.statuses[name] or 'accepted'] or statusColors.pending
+                row.state:SetVertexColor(tonumber(tint:sub(3,4),16)/255,tonumber(tint:sub(5,6),16)/255,tonumber(tint:sub(7,8),16)/255)
                 row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
-                row.invite:SetShown(e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
-                row.accept:SetShown(name~=identity); row.reserve:SetShown(name~=identity); row.reject:SetShown(name~=identity); row:Show()
+                row.invite:SetShown(own and e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
+                row.accept:SetShown(own and name~=identity); row.reserve:SetShown(own and name~=identity); row.reject:SetShown(own and name~=identity); row:Show()
             end
-            height=height+#names*100
+            height=height+#names*32
         end
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.inviteAll:SetShown(own and e.kind=='raid')
@@ -653,7 +712,8 @@ refresh=function()
         window.roleMenu:SetShown(canJoin)
         window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
     else
-        window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
+        window.roleSummary:Hide(); window.roleFlex:Hide(); for _,column in ipairs(window.roleColumns) do column:Hide() end
+        window.participantHeader:Hide(); window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
         window.details:SetText('Оберіть подію зі списку.'); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
         window.detailsContent:SetHeight(250)
     end
@@ -678,9 +738,12 @@ local function createWindow(parent)
     f.detailsWidth=detailsWidth
     if f.TitleText then f.TitleText:SetText('Old Kraken — Події гільдії') end
     f.alertButton=action(f,'Сповіщення',630+shift,-35,185,function() Events:SetAlertsEnabled(not Events:AlertsEnabled()); refresh() end)
-    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',18,-38); note:SetText('Час подій показано за місцевим часом комп’ютера.')
+    f.creationMode=false
+    f.eventsTab=action(f,'Події',18,-35,100,function() f.creationMode=false; refresh() end)
+    f.createTab=action(f,'Створити івент',126,-35,130,function() f.creationMode=true; refresh() end,'primary')
+    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',f,'TOPLEFT',270,-41); note:SetText('Час — місцевий')
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',25,-72); f.empty:SetWidth(embedded and 400 or 365); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Найближчих подій немає. Заплануйте першу подію для гільдії.')
-    f.emptyAction=action(f,'Створити подію',25,-115,150,function() if f.title then f.title:SetFocus() end end,'primary')
+    f.emptyAction=action(f,'Створити подію',25,-115,150,function() f.creationMode=true; refresh(); if f.title then f.title:SetFocus() end end,'primary')
     f.eventRows=rows
     for i=1,EVENTS_PER_PAGE do
         local index=i
@@ -723,6 +786,15 @@ local function createWindow(parent)
     local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,-66); scroll:SetSize(detailsWidth,320)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(detailsWidth,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
     f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true)
+    f.roleSummary=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleSummary:SetWidth(detailsWidth); f.roleSummary:SetJustifyH('LEFT')
+    f.roleColumns={}
+    for i=1,3 do
+        local column=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight')
+        column:SetWidth(detailsWidth/3-7); column:SetJustifyH('LEFT'); column:SetWordWrap(false); column:SetSpacing(5)
+        f.roleColumns[i]=column
+    end
+    f.roleFlex=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleFlex:SetWidth(detailsWidth); f.roleFlex:SetJustifyH('LEFT')
+    f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT')
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,-395,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
     f.join=action(f,'Записатися',605+shift,-395,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
@@ -737,8 +809,8 @@ local function createWindow(parent)
     for value=0,23 do hourValues[#hourValues+1]=value; hourLabels[value]=string.format('%02d',value) end
     local timeLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); timeLabel:SetPoint('TOPLEFT',f,'TOPLEFT',390+shift,-449); timeLabel:SetText('Година')
     local minuteLabel=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); minuteLabel:SetPoint('TOPLEFT',f,'TOPLEFT',490+shift,-449); minuteLabel:SetText('Хвилина')
-    selectMenu(f,'OldKrakenEventsHour',390+shift,-467,90,hourValues,hourLabels,function() return hour end,function(v) hour=v end)
-    selectMinutes(f,490+shift,-467,function() return minute end,function(v) minute=v end)
+    f.hourMenu=selectMenu(f,'OldKrakenEventsHour',390+shift,-467,90,hourValues,hourLabels,function() return hour end,function(v) hour=v end)
+    f.minuteMenu=selectMinutes(f,490+shift,-467,function() return minute end,function(v) minute=v end)
     f.size=field(f,'Місць (2–40)',600+shift,-449,80,'10')
     f.description=field(f,'Опис',18,-502,270,'')
     local activity=''
@@ -746,10 +818,10 @@ local function createWindow(parent)
     local function chooseActivity(value)
         activity=value
         if value~='' then f.title:SetText(activityLabels[value]) end
-        activityButton:SetText(value~='' and activityLabels[value] or 'Обрати картку…')
-        f.activityCards:Hide()
+        activityButton:SetText(value~='' and activityLabels[value] or 'Локацію не вибрано')
+        f:ShowActivityCards()
     end
-    activityButton=action(f,'Обрати картку…',460+shift,-520,180,function() f:ShowActivityCards() end)
+    activityButton=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); activityButton:SetPoint('TOPLEFT',f,'TOPLEFT',460+shift,-522); activityButton:SetSize(180,28); activityButton:SetJustifyH('LEFT')
     f.activityButton=activityButton
     local grid=CreateFrame('Frame',nil,f)
     grid:SetSize(embedded and 850 or 805,345); grid:SetPoint('TOPLEFT',f,'TOPLEFT',18,-65)
@@ -757,7 +829,6 @@ local function createWindow(parent)
     local fill=grid:CreateTexture(nil,'BACKGROUND'); fill:SetAllPoints(grid); fill:SetColorTexture(0.035,0.04,0.05,1)
     grid.heading=grid:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); grid.heading:SetPoint('TOPLEFT',grid,'TOPLEFT',12,-10)
     action(grid,'Без конкретної локації',embedded and 560 or 515,-7,230,function() chooseActivity('') end)
-    action(grid,'X',embedded and 812 or 765,-7,28,function() grid:Hide() end)
     local clip=CreateFrame('Frame',nil,grid); clip:SetPoint('TOPLEFT',grid,'TOPLEFT',8,-40); clip:SetSize(embedded and 830 or 785,297)
     if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
     local body=CreateFrame('Frame',nil,clip); body:SetSize(embedded and 830 or 785,1)
@@ -770,7 +841,6 @@ local function createWindow(parent)
     grid:SetScript('OnMouseWheel',wheel); clip:EnableMouseWheel(true); clip:SetScript('OnMouseWheel',wheel)
     f.activityCards=grid
     function f:ShowActivityCards()
-        if grid:IsShown() then grid:Hide(); return end
         grid.heading:SetText(currentKind=='raid' and 'Оберіть рейд' or 'Оберіть підземелля')
         local width=embedded and 268 or 253
         local level=type(UnitLevel)=='function' and tonumber((UnitLevel('player'))) or 0; level=level or 0
@@ -798,24 +868,30 @@ local function createWindow(parent)
             end
         end
         for i=count+1,#grid.cards do grid.cards[i]:Hide(); grid.cards[i].entry=nil end
-        grid.full=math.max(1,math.ceil(count/3)*70); body:SetHeight(grid.full); grid:ScrollTo(0); grid:Show()
+        grid.full=math.max(1,math.ceil(count/3)*70); body:SetHeight(grid.full)
+        if grid.kind~=currentKind then grid.offset=0; grid.kind=currentKind end
+        grid:ScrollTo(grid.offset); grid:Show()
     end
     grid:Hide()
     f:HookScript('OnHide',function() grid:Hide() end)
     local function showActivity()
-        activityButton:SetShown(catalog[currentKind]~=nil)
-        activityButton:SetText(activity~='' and activityLabels[activity] or 'Обрати картку…')
-        grid:Hide()
+        local enabled=catalog[currentKind]~=nil
+        activityButton:SetShown(f.creationMode and enabled)
+        activityButton:SetText(activity~='' and activityLabels[activity] or 'Локацію не вибрано')
+        if f.creationMode and enabled then f:ShowActivityCards() else grid:Hide() end
     end
     f.kindMenu=selectMenu(f,'OldKrakenEventsKind',310+shift,-520,130,{'raid','dungeon','pvp','guild'},kinds,function() return currentKind end,function(v) currentKind=v; activity=''; showActivity() end)
     showActivity()
-    action(f,'Створити',650+shift,-520,150,function()
+    f.submit=action(f,'Створити',650+shift,-520,150,function()
         local day=getDate()
         local when=day and parseDate(day.day,day.month,day.year,hour,minute)
         if not when then print('Old Kraken: оберіть коректні дату та місцевий час.'); return end
-        if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText(),activity) then f.title:SetText(''); f.description:SetText(''); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
+        if Events:Create(f.title:GetText(),f.description:GetText(),when,currentKind,f.size:GetText(),activity) then f.title:SetText(''); f.description:SetText(''); f.creationMode=false; refresh(); print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.') end
     end,'primary')
+    f.formControls={heading,f.title,f.title.label,f.dateButton,f.dateCaption,timeLabel,minuteLabel,f.hourMenu,f.minuteMenu,f.size,f.size.label,f.description,f.description.label,f.kindMenu,f.submit,activityButton}
+    f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleMenu}
+    f.SetCreationMode=function(_,value) f.creationMode=value==true; refresh() end
     f:HookScript('OnShow',refresh)
     f:Hide(); return f
 end
@@ -832,6 +908,7 @@ function Events:Show()
 end
 
 function Events:ShowEvent(key)
+    if window then window.creationMode=false end
     if events[key] and not events[key].cancelled then selected=key end
     self:Show()
 end

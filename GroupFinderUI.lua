@@ -1473,6 +1473,10 @@ end)
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not Finder:GroupAlertsEnabled() then return end
+    if group.category == 'dungeon' then
+        local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
+        if not level or level < group.minLevel or level > group.maxLevel then return end
+    end
     refreshPeople()
     local free = math.max(0, group.maxSize - #group.members)
     local actual = group.partyObserved and 1 or nil
