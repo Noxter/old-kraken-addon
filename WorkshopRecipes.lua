@@ -9,6 +9,7 @@ local recipeCatalog,catalogCursor,catalogPending,catalogSize=nil,nil,false,0
 local scanPending,tradeOpen,sendQueue=false,false,{}
 local activeQuery,sequence,lastQuery,lastIncoming=nil,0,-60,{}
 local frame,rows,offset,resultSet=nil,{},0,{}
+local PAGE_SIZE=10
 local selectRecipe,selectedEntry,viewOwner
 local professionContext, selectedMaster, tab, mastersOnline = nil, nil, 'recipes', false
 local recipeChanged=false
@@ -431,6 +432,9 @@ local function reagentText(r)
     end
     return #lines>0 and ('Матеріали:\n'..table.concat(lines,'\n')) or 'Матеріали: гра не надала даних для цього рецепта.'
 end
+local function resizeInfo()
+    if frame and frame.infoContent then frame.infoContent:SetHeight(math.max(110, frame.detailInfo:GetStringHeight()+8)) end
+end
 render=function()
     if not frame or not frame:IsShown() then return end
     local online=onlineIndex(); local list={}; local grouped={}
@@ -460,12 +464,12 @@ render=function()
             if aOnline~=bOnline then return aOnline end
             return a.name<b.name
         end)
-        offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/12)-1)))
-        frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/12)))
+        offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
+        frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
         frame.count:SetText('Майстрів: '..#list..' · рівень і дата за останніми доступними даними')
         local _,icon=OldKraken.Workshop:ProfessionInfo(professionContext)
         for i,row in ipairs(rows) do
-            local entry=list[offset*12+i]
+            local entry=list[offset*PAGE_SIZE+i]
             if entry then
                 row.entry=entry; row.icon:SetTexture(icon); row.name:SetText(entry.name)
                 local level=entry.rank and entry.maximum and (entry.rank..'/'..entry.maximum) or 'рівень невідомий'
@@ -488,7 +492,7 @@ render=function()
         else
             frame.detailTitle:SetText('Оберіть майстра'); frame.detailInfo:SetText('Тут показані власники професії, зокрема без зчитаних рецептів.'); frame.detailReagents:SetText('')
         end
-        return
+        resizeInfo(); return
     end
     local byRecipe=not selectRecipe and not viewOwner and (professionContext or (activeQuery and activeQuery.query:match('^prof:%d+$')))
     for _,entry in pairs(resultSet) do
@@ -502,11 +506,11 @@ render=function()
     end
     if byRecipe then for _,entry in pairs(grouped) do list[#list+1]=entry end end
     table.sort(list,function(a,b) if a.record.name~=b.record.name then return a.record.name<b.record.name end return a.owner<b.owner end)
-    offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/12)-1)))
-    frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/12)))
+    offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
+    frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
     frame.count:SetText('Знайдено: '..#list..' · результати можуть бути застарілими або неповними')
     for i,row in ipairs(rows) do
-        local entry=list[offset*12+i]
+        local entry=list[offset*PAGE_SIZE+i]
         if entry then
             local r=entry.record; row.entry=entry
             row.icon:SetTexture(recipeIcon(r))
@@ -530,10 +534,11 @@ render=function()
     else
         frame.detailTitle:SetText('Оберіть рецепт'); frame.detailInfo:SetText('Перегляньте збережені рецепти або знайдіть предмет.'); frame.detailReagents:SetText('')
     end
+    resizeInfo()
 end
 local function createWindow()
     local f=CreateFrame('Frame','OldKrakenWorkshopRecipesFrame',UIParent,'BasicFrameTemplateWithInset')
-    table.insert(UISpecialFrames,'OldKrakenWorkshopRecipesFrame'); f:SetSize(820,520); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
+    table.insert(UISpecialFrames,'OldKrakenWorkshopRecipesFrame'); f:SetSize(750,470); f:SetPoint('CENTER'); f:SetMovable(true); f:EnableMouse(true); f:SetClampedToScreen(true)
     f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing); OldKraken.UIStyle.Window(f)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук рецептів') end
     local function changeTab(nextTab)
@@ -547,8 +552,8 @@ local function createWindow()
         item.activeBar:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
     end
     f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(f.query)
-    f.query:SetSize(350,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-80); f.query:SetAutoFocus(false)
-    f.searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',505,-55)
+    f.query:SetSize(300,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-74); f.query:SetAutoFocus(false)
+    f.searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',455,-49)
     f.query:SetScript('OnTextChanged',function() if professionContext then selectedEntry=nil; selectedMaster=nil; offset=0; render() end end)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local function submitSearch()
@@ -556,37 +561,40 @@ local function createWindow()
         selectedEntry=nil; viewOwner=nil; if search(f.query:GetText() or '') then f.query:ClearFocus() end
     end
     f.query:SetScript('OnEnterPressed',submitSearch)
-    button(f,'Знайти',385,-80,105,submitSearch,'primary')
-    f.onlineOnly=button(f,'Лише онлайн: ні',505,-80,160,function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end)
-    f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-110)
-    for i=1,12 do
-        rows[i]=button(f,'',20,-134-(i-1)*26,465,function(self)
+    button(f,'Знайти',335,-74,105,submitSearch,'primary')
+    f.onlineOnly=button(f,'Лише онлайн: ні',455,-74,160,function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end)
+    f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-104)
+    for i=1,PAGE_SIZE do
+        rows[i]=button(f,'',20,-125-(i-1)*26,410,function(self)
+            f.infoScroll:SetVerticalScroll(0)
             if self.entry and professionContext and tab=='masters' and not selectRecipe then selectedMaster=self.entry; render()
             elseif self.entry and selectRecipe then
                 local callback=selectRecipe; selectRecipe=nil; f:Hide(); callback(self.entry.record)
             elseif self.entry then selectedEntry=self.entry; render() end
         end)
         rows[i].icon=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].icon:SetSize(21,21); rows[i].icon:SetPoint('LEFT',rows[i],'LEFT',3,0)
-        rows[i].name=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); rows[i].name:SetPoint('TOPLEFT',rows[i],'TOPLEFT',29,-1); rows[i].name:SetWidth(425); rows[i].name:SetJustifyH('LEFT'); rows[i].name:SetWordWrap(false)
-        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); rows[i].meta:SetPoint('BOTTOMLEFT',rows[i],'BOTTOMLEFT',29,1); rows[i].meta:SetWidth(425); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false)
+        rows[i].name=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].name:SetPoint('TOPLEFT',rows[i],'TOPLEFT',29,-1); rows[i].name:SetWidth(370); rows[i].name:SetJustifyH('LEFT'); rows[i].name:SetWordWrap(false)
+        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); rows[i].meta:SetPoint('BOTTOMLEFT',rows[i],'BOTTOMLEFT',29,1); rows[i].meta:SetWidth(370); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false)
     end
-    f.detailIcon=f:CreateTexture(nil,'ARTWORK'); f.detailIcon:SetSize(46,46); f.detailIcon:SetPoint('TOPLEFT',f,'TOPLEFT',505,-136)
-    f.detailTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.detailTitle:SetPoint('TOPLEFT',f,'TOPLEFT',560,-139); f.detailTitle:SetWidth(230); f.detailTitle:SetJustifyH('LEFT'); f.detailTitle:SetWordWrap(true)
-    f.detailInfo=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailInfo:SetPoint('TOPLEFT',f,'TOPLEFT',505,-192); f.detailInfo:SetWidth(280); f.detailInfo:SetJustifyH('LEFT'); f.detailInfo:SetJustifyV('TOP')
-    f.detailReagents=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailReagents:SetPoint('TOPLEFT',f,'TOPLEFT',505,-347); f.detailReagents:SetWidth(280); f.detailReagents:SetJustifyH('LEFT'); f.detailReagents:SetJustifyV('TOP')
-    f.whisper=button(f,'Шепнути',505,-474,110,function()
+    f.detailIcon=f:CreateTexture(nil,'ARTWORK'); f.detailIcon:SetSize(46,46); f.detailIcon:SetPoint('TOPLEFT',f,'TOPLEFT',450,-128)
+    f.detailTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.detailTitle:SetPoint('TOPLEFT',f,'TOPLEFT',505,-131); f.detailTitle:SetWidth(220); f.detailTitle:SetJustifyH('LEFT'); f.detailTitle:SetWordWrap(true)
+    f.infoScroll=CreateFrame('ScrollFrame',nil,f,'UIPanelScrollFrameTemplate'); f.infoScroll:SetPoint('TOPLEFT',f,'TOPLEFT',450,-184); f.infoScroll:SetSize(255,110)
+    f.infoContent=CreateFrame('Frame',nil,f.infoScroll); f.infoContent:SetSize(245,110); f.infoScroll:SetScrollChild(f.infoContent)
+    f.detailInfo=f.infoContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.detailInfo:SetPoint('TOPLEFT'); f.detailInfo:SetWidth(245); f.detailInfo:SetJustifyH('LEFT'); f.detailInfo:SetJustifyV('TOP')
+    f.detailReagents=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailReagents:SetPoint('TOPLEFT',f,'TOPLEFT',450,-302); f.detailReagents:SetWidth(275); f.detailReagents:SetJustifyH('LEFT'); f.detailReagents:SetJustifyV('TOP')
+    f.whisper=button(f,'Шепнути',450,-410,110,function()
         local name=professionContext and tab=='masters' and selectedMaster and selectedMaster.name or (selectedEntry and selectedEntry.owner)
         if name and name~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(name) end
     end)
-    f.order=button(f,'Замовити',625,-474,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
-    f.masterRecipes=button(f,'Рецепти майстра',625,-474,170,function()
+    f.order=button(f,'Замовити',570,-410,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
+    f.masterRecipes=button(f,'Рецепти майстра',570,-410,160,function()
         if not selectedMaster then return end
         viewOwner=selectedMaster.name; tab='recipes'; selectedEntry=nil; selectedMaster=nil; offset=0; f.query:SetText(''); render()
     end)
-    button(f,'‹',20,-457,44,function() offset=offset-1; render() end)
-    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-462)
-    button(f,'›',130,-457,44,function() offset=offset+1; render() end)
-    f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-497); f.status:SetWidth(465); f.status:SetJustifyH('LEFT')
+    button(f,'‹',20,-394,44,function() offset=offset-1; render() end)
+    f.page=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.page:SetPoint('TOPLEFT',f,'TOPLEFT',75,-399)
+    button(f,'›',130,-394,44,function() offset=offset+1; render() end)
+    f.status=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.status:SetPoint('TOPLEFT',f,'TOPLEFT',20,-438); f.status:SetWidth(410); f.status:SetJustifyH('LEFT')
     f.status:SetText(scanStatus)
     f:SetScript('OnHide',function() selectRecipe=nil end)
     f:Hide(); return f

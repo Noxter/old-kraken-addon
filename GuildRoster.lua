@@ -260,14 +260,14 @@ local function CreateRosterWindow(parent)
     summary:SetJustifyH("LEFT")
     frame.summaryText = summary
 
-    CreateColumnHeader(frame, "ІМ'Я", "name", 18, 180)
-    CreateColumnHeader(frame, "РАНГ", "rank", 202, 130)
-    CreateColumnHeader(frame, "РІВ.", "level", 336, 48)
-    CreateColumnHeader(frame, "КЛАС", "class", 388, 100)
-    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 492, 100)
-    CreateColumnHeader(frame, "ПРОФЕСІЇ", nil, 594, 80)
-    CreateColumnHeader(frame, "СТАТУС", nil, 676, 74)
-    CreateColumnHeader(frame, "ДІЯ", nil, 754, 84)
+    CreateColumnHeader(frame, "ІМ'Я", "name", 18, 170)
+    CreateColumnHeader(frame, "РАНГ", "rank", 192, 105)
+    CreateColumnHeader(frame, "РІВ.", "level", 301, 45)
+    CreateColumnHeader(frame, "КЛАС", "class", 350, 90)
+    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 444, 140)
+    CreateColumnHeader(frame, "ПРОФЕСІЇ", nil, 588, 80)
+    CreateColumnHeader(frame, "СТАТУС", nil, 672, 70)
+    CreateColumnHeader(frame, "ДІЯ", nil, 746, 84)
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -132)
@@ -304,17 +304,17 @@ local function CreateRow(index, parent)
     end
 
     local columns = {
-        { x = 6, width = 180 },
-        { x = 190, width = 130 },
-        { x = 324, width = 48 },
-        { x = 376, width = 100 },
-        { x = 480, width = 100 },
-        { x = 664, width = 74 },
+        { x = 6, width = 170 },
+        { x = 180, width = 105 },
+        { x = 289, width = 45 },
+        { x = 338, width = 90 },
+        { x = 432, width = 140 },
+        { x = 660, width = 70 },
     }
 
     row.cells = {}
     for cellIndex, column in ipairs(columns) do
-        local cell = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        local cell = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         cell:SetPoint("LEFT", row, "LEFT", column.x, 0)
         cell:SetWidth(column.width)
         cell:SetHeight(ROW_HEIGHT)
@@ -322,11 +322,23 @@ local function CreateRow(index, parent)
         cell:SetWordWrap(false)
         row.cells[cellIndex] = cell
     end
+    row.cellHovers = {}
+    for _, cellIndex in ipairs({1, 2, 4, 5}) do
+        local hover = CreateFrame('Frame', nil, row)
+        hover:SetAllPoints(row.cells[cellIndex]); hover:EnableMouse(true)
+        hover:SetScript('OnEnter', function(self)
+            if GameTooltip and self.fullText and self.fullText ~= '' then
+                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(self.fullText, 1, 1, 1, true); GameTooltip:Show()
+            end
+        end)
+        hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+        row.cellHovers[cellIndex] = hover
+    end
 
     row.professions = {}
     for i=1,5 do
         local icon=CreateFrame('Button',nil,row)
-        icon:SetSize(15,15); icon:SetPoint('LEFT',row,'LEFT',584+(i-1)*16,0)
+        icon:SetSize(15,15); icon:SetPoint('LEFT',row,'LEFT',576+(i-1)*16,0)
         icon.texture=icon:CreateTexture(nil,'ARTWORK'); icon.texture:SetAllPoints(icon)
         icon:SetScript('OnClick',function(self)
             if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
@@ -348,7 +360,7 @@ local function CreateRow(index, parent)
     local inviteButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
     OldKraken.UIStyle.Button(inviteButton, "primary")
     inviteButton:SetSize(76, 18)
-    inviteButton:SetPoint("LEFT", row, "LEFT", 746, 0)
+    inviteButton:SetPoint("LEFT", row, "LEFT", 734, 0)
     inviteButton:SetText("Інвайт")
     inviteButton:SetScript("OnClick", function(self)
         if self.memberName and self.online then
@@ -435,6 +447,10 @@ function Roster:Render()
         cells[4]:SetText(SafeText(member.class))
         cells[5]:SetText(SafeText(member.zone))
         cells[6]:SetText(member.isOnline and "Онлайн" or "Офлайн")
+        row.cellHovers[1].fullText = SafeText(member.name)
+        row.cellHovers[2].fullText = SafeText(member.rank)
+        row.cellHovers[4].fullText = SafeText(member.class)
+        row.cellHovers[5].fullText = SafeText(member.zone)
 
         local classColor = member.classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.classFile]
         if classColor then

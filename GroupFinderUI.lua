@@ -1,13 +1,14 @@
 -- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
 local window, selected, requestsWindow
+local refresh
 local groupAlert
 local lastAlertSoundAt = -math.huge
 local ALERT_DURATION, ALERT_FADE_DURATION, ALERT_SOUND_INTERVAL = 9, 1, 60
 local tab = 'all'
 local offset = 0
 local requestOffset = 0
-local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 5, 3
+local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 3, 3
 local category, role = 'dungeon', 'dps'
 local filterCategory, filterRole, filterFree = 'all', '', false
 local dungeon, filterDungeon = '', ''
@@ -184,12 +185,14 @@ local function refreshRequests()
                 local requestKey = id .. '\001' .. name
                 entries[#entries + 1] = {
                     id=id, name=name, role=applicantRole, title=group.title,
+                    selected=selected == Finder.identity .. '\001' .. id,
                     time=Finder.requestVersions[requestKey] or 0,
                 }
             end
         end
     end
     table.sort(entries, function(a, b)
+        if a.selected ~= b.selected then return a.selected end
         if a.time ~= b.time then return a.time > b.time end
         if a.title ~= b.title then return a.title < b.title end
         return a.name < b.name
@@ -209,52 +212,38 @@ local function refreshRequests()
             row.name:Hide(); row.group:Hide(); row.hover:Hide(); row.accept:Hide(); row.reject:Hide()
         end
     end
-    requestsWindow.page:SetText(#entries == 0 and '' or (math.floor(requestOffset / REQUESTS_PER_PAGE) + 1) .. ' / ' .. math.ceil(#entries / REQUESTS_PER_PAGE))
+    local showPagination = #entries > REQUESTS_PER_PAGE
+    requestsWindow.page:SetText(showPagination and ((math.floor(requestOffset / REQUESTS_PER_PAGE) + 1) .. ' / ' .. math.ceil(#entries / REQUESTS_PER_PAGE)) or '')
+    requestsWindow.page:SetShown(showPagination); requestsWindow.previousPage:SetShown(showPagination); requestsWindow.nextPage:SetShown(showPagination)
 end
 
 local function showRequests()
     if not Finder.active then print('Old Kraken: пошук груп не ініціалізовано.'); return end
     if not window or not window:IsShown() then Finder:Show() end
     if not window or not window:IsShown() then return end
+    if tab == 'create' then tab='mine'; selected=nil end
     refreshPeople()
     if not requestsWindow then
-        local popupParent = window.embedded and OldKraken.UIHub.content or window
-        local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', popupParent, 'BasicFrameTemplateWithInset')
+        local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', window)
         f:Hide()
-        f:SetSize(370, 335)
-        if window.embedded then f:SetPoint('TOPRIGHT', popupParent, 'TOPRIGHT', -10, -50)
-        else f:SetPoint('TOPLEFT', window, 'TOPRIGHT', 8, 0) end
+        f:SetSize(300, 175); f:SetPoint('TOPLEFT', window, 'TOPLEFT', 550, -70)
         f:EnableMouse(true)
-        OldKraken.UIStyle.Window(f)
-        f:SetFrameStrata('FULLSCREEN_DIALOG')
-        f:SetFrameLevel(20)
-        f:SetScript('OnHide', function(self)
-            local saved = self.mainPosition
-            if not saved then return end
-            window:SetScale(saved.scale)
-            if not self.mainMoved then
-                window:ClearAllPoints()
-                window:SetPoint(saved.point, saved.relative, saved.relativePoint, saved.x, saved.y)
-            end
-            self.mainPosition = nil
-        end)
-        if f.TitleText then f.TitleText:SetText('Old Kraken — Заявки до груп') end
         f.count = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-        f.count:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, -38)
+        f.count:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, 0)
         f.empty = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-        f.empty:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, -64); f.empty:SetText('Нових заявок немає.')
+        f.empty:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -28); f.empty:SetWidth(285); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Нових заявок немає. Поверніться до деталей оголошення.')
         f.rows = {}
         for i=1, REQUESTS_PER_PAGE do
             local row = {}
-            local y = -62 - (i - 1) * 46
+            local y = -22 - (i - 1) * 40
             row.name = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-            row.name:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y); row.name:SetSize(150, 18)
+            row.name:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y); row.name:SetSize(150, 18)
             row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
             row.group = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-            row.group:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y - 19); row.group:SetSize(150, 16)
+            row.group:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y - 18); row.group:SetSize(150, 16)
             row.group:SetJustifyH('LEFT'); row.group:SetWordWrap(false)
             row.hover = CreateFrame('Frame', nil, f)
-            row.hover:SetPoint('TOPLEFT', f, 'TOPLEFT', 18, y); row.hover:SetSize(150, 38); row.hover:EnableMouse(true)
+            row.hover:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, y); row.hover:SetSize(150, 36); row.hover:EnableMouse(true)
             row.hover:SetScript('OnEnter', function(self)
                 if not row.entry then return end
                 GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
@@ -273,33 +262,24 @@ local function showRequests()
                     refreshRequests()
                 else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
             end
-            row.accept = button(f, 'Прийняти', 175, y - 3, 85, function() decide(true) end, nil, 'primary')
-            row.reject = button(f, 'Відхилити', 265, y - 3, 95, function() decide(false) end)
+            row.accept = button(f, 'Прийняти', 150, y - 3, 70, function() decide(true) end, nil, 'primary')
+            row.reject = button(f, 'Відхилити', 225, y - 3, 70, function() decide(false) end)
+            row.accept:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Прийняти заявку'); GameTooltip:Show() end end)
+            row.reject:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Відхилити заявку'); GameTooltip:Show() end end)
+            row.accept:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+            row.reject:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
             f.rows[i] = row
         end
-        button(f, '‹', 18, -300, 45, function() requestOffset=math.max(0, requestOffset-REQUESTS_PER_PAGE); refreshRequests() end)
-        button(f, '›', 115, -300, 45, function() if requestOffset + REQUESTS_PER_PAGE < #(f.entries or {}) then requestOffset=requestOffset+REQUESTS_PER_PAGE end; refreshRequests() end)
+        f.previousPage = button(f, '‹', 0, -145, 45, function() requestOffset=math.max(0, requestOffset-REQUESTS_PER_PAGE); refreshRequests() end)
+        f.nextPage = button(f, '›', 97, -145, 45, function() if requestOffset + REQUESTS_PER_PAGE < #(f.entries or {}) then requestOffset=requestOffset+REQUESTS_PER_PAGE end; refreshRequests() end)
         f.page = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-        f.page:SetPoint('TOPLEFT', f, 'TOPLEFT', 70, -304)
+        f.page:SetPoint('TOPLEFT', f, 'TOPLEFT', 52, -149)
         requestsWindow = f
     end
-    if not window.embedded and not requestsWindow:IsShown() then
-        local point, relative, relativePoint, x, y = window:GetPoint(1)
-        requestsWindow.mainPosition = {point=point, relative=relative, relativePoint=relativePoint, x=x, y=y, scale=window:GetScale()}
-        requestsWindow.mainMoved = false
-        local totalWidth = 900 + 8 + 370
-        local screenWidth = UIParent:GetWidth()
-        if screenWidth and screenWidth > 0 then
-            local scale = math.min(window:GetScale(), screenWidth * 0.96 / totalWidth)
-            window:SetScale(scale)
-            window:ClearAllPoints()
-            window:SetPoint('CENTER', UIParent, 'CENTER', -(370 + 8) * scale / 2, 0)
-        end
-    end
-    requestsWindow:Show(); refreshRequests()
+    requestsWindow:Show(); refreshRequests(); if refresh then refresh() end
 end
 
-local function refresh()
+refresh=function()
     if not window or not window:IsShown() then return end
     window.alertButton:SetText(Finder:GroupAlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local lines = {}
@@ -320,7 +300,12 @@ local function refresh()
     table.sort(lines, function(a,b) return a.group.title < b.group.title end)
     if offset >= #lines then offset = math.max(0, math.floor((#lines - 1) / CARDS_PER_PAGE) * CARDS_PER_PAGE) end
     window.visible = lines
-    window.emptyList:SetShown(#lines == 0 and tab ~= 'create')
+    local empty = #lines == 0 and tab ~= 'create'
+    window.emptyList:SetText(tab == 'applications' and 'Ви ще не подали жодної заявки.' or (tab == 'mine' and 'У вас ще немає оголошень.' or 'Груп не знайдено. Змініть фільтри або створіть оголошення.'))
+    window.emptyList:SetShown(empty)
+    local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= '' or (window.searchFilter:GetText() or '') ~= '' or (window.levelFilter:GetText() or '') ~= ''
+    window.emptyAction:SetText(tab == 'applications' and 'Знайти групу' or (tab == 'all' and hasFilters and 'Очистити фільтри' or 'Створити оголошення'))
+    window.emptyAction:SetShown(empty)
     for _, item in ipairs(window.tabs) do
         item.button.activeMark:SetShown(item.key == tab)
         if item.key == tab then item.button:LockHighlight() else item.button:UnlockHighlight() end
@@ -393,7 +378,10 @@ local function refresh()
             window.deleteButtons[i]:Hide()
         end
     end
-    local g = selected and Finder.groups[selected]
+    if tab == 'create' and requestsWindow then requestsWindow:Hide() end
+    local showingRequests = requestsWindow and requestsWindow:IsShown() and tab ~= 'create'
+    window.detailsScroll:SetShown(tab ~= 'create' and not showingRequests)
+    local g = tab ~= 'create' and selected and Finder.groups[selected]
     if g then
         local applicationStatus = Finder.pending[selected]
         window.details:SetText(string.format('%s — %s\nАвтор: %s | Рівень: %d–%d | Роль: %s\n%s\nСтатус: %s%s\nСклад:',
@@ -507,19 +495,24 @@ local function refresh()
     local pending = selected and Finder.pending[selected]
     local alreadyMember = false
     if g then for _, name in ipairs(g.members) do if name == Finder.identity then alreadyMember = true; break end end end
-    window.applyButton:SetShown(isOther and not alreadyMember and pending ~= 'pending')
+    local canApply = isOther and not showingRequests and not alreadyMember and pending ~= 'pending'
+    window.applyButton:SetShown(canApply)
     window.applicationActionButton:SetText(pending == 'pending' and 'Відкликати' or 'Прибрати заявку')
-    window.applicationActionButton:SetShown(tab == 'applications' and g and g.owner ~= Finder.identity and pending ~= nil)
-    window.cancelButton:SetShown(canManage)
-    window.bumpButton:SetShown(canManage)
-    window.roleButton:SetShown(tab == 'create' or (isOther and not alreadyMember))
-    window.roleLabel:SetShown(tab == 'create' or (isOther and not alreadyMember))
-    local requestCount = 0
+    window.applicationActionButton:SetShown(not showingRequests and tab == 'applications' and g and g.owner ~= Finder.identity and pending ~= nil)
+    window.cancelButton:SetShown(canManage and not showingRequests)
+    window.bumpButton:SetShown(canManage and not showingRequests)
+    window.roleButton:SetShown(tab == 'create' or canApply)
+    window.roleLabel:SetShown(tab == 'create' or canApply)
+    local requestCount, haveOwned = 0, false
+    for _, group in pairs(Finder.groups or {}) do
+        if group.owner == Finder.identity and not group.closed and not group.hidden then haveOwned = true; break end
+    end
     for id, applicants in pairs(Finder.requests or {}) do
         local own = Finder.groups[Finder.identity .. '\001' .. id]
         if own and not own.closed and not own.hidden then for _ in pairs(applicants) do requestCount = requestCount + 1 end end
     end
-    window.requestsButton:SetText('Заявки: ' .. requestCount)
+    window.requestsButton:SetText(showingRequests and '← До деталей' or ('Заявки: ' .. requestCount))
+    window.requestsButton:SetShown(tab ~= 'create' and (haveOwned or showingRequests))
     for _, control in ipairs(window.filterControls) do control:SetShown(tab == 'all') end
     window.dungeonButton:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
     window.dungeonLabel:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
@@ -550,7 +543,6 @@ local function createWindow(parent)
     if not parent then
         f:SetScript('OnDragStop', function(self)
             self:StopMovingOrSizing()
-            if requestsWindow and requestsWindow:IsShown() then requestsWindow.mainMoved = true end
         end)
     end
     f:SetClampedToScreen(true); f:Hide()
@@ -561,7 +553,11 @@ local function createWindow(parent)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
     f.tabs = {}
     for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
-        local b = button(f, item[1], 18 + (i-1)*160, -32, 150, function() tab=item[2]; selected=nil; offset=0; requestOffset=0; refresh() end)
+        local b = button(f, item[1], 18 + (i-1)*160, -32, 150, function()
+            if requestsWindow then requestsWindow:Hide() end
+            if type(CloseDropDownMenus)=='function' then CloseDropDownMenus() end
+            tab=item[2]; selected=nil; offset=0; requestOffset=0; refresh()
+        end)
         b.activeMark = b:CreateTexture(nil, 'OVERLAY')
         b.activeMark:SetPoint('BOTTOMLEFT', b, 'BOTTOMLEFT', 8, 2)
         b.activeMark:SetSize(134, 2)
@@ -593,13 +589,24 @@ local function createWindow(parent)
             UIDropDownMenu_AddButton(info, level)
         end
     end, 'MENU')
-    f.emptyList = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.emptyList:SetPoint('TOPLEFT', f, 'TOPLEFT', 25, -75); f.emptyList:SetText('Груп не знайдено. Змініть фільтри або створіть оголошення.')
+    f.emptyList = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+    f.emptyList:SetPoint('TOPLEFT', f, 'TOPLEFT', 25, -75); f.emptyList:SetWidth(480); f.emptyList:SetJustifyH('LEFT'); f.emptyList:SetText('Груп не знайдено. Змініть фільтри або створіть оголошення.')
+    f.emptyAction = button(f, 'Створити оголошення', 25, -115, 190, function()
+        local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= '' or (f.searchFilter:GetText() or '') ~= '' or (f.levelFilter:GetText() or '') ~= ''
+        if tab == 'all' and hasFilters then
+            filterCategory, filterRole, filterFree, filterDungeon = 'all', '', false, ''
+            f.searchFilter:SetText(''); f.levelFilter:SetText('')
+            UIDropDownMenu_SetText(f.categoryFilter, 'Усі категорії'); UIDropDownMenu_SetText(f.roleFilter, 'Усі ролі')
+            UIDropDownMenu_SetText(f.freeFilter, 'Усі групи'); UIDropDownMenu_SetText(f.dungeonFilter, dungeonLabels[''] or 'Усі / не вибрано')
+        elseif tab == 'applications' then tab='all'
+        else tab='create' end
+        selected=nil; offset=0; refresh()
+    end)
     for i=1,CARDS_PER_PAGE do
         local index = i
         local card = button(f, '', 18, -65-(i-1)*82, 490, function()
             local entry = f.visible and f.visible[index + offset]
-            if entry then if selected ~= entry.key then requestOffset=0; f.detailsScroll:SetVerticalScroll(0) end; selected=entry.key; refresh() end
+            if entry then if requestsWindow then requestsWindow:Hide() end; if selected ~= entry.key then requestOffset=0; f.detailsScroll:SetVerticalScroll(0) end; selected=entry.key; refresh() end
         end)
         card:SetHeight(78)
         card.art = card:CreateTexture(nil, 'ARTWORK')
@@ -734,13 +741,15 @@ local function createWindow(parent)
     f.listPage:SetPoint('TOPLEFT', f, 'TOPLEFT', 86, -323)
     f.listPage:SetWidth(44); f.listPage:SetJustifyH('CENTER')
     f.detailsScroll = CreateFrame('ScrollFrame', nil, f, 'UIPanelScrollFrameTemplate')
-    f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.detailsScroll:SetSize(300, 210)
+    f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.detailsScroll:SetSize(300, 175)
     f.detailsContent = CreateFrame('Frame', nil, f.detailsScroll)
     f.detailsContent:SetSize(300, 86); f.detailsScroll:SetScrollChild(f.detailsContent)
     f.details = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
     f.details:SetPoint('TOPLEFT'); f.details:SetWidth(300); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     f.memberRows = {}
-    f.requestsButton = button(f, 'Заявки', 550, -288, 150, showRequests)
+    f.requestsButton = button(f, 'Заявки', 550, -288, 150, function()
+        if requestsWindow and requestsWindow:IsShown() then requestsWindow:Hide(); refresh() else showRequests() end
+    end)
     f.searchFilter = input(f, 'Пошук за назвою або автором', 20, -350, 260, '')
     f.searchFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
     f.dungeonFilter = dropdown(f, 285, -368, 250, activityOptions,
@@ -825,11 +834,11 @@ local function createWindow(parent)
             Finder:Changed(); selected=nil; refresh()
         else print('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.') end
     end)
-    f.cancelButton = button(f, 'Закрити набір', 550, -415, 140, function()
+    f.cancelButton = button(f, 'Закрити набір', 550, -253, 140, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:Cancel(g.id) then Finder:Changed(); refresh() end
     end)
-    f.bumpButton = button(f, 'Оновити набір', 550, -445, 150, function()
+    f.bumpButton = button(f, 'Оновити набір', 700, -253, 150, function()
         local group = selected and Finder.groups[selected]
         if not group or group.owner ~= Finder.identity or group.closed then return end
         local ok, reason, seconds = Finder:Reannounce(group.id)
@@ -837,6 +846,11 @@ local function createWindow(parent)
         elseif reason == 'cooldown' then print('Old Kraken: повторити оголошення можна через ' .. seconds .. ' с.')
         else print('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.') end
     end)
+    for _, item in ipairs({{f.cancelButton, 'Закрити набір: оголошення зникне з відкритих груп.'}, {f.bumpButton, 'Повторно сповістити гільдію про набір. Інтервал — 5 хвилин.'}}) do
+        local control, help = item[1], item[2]
+        control:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(help, 1, 1, 1, true); GameTooltip:Show() end end)
+        control:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    end
     return f
 end
 
@@ -972,7 +986,9 @@ local function showAlert(title, subtitle, kind, key, dungeonId)
             elseif alertKind == 'group' then
                 tab, selected, offset, requestOffset = 'all', nil, 0, 0
             end
+            if requestsWindow then requestsWindow:Hide() end
             Finder:Show()
+            if alertKind == 'request' then showRequests() end
         end)
         groupAlert:SetScript('OnUpdate', function(self, elapsed)
             if self.dragging then return end
@@ -1079,7 +1095,7 @@ OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
     refreshPeople()
     showAlert('Нова заявка від ' .. playerLabel(name), roleLabel(role) .. ' · ' .. group.title,
         'request', group.owner .. '\001' .. group.id)
-    showRequests()
+    refreshRequests()
 end)
 
 OldKraken:On('GROUP_FINDER_APPLICATION_STATUS', function(group, status)
