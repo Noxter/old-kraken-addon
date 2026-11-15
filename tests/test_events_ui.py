@@ -11,7 +11,7 @@ OldKraken = {
     _listeners = {},
     UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end, Input=function() end},
     Communication = {},
-    GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end},
+    GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end, CanPerformRole=function() return true end},
 }
 StaticPopupDialogs={}
 function StaticPopup_Show(_,_,_,callback)

@@ -216,11 +216,15 @@ comm:RegisterHandler('CVNEW', function(sender,id,payload) receiveEvent(sender,id
 comm:RegisterHandler('CVCANCEL', function(sender,id,payload) receiveEvent(sender,id,payload,false,true,true) end)
 comm:RegisterHandler('CVSTATE', function(sender,id,payload) receiveEvent(sender,id,payload,false,true) end)
 
+local function canPerformRole(name,role)
+    return role=='flex' or codec:CanPerformRole(name,role)
+end
 local function updateSignup(sender, owner, id, role, version)
     local key = eventKey(owner,id)
     local e = events[key]
     if not e or e.owner ~= identity or e.cancelled or not validText(sender,1,128)
         or (role ~= 'leave' and not roles[role]) or not version or version % 1 ~= 0 or version < 1 or version > 9000000000000000 then return end
+    if role~='leave' and not canPerformRole(sender,role) then return end
     e.versions = e.versions or {}
     if e.versions[sender] and e.versions[sender] >= version then dirty[key]=true; return end
     if not e.versions[sender] and count(e.versions) >= 200 then return end
@@ -242,8 +246,14 @@ local function updateSignup(sender, owner, id, role, version)
 end
 comm:RegisterHandler('CEVRSVP', function(sender, _, payload)
     if not active then return end
-    local f = codec._unpackFields(payload,4)
-    if not f or #f ~= 4 or f[1] ~= identity or not validID(f[2]) then return end
+    local f = codec._unpackFields(payload,5)
+    if not f or (#f~=4 and #f~=5) or f[1]~=identity or not validID(f[2]) then return end
+    if f[5] then
+        if not f[5]:match('^[01][01][01]$') then return end
+        local available=codec:GetGameRoles(sender) or {tank=f[5]:sub(1,1)=='1',healer=f[5]:sub(2,2)=='1',dps=f[5]:sub(3,3)=='1'}
+        if f[3]~='leave' and f[3]~='flex' and not available[f[3]] then return end
+        codec.roleCapabilities=codec.roleCapabilities or {}; codec.roleCapabilities[sender]=available
+    end
     updateSignup(sender,f[1],f[2],f[3],tonumber(f[4]))
 end)
 comm:RegisterHandler('CEVQUERY', function(_, _, payload)
@@ -348,6 +358,7 @@ end
 function Events:Signup(key, role)
     local e=events[key]
     if not active or not e or e.relayed or e.cancelled or (role~='leave' and not roles[role]) then return false end
+    if role~='leave' and not canPerformRole(identity,role) then return false end
     if role~='leave' and e.owner==identity and e.statuses[identity]~='accepted' and acceptedCount(e)>=e.size then return false end
     sequence=math.max(sequence+1,GetServerTime()*1000)
     local intent={role=role,version=sequence}; intents[key]=intent
@@ -357,6 +368,7 @@ end
 function Events:Decide(key, name, status)
     local e=events[key]
     if not active or not e or e.owner~=identity or e.cancelled or not e.people[name] or name==identity or not statuses[status] or status=='pending' then return false end
+    if (status=='accepted' or status=='reserve') and not canPerformRole(name,e.people[name]) then return false end
     if status=='accepted' and e.statuses[name]~='accepted' and acceptedCount(e)>=e.size then return false end
     if e.statuses[name]==status then return true end
     local previous=e.statuses[name]
@@ -451,7 +463,11 @@ if C_Timer and C_Timer.NewTicker then
             if comm:SendProtocol('CEVQUERY','') then nextRetry=now+180 end
             for key in pairs(intents) do
                 local e=events[key]; local intent=intents[key]
-                if e and e.owner~=identity then comm:SendProtocol('CEVRSVP',codec._pack({e.owner,e.id,intent.role,string.format('%.0f',intent.version)})) end
+                if e and e.owner~=identity then
+                    local fields={e.owner,e.id,intent.role,string.format('%.0f',intent.version)}
+                    fields[5]=codec:RoleCapabilityCode()
+                    comm:SendProtocol('CEVRSVP',codec._pack(fields))
+                end
             end
         end
         local key=next(dirty)
@@ -488,13 +504,14 @@ local function field(parent, label, x, y, width, value)
     box:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); box:SetSize(width,22); box:SetAutoFocus(false); box:SetText(value or '')
     box.label=caption; box:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return box
 end
-local function selectMenu(parent,name,x,y,width,values,labels,get,set)
+local function selectMenu(parent,name,x,y,width,values,labels,get,set,allowed)
     local f=CreateFrame('Frame',name,parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
     f:SetPoint('TOPLEFT',parent,'TOPLEFT',x-16,y+3); UIDropDownMenu_SetWidth(f,width-34); UIDropDownMenu_JustifyText(f,'LEFT')
     UIDropDownMenu_Initialize(f,function(_,level)
         for _,v in ipairs(values) do
             local value=v; local item=UIDropDownMenu_CreateInfo(); item.text=labels[value]; item.value=value; item.checked=get()==value
-            item.func=function() set(value); UIDropDownMenu_SetText(f,labels[value]) end; UIDropDownMenu_AddButton(item,level)
+            item.disabled=allowed and not allowed(value) or false
+            item.func=function() if allowed and not allowed(value) then return end; set(value); UIDropDownMenu_SetText(f,labels[value]) end; UIDropDownMenu_AddButton(item,level)
         end
     end)
     UIDropDownMenu_SetText(f,labels[get()]); return f
@@ -525,7 +542,8 @@ local function selectMinutes(parent,x,y,get,set)
             if not start then return end
             for minute=start,start+14 do
                 local value=minute; local item=UIDropDownMenu_CreateInfo(); item.text=string.format('%02d',value); item.value=value; item.checked=get()==value
-                item.func=function() set(value); UIDropDownMenu_SetText(f,string.format('%02d',value)) end
+                item.disabled=allowed and not allowed(value) or false
+            item.func=function() if allowed and not allowed(value) then return end; set(value); UIDropDownMenu_SetText(f,string.format('%02d',value)) end
                 UIDropDownMenu_AddButton(item,level)
             end
         end
@@ -715,6 +733,7 @@ refresh=function()
                 row.state:SetVertexColor(tonumber(tint:sub(3,4),16)/255,tonumber(tint:sub(5,6),16)/255,tonumber(tint:sub(7,8),16)/255)
                 row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
                 row.invite:SetShown(own and e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
+                row.accept:SetEnabled(canPerformRole(name,role)); row.reserve:SetEnabled(canPerformRole(name,role))
                 row.accept:SetShown(own and name~=identity); row.reserve:SetShown(own and name~=identity); row.reject:SetShown(own and name~=identity); row:Show()
             end
             height=height+#names*32
@@ -722,6 +741,7 @@ refresh=function()
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.inviteAll:SetShown(own and e.kind=='raid')
         window.cancel:SetShown(e.owner==identity)
+        if not canPerformRole(identity,currentRole) then currentRole='flex'; UIDropDownMenu_SetText(window.roleMenu,roles[currentRole]) end
         local canJoin=not e.relayed and not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
         window.join:SetShown(canJoin)
         window.roleMenu:SetShown(canJoin)
@@ -827,7 +847,7 @@ local function createWindow(parent)
     f.flexButton=roleButton(f.roleFlex,'flex'); f.flexButton:SetWidth(detailsWidth)
     f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT')
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
-    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,-395,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end)
+    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,-395,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end)
     f.join=action(f,'Записатися',605+shift,-395,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
     f.leave=action(f,'Виписатися',605+shift,-395,100,function() if selected then Events:Signup(selected,'leave') end end)
     f.cancel=action(f,'Скасувати',710+shift,-395,105,function() if selected then Events:Cancel(selected) end end)

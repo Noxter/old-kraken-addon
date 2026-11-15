@@ -34,6 +34,8 @@ function UnitInParty() return false end
 C_PartyInfo={InviteUnit=function(name) invites[#invites+1]=name; return true end,
 ConvertToRaid=function() conversions=conversions+1; inRaid=true; return true end}
 ''')
+lua.execute((root/'GroupFinder.lua').read_text(encoding='utf-8'))
+lua.execute("OldKraken.GroupFinder:Initialize('Tester Realm',function() return true end); handlers={}; function OldKraken.Communication:RegisterHandler(kind,fn) handlers[kind]=fn end")
 for name in ['ActivityCatalog.lua','GuildEvents.lua']:
     lua.execute((root/name).read_text(encoding='utf-8'))
 lua.execute('''
@@ -108,6 +110,31 @@ lead=false; assert(not events:InviteAll(key))
 lead=true
 local owner=e.owner; e.owner='Somebody else'
 assert(not events:InviteAll(key)); e.owner=owner
+-- Game role capabilities guard dropdown, local signup, owner decisions and remote RSVP.
+gameRoles={tank=false,healer=false,dps=true}
+function UnitGetAvailableRoles(unit)
+    if unit=='player' then return gameRoles.tank,gameRoles.healer,gameRoles.dps end
+end
+assert(not events:Signup(key,'tank') and not events:Signup(key,'healer'))
+assert(events:Signup(key,'dps'))
+options={}; ui.roleMenu.initialize(ui.roleMenu,1)
+for _,info in ipairs(options) do
+    if info.value=='tank' or info.value=='healer' then assert(info.disabled) end
+    if info.value=='dps' or info.value=='flex' then assert(not info.disabled) end
+end
+local finder=OldKraken.GroupFinder
+handlers.CEVRSVP('Caster',nil,finder._pack({e.owner,e.id,'tank','2000000000100','001'}))
+assert(not e.people.Caster)
+handlers.CEVRSVP('Caster',nil,finder._pack({e.owner,e.id,'dps','2000000000101','001'}))
+assert(e.people.Caster=='dps')
+assert(events:Decide(key,'Caster','accepted'))
+e.people.Caster='healer'
+assert(not events:Decide(key,'Caster','accepted') and not events:Decide(key,'Caster','reserve'))
+assert(events:Decide(key,'Caster','rejected'))
+gameRoles={tank=true,healer=true,dps=false}
+assert(events:Signup(key,'tank') and events:Signup(key,'healer'))
+assert(not events:Signup(key,'dps'))
+assert(events:Signup(key,'leave'))
 e.cancelled=true; assert(not events:InviteAll(key))
 ''')
 print('PASS: raid selection auto-title, owner controls, accepted-only individual/batch invitations, existing-member skips, solo party limits, raid conversion, combat and permission guards')
