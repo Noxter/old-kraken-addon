@@ -1124,12 +1124,71 @@ local alertActions = {
     event_signup='Клік — відкрити подію', workshop='Клік — відкрити замовлення',
 }
 
-local function showAlert(title, subtitle, kind, key, dungeonId)
+local function paintAlertRoster(group)
+    groupAlert.roleSlots=groupAlert.roleSlots or {}
+    local slots={}
+    if group.category=='dungeon' and group.maxSize==5 then slots=Finder:DungeonSlots(group)
+    else
+        for i=1,math.min(5,group.maxSize) do
+            local member=group.members[i]
+            slots[i]={member=member,role='flex',memberRole=member and (i==1 and group.role or (group.memberRoles and group.memberRoles[member]) or '')}
+        end
+    end
+    local atlas={tank={0,67/256,67/256,134/256},healer={67/256,134/256,0,67/256},dps={67/256,134/256,67/256,134/256}}
+    for i=1,5 do
+        local slot=slots[i]
+        local control=groupAlert.roleSlots[i]
+        if slot and not control then
+            control=CreateFrame('Button',nil,groupAlert)
+            control:SetSize(86,49); control:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',82+(i-1)*91,-53)
+            control.ring=control:CreateTexture(nil,'BACKGROUND'); control.ring:SetSize(30,30); control.ring:SetPoint('TOP',control,'TOP',0,0)
+            control.ring:SetTexture('Interface\\AddOns\\OldKraken\\Media\\RoleSlot.tga')
+            control.icon=control:CreateTexture(nil,'ARTWORK'); control.icon:SetSize(22,22); control.icon:SetPoint('CENTER',control.ring,'CENTER',0,0)
+            control.label=control:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+            control.label:SetPoint('TOPLEFT',control,'TOPLEFT',0,-33); control.label:SetSize(86,14); control.label:SetJustifyH('CENTER'); control.label:SetWordWrap(false)
+            control:RegisterForClicks('LeftButtonUp','RightButtonUp')
+            control:SetScript('OnClick',function(_,mouseButton)
+                if GameTooltip then GameTooltip:Hide() end
+                local click=groupAlert:GetScript('OnClick'); if click then click(groupAlert,mouseButton) end
+            end)
+            control:RegisterForDrag('LeftButton')
+            control:SetScript('OnDragStart',function() local fn=groupAlert:GetScript('OnDragStart'); if fn then fn(groupAlert) end end)
+            control:SetScript('OnDragStop',function() local fn=groupAlert:GetScript('OnDragStop'); if fn then fn(groupAlert) end end)
+            control:SetScript('OnEnter',function(self)
+                if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_TOP'); GameTooltip:SetText(self.tooltipText); GameTooltip:Show() end
+            end)
+            control:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+            groupAlert.roleSlots[i]=control
+        end
+        if control then
+            control:SetShown(slot~=nil)
+            if slot then
+                local member=slot.member
+                local displayedRole=member and (slot.memberRole or '') or slot.role
+                local coords=atlas[displayedRole]
+                control.memberName=member; control.role=displayedRole; control.occupied=member~=nil
+                control.icon:SetTexture(coords and 'Interface\\LFGFrame\\UI-LFG-ICON-ROLES' or 'Interface\\Icons\\INV_Misc_QuestionMark')
+                if coords then control.icon:SetTexCoord(unpack(coords)) else control.icon:SetTexCoord(0,1,0,1) end
+                control.icon:SetDesaturated(not member); control.icon:SetAlpha(member and 1 or 0.4)
+                local state=not member and 'Вільне місце' or (member==group.owner and 'Автор збору' or (group.partyObserved and (group.partyObserved[member] and 'У групі' or 'Резерв') or 'Стан групи невідомий'))
+                if not member then control.ring:SetVertexColor(0.4,0.44,0.5)
+                elseif group.partyObserved and member~=group.owner and not group.partyObserved[member] then control.ring:SetVertexColor(1,0.72,0.25)
+                else control.ring:SetVertexColor(0.3,1,0.55) end
+                control.label:SetText(member or roleLabel(slot.role))
+                control.label:SetTextColor(member and 0.92 or 0.6,member and 0.95 or 0.65,member and 1 or 0.7)
+                control.tooltipText=(member or 'Вільне місце')..'\n'..roleLabel(displayedRole)..' · '..state
+            end
+        end
+    end
+end
+
+local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     local isEvent = kind == 'event' or kind == 'event_signup'
     local isWorkshop = kind == 'workshop'
     print('|cff2ec4b6Old Kraken|r: ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or '') .. (isEvent and '. /okr events' or (isWorkshop and '. /okr orders' or '. /okr group')))
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
+        groupAlert.roleSlots = {}
         OldKraken.UIStyle.Button(groupAlert)
         groupAlert:SetSize(560, 100)
         groupAlert.alertAccent = groupAlert:CreateTexture(nil, 'ARTWORK')
@@ -1216,6 +1275,9 @@ local function showAlert(title, subtitle, kind, key, dungeonId)
             if self.remaining <= 0 then self:Hide() end
         end)
     end
+    for _,control in ipairs(groupAlert.roleSlots or {}) do control:Hide() end
+    local graphical=kind=='group' and rosterGroup~=nil
+    groupAlert:SetSize(560,graphical and 146 or 100)
     groupAlert.kind, groupAlert.groupKey = kind, key
     local hasGroupArt = kind == 'group'
     groupAlert.alertArt:SetShown(hasGroupArt)
@@ -1243,7 +1305,16 @@ local function showAlert(title, subtitle, kind, key, dungeonId)
     groupAlert.alertCaption:SetText(alertCaptions[kind] or 'OLD KRAKEN')
     groupAlert.alertTitle:SetText(title)
     local hint = (alertActions[kind] or 'Клік — відкрити') .. ' · перетягніть, щоб перемістити'
+    if graphical then
+        paintAlertRoster(rosterGroup)
+        groupAlert.alertSubtitle:ClearAllPoints()
+        groupAlert.alertSubtitle:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',82,-108)
+        groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,8)
+        local extra=#rosterGroup.members>5 and (' · ще учасників: '..(#rosterGroup.members-5)) or ''
+        groupAlert.alertSubtitle:SetText('Склад '..#rosterGroup.members..'/'..rosterGroup.maxSize..' · вільно '..math.max(0,rosterGroup.maxSize-#rosterGroup.members)..extra..'\n'..hint)
+    else
     groupAlert.alertSubtitle:SetText(subtitle ~= '' and (subtitle .. '\n' .. hint) or hint)
+    end
     groupAlert.remaining = ALERT_DURATION
     groupAlert:SetAlpha(1)
     groupAlert:Show()
@@ -1257,7 +1328,7 @@ end
 
 function Finder:PreviewAlert(kind)
     if kind == 'group' then
-        showAlert('Гравець збирає: Назва групи', 'Склад 2/5 · Вільно місць: 3', 'group')
+        showAlert('Гравець збирає: Назва групи', 'Склад 2/5 · Вільно місць: 3', 'group',nil,'rfc',{category='dungeon',maxSize=5,owner='Танк',role='tank',members={'Танк','Лікар'},memberRoles={['Лікар']='healer'}})
     elseif kind == 'request' then
         showAlert('Нова заявка від гравця', 'Танк · Назва групи', 'request')
     elseif kind == 'event' then
@@ -1305,7 +1376,7 @@ OldKraken:On('GROUP_FINDER_NEW', function(group)
         needed = 'Вільні ролі: ' .. roleLabel('tank') .. ' ' .. missing.tank .. ', ' .. roleLabel('healer') .. ' ' .. missing.healer .. ', ' .. roleLabel('dps') .. ' ' .. missing.dps
     end
     local groupKey = group.owner .. '\001' .. group.id
-    showAlert(playerLabel(group.owner) .. ' збирає: ' .. group.title, summary .. ' · ' .. needed, 'group', groupKey, group.dungeon)
+    showAlert(playerLabel(group.owner) .. ' збирає: ' .. group.title, summary .. ' · ' .. needed, 'group', groupKey, group.dungeon, group)
 end)
 
 OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
