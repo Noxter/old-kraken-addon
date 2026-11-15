@@ -533,11 +533,11 @@ refresh=function()
     window.cancelButton:SetShown(canManage and not showingRequests)
     window.bumpButton:SetShown(canManage and not showingRequests)
     UpdateReannounceButton(window.bumpButton)
-    local roleLabelY = tab == 'create' and -330 or -313
+    local roleLabelY = -313
     window.roleLabel:ClearAllPoints(); window.roleLabel:SetPoint('TOPLEFT', window, 'TOPLEFT', 550, roleLabelY)
     window.roleButton:ClearAllPoints(); window.roleButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 534, roleLabelY - 14)
-    window.roleButton:SetShown(tab == 'create' or canApply)
-    window.roleLabel:SetShown(tab == 'create' or canApply)
+    window.roleButton:SetShown(canApply and true or false)
+    window.roleLabel:SetShown(canApply and true or false)
     local requestCount, haveOwned = 0, false
     for _, group in pairs(Finder.groups or {}) do
         if group.owner == Finder.identity and not group.closed and not group.hidden then haveOwned = true; break end
@@ -549,22 +549,31 @@ refresh=function()
     window.requestsButton:SetText(showingRequests and '← До деталей' or ('Заявки: ' .. requestCount))
     window.requestsButton:SetShown(tab ~= 'create' and (haveOwned or showingRequests))
     for _, control in ipairs(window.filterControls) do control:SetShown(tab == 'all') end
-    window.dungeonSelection:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
-    window.dungeonLabel:SetShown(tab == 'create' and (category == 'dungeon' or category == 'raid'))
-    window.dungeonLabel:SetText(category == 'raid' and 'Рейд' or 'Підземелля')
-    if window.activityPicker then
-        local show=tab=='create' and (category=='dungeon' or category=='raid')
-        window.activityPicker:SetShown(show)
-        if show then window.UpdateActivityCards() end
+    window.creationFooter:SetShown(tab=='create')
+    window.LayoutCreation()
+    local showCards=tab=='create' and (category=='dungeon' or category=='raid')
+    window.activityPicker:SetShown(showCards)
+    if showCards then window.UpdateActivityCards() end
+    local advanced=tab=='create' and window.advancedCreation
+    window.creationOptions:SetShown(advanced)
+    for _,box in ipairs({window.titleBox,window.maxBox,window.minBox,window.maxLevelBox}) do
+        box:SetShown(advanced); box.label:SetShown(advanced)
     end
-    for _, box in ipairs(window.createFields) do
-        if tab == 'create' then box:Show(); box.label:Show() else box:Hide(); box.label:Hide() end
+    window.descriptionBox:SetShown(tab=='create'); window.descriptionBox.label:Hide()
+    window.categoryButton:SetShown(advanced); window.categoryLabel:SetShown(advanced)
+    window.dungeonLabel:Hide()
+    window.maxBox.label:SetText(category=='dungeon' and 'Місць (5)' or 'Місць')
+    window.createButton:SetShown(tab=='create')
+    window.createButton:SetText('Зібрати групу')
+    for _,control in ipairs(window.creationRoles) do
+        control:SetShown(tab=='create' and (category~='dungeon' or control.role~='flex'))
+        control.active:SetShown(control.role==role)
     end
-    if tab == 'create' then
-        window.createButton:SetText('Створити')
-        window.maxBox.label:SetText(category == 'dungeon' and 'Місць (5)' or 'Місць')
-        window.createButton:Show(); window.categoryButton:Show(); window.categoryLabel:Show()
-    else window.createButton:Hide(); window.categoryButton:Hide(); window.categoryLabel:Hide() end
+    window.creationOptionsButton:SetText(window.advancedCreation and 'Менше' or 'Деталі')
+    local selectedActivity=dungeon~='' and dungeonLabels[dungeon] or nil
+    window.dungeonSelection:SetText(selectedActivity or ((category=='dungeon' or category=='raid') and 'Оберіть картку вище' or categoryLabels[category]))
+    catalog.SetArtwork(window.creationArt,dungeon)
+
 end
 
 local function createWindow(parent)
@@ -860,10 +869,11 @@ local function createWindow(parent)
         end
         f.dungeonSelection:SetText(value~='' and dungeonLabels[value] or 'Без конкретного підземелля')
         f.UpdateActivityCards()
+        refresh()
     end
     -- An inline, clipped three-column grid. No popup or additional click is needed.
     local picker=CreateFrame('Frame',nil,f)
-    picker:SetSize(840,245); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-64)
+    picker:SetSize(840,450); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-64)
     picker:EnableMouse(true); picker:EnableMouseWheel(true)
     local background=picker:CreateTexture(nil,'BACKGROUND')
     background:SetAllPoints(picker); background:SetColorTexture(0.035,0.04,0.05,1)
@@ -874,13 +884,13 @@ local function createWindow(parent)
     hint:SetText('Підсвічено під ваш рівень · прокрутка коліщатком')
     picker.clear=button(picker,'Без конкретного підземелля',605,-5,225,function() selectActivity('') end)
     local clip=CreateFrame('Frame',nil,picker)
-    clip:SetPoint('TOPLEFT',picker,'TOPLEFT',6,-36); clip:SetSize(808,202)
+    clip:SetPoint('TOPLEFT',picker,'TOPLEFT',6,-36); clip:SetSize(808,407)
     if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
     local content=CreateFrame('Frame',nil,clip)
     content:SetPoint('TOPLEFT',clip,'TOPLEFT',0,0); content:SetSize(808,1)
-    picker.clip=clip; picker.content=content; picker.cards={}; picker.offset=0
+    picker.clip=clip; picker.content=content; picker.cards={}; picker.offset=0; picker.viewportHeight=407; picker.fullHeight=1
     function picker:ScrollTo(value)
-        local maximum=math.max(0,(self.fullHeight or 0)-202)
+        local maximum=math.max(0,(self.fullHeight or 0)-(self.viewportHeight or 407))
         self.offset=math.max(0,math.min(maximum,value or 0))
         content:ClearAllPoints(); content:SetPoint('TOPLEFT',clip,'TOPLEFT',0,self.offset)
     end
@@ -971,6 +981,51 @@ local function createWindow(parent)
         if ok then Finder:Changed(); tab='mine'; refresh()
         else print('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.') end
     end, nil, 'primary')
+    f.advancedCreation=false
+    local footer=CreateFrame('Frame',nil,f)
+    footer:SetSize(844,46); footer:SetPoint('TOPLEFT',f,'TOPLEFT',18,-527)
+    local footerFill=footer:CreateTexture(nil,'BACKGROUND'); footerFill:SetAllPoints(footer); footerFill:SetColorTexture(0.055,0.06,0.075,1)
+    f.creationFooter=footer
+    f.creationArt=footer:CreateTexture(nil,'ARTWORK'); f.creationArt:SetSize(36,28); f.creationArt:SetPoint('TOPLEFT',footer,'TOPLEFT',3,-8)
+    f.dungeonSelection:SetParent(footer); f.dungeonSelection:ClearAllPoints()
+    f.dungeonSelection:SetPoint('TOPLEFT',footer,'TOPLEFT',45,-7); f.dungeonSelection:SetSize(177,32)
+    f.creationRoles={}
+    for i,value in ipairs({'tank','healer','dps','flex'}) do
+        local chosen=value
+        local control=button(footer,catalog.roleIcons[value] or 'Гн.',230+(i-1)*34,-8,30,function() role=chosen; refresh() end,28)
+        control.role=value
+        control.active=control:CreateTexture(nil,'OVERLAY')
+        control.active:SetPoint('BOTTOMLEFT',control,'BOTTOMLEFT',1,1); control.active:SetSize(28,2); control.active:SetColorTexture(1,0.78,0.25,1)
+        control:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_TOP'); GameTooltip:SetText(roleLabel(chosen)); GameTooltip:Show() end end)
+        control:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        f.creationRoles[i]=control
+    end
+    f.descriptionBox:SetParent(footer); f.descriptionBox:ClearAllPoints()
+    f.descriptionBox:SetPoint('TOPLEFT',footer,'TOPLEFT',373,-8); f.descriptionBox:SetSize(207,28)
+    f.commentHint=footer:CreateFontString(nil,'OVERLAY','GameFontDisableSmall')
+    f.commentHint:SetPoint('LEFT',f.descriptionBox,'LEFT',6,0); f.commentHint:SetText('Коментар')
+    f.descriptionBox:SetScript('OnTextChanged',function(self) f.commentHint:SetShown(self:GetText()=='') end)
+    f.creationOptionsButton=button(footer,'Деталі',590,-8,88,function() f.advancedCreation=not f.advancedCreation; refresh() end,28)
+    f.createButton:SetParent(footer); f.createButton:ClearAllPoints()
+    f.createButton:SetPoint('TOPLEFT',footer,'TOPLEFT',688,-8); f.createButton:SetSize(150,28)
+    local options=CreateFrame('Frame',nil,f)
+    options:SetSize(840,82); options:SetPoint('TOPLEFT',f,'TOPLEFT',18,-440)
+    local optionsFill=options:CreateTexture(nil,'BACKGROUND'); optionsFill:SetAllPoints(options); optionsFill:SetColorTexture(0.055,0.06,0.075,1)
+    f.creationOptions=options
+    local fields={{f.titleBox,12,240},{f.maxBox,267,65},{f.minBox,348,75},{f.maxLevelBox,438,75}}
+    for _,layout in ipairs(fields) do
+        local box=layout[1]; box:SetParent(options); box:ClearAllPoints()
+        box:SetPoint('TOPLEFT',options,'TOPLEFT',layout[2],-29); box:SetSize(layout[3],24)
+        box.label:SetParent(options); box.label:ClearAllPoints(); box.label:SetPoint('BOTTOMLEFT',box,'TOPLEFT',0,3)
+    end
+    f.categoryButton:SetParent(options); f.categoryButton:ClearAllPoints(); f.categoryButton:SetPoint('TOPLEFT',options,'TOPLEFT',535,-26)
+    f.categoryLabel:SetParent(options); f.categoryLabel:ClearAllPoints(); f.categoryLabel:SetPoint('TOPLEFT',options,'TOPLEFT',550,-12)
+    f.LayoutCreation=function()
+        local height=f.advancedCreation and 370 or 450
+        picker:SetHeight(height); picker.viewportHeight=height-43
+        clip:SetHeight(picker.viewportHeight); picker:ScrollTo(picker.offset)
+    end
+    options:Hide(); footer:Hide()
     f.applyButton = button(f, 'Подати заявку', 550, -385, 140, function()
         local g=selected and Finder.groups[selected]
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
