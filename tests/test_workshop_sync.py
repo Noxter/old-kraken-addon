@@ -98,14 +98,14 @@ def test_direct_snapshot_round_trip_and_duplicate_protection():
     assert len(page_packets) == 1
     send_packets(owner, requester, page_packets)
 
-    imported = requester.globals().imported["Alice"]
+    imported = requester.globals().imported["Alice Realm"]
     assert len(imported) == 1
     assert imported[1]["recipe"] == 123
-    assert requester.globals().importedMeta["Alice"]["relayed"] is False
+    assert requester.globals().importedMeta["Alice Realm"]["relayed"] is False
 
     # A duplicate page cannot cause a second import.
     send_packets(owner, requester, page_packets)
-    assert len(requester.globals().imported["Alice"]) == 1
+    assert len(requester.globals().imported["Alice Realm"]) == 1
 
 
 def test_relayed_snapshot_is_not_promoted_to_direct_authority():
@@ -129,8 +129,8 @@ def test_relayed_snapshot_is_not_promoted_to_direct_authority():
     send_packets(relay, owner, relay.globals().drain("WRGET"))
     tick(owner)
     send_packets(owner, relay, owner.globals().drain("WRPAGE"))
-    assert relay.globals().imported["Alice"][1]["recipe"] == 321
-    assert relay.globals().importedMeta["Alice"]["relayed"] is False
+    assert relay.globals().imported["Alice Realm"][1]["recipe"] == 321
+    assert relay.globals().importedMeta["Alice Realm"]["relayed"] is False
 
     # Carol asks Bob for indexes. Bob may advertise Alice only because Bob
     # possesses a direct snapshot from Alice.
@@ -142,7 +142,7 @@ def test_relayed_snapshot_is_not_promoted_to_direct_authority():
     for index in range(1, len(relay_indexes) + 1):
         packet = relay_indexes[index]
         fields = codec._unpackFields(packet["payload"], 4)
-        if fields and fields[2] == "Alice":
+        if fields and fields[2] == "Alice Realm":
             alice_indexes.append(packet)
     assert alice_indexes, "relay did not advertise the directly received Alice snapshot"
     send_packets(relay, receiver, alice_indexes)
@@ -154,8 +154,8 @@ def test_relayed_snapshot_is_not_promoted_to_direct_authority():
     pages = relay.globals().drain("WRPAGE")
     assert pages
     send_packets(relay, receiver, pages)
-    assert receiver.globals().importedMeta["Alice"]["relayed"] is True
-    assert receiver.globals().imported["Alice"][1]["recipe"] == 321
+    assert receiver.globals().importedMeta["Alice Realm"]["relayed"] is True
+    assert receiver.globals().imported["Alice Realm"][1]["recipe"] == 321
 
     # Carol only has a relayed copy. It must not advertise Alice to Dave.
     receiver.globals().handlers["WRQ"]("Dave Realm", "request", "")
@@ -165,7 +165,7 @@ def test_relayed_snapshot_is_not_promoted_to_direct_authority():
     for index in range(1, len(dave_indexes) + 1):
         packet = dave_indexes[index]
         fields = codec._unpackFields(packet["payload"], 4)
-        if fields and fields[2] == "Alice":
+        if fields and fields[2] == "Alice Realm":
             advertised.append(packet)
     assert not advertised, "a relayed snapshot was incorrectly promoted and relayed again"
 
@@ -175,14 +175,14 @@ def test_invalid_snapshot_index_and_page_are_ignored():
     codec = lua.globals().OldKraken.GroupFinder
     invalid_index = pack(lua, ["Mallory", "Alice", "7", "1"])
     lua.globals().handlers["WRIDX"]("Mallory Realm", "bad", invalid_index)
-    assert lua.globals().imported["Alice"] is None
+    assert lua.globals().imported["Alice Realm"] is None
 
     # No index was accepted, so a page from an unrelated sender has no pending
     # transfer to attach to and must not import anything.
     bad_page = pack(lua, ["Bob", "Alice", "7", "1", "1", "123", "456", "171",
                           "1700000000", "Recipe", "Potion", "L"])
     lua.globals().handlers["WRPAGE"]("Mallory Realm", "bad", bad_page)
-    assert lua.globals().imported["Alice"] is None
+    assert lua.globals().imported["Alice Realm"] is None
 
 
 if __name__ == "__main__":
