@@ -1,0 +1,11 @@
+# Local Python environment used by the Lua test suite (see TESTING.md)
+.venv/
+venv/
+
+# Python bytecode left by `python tests/test_*.py`
+__pycache__/
+*.py[cod]
+
+# Editor and OS noise
+*.swp
+.DS_Store
