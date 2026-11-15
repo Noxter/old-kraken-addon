@@ -194,32 +194,55 @@ Group Finder, календар і Майстерня використовуют�
 
 ## Поточна структура
 
+Модулі перелічено в порядку завантаження з `OldKraken.toc`:
+
 ```
-OldKraken.toc
-Database.lua
-Core.lua
-Communication.lua
-GuildRoster.lua
-GroupFinder.lua
-GroupFinderIntegration.lua
-GroupFinderUI.lua
-GroupFinderAPI.lua
+OldKraken.toc                — список файлів аддона; його читають і workflows пакування
+Database.lua                 — схема та міграції OldKrakenDB
+Core.lua                     — життєвий цикл, шина подій, спільний UI-стиль
+UIHub.lua                    — каркас вікна та реєстрація сторінок
+Communication.lua            — транспорт GUILD-повідомлень
+GuildRoster.lua              — ростер гільдії
+ActivityCatalog.lua          — спільний каталог підземель і рейдів для подій та груп
+GroupFinder.lua              — модель оголошень, заявок і рішень
+GroupFinderIntegration.lua   — прив'язка до гільдії й поточної групи, збереження стану
+GroupFinderUI.lua            — вікно гільдійного Group Finder
+GroupFinderAPI.lua           — read-only діагностика нативного C_LFGList
+GuildEvents.lua              — календар гільдійних подій
+Workshop.lua                 — каталог професій і майстрів
+WorkshopRecipes.lua          — пошук і зчитування рецептів
+WorkshopSync.lua             — версійовані знімки рецептів
+WorkshopOrders.lua           — замовлення та їхній життєвий цикл
+WorkshopDeliveries.lua       — спостереження за підтвердженим обміном і поштою
+Minimap.lua                  — кнопка біля мінікарти
+Media/                       — герб аддона та зображення рейдів
+docs/                        — проєктні документи (зовнішнє сховище подій)
+tests/                       — Python-тести на Lua 5.1 через Lupa
+.github/workflows/           — перевірка та пакування
 README.md
 TESTING.md
 LICENSE
-tests/
 ```
 
 ### Ініціалізація та локальні дані
 
 - `Database.lua` — єдине місце ініціалізації `OldKrakenDB`, значень за замовчуванням і версії схеми `schemaVersion`.
-- `Core.lua` — життєвий цикл аддона та внутрішні події `OldKraken:On()` / `OldKraken:Fire()`.
+- `Core.lua` — життєвий цикл аддона, внутрішні події `OldKraken:On()` / `OldKraken:Fire()` і спільний стиль `OldKraken.UIStyle`.
+- `UIHub.lua` — спільне вікно аддона: сторінки реєструються через `UIHub:RegisterPage()` і створюються ліниво.
 - `Communication.lua` — діагностичний транспорт обміну addon messages у каналі `GUILD`.
 - `GuildRoster.lua` — інтерфейс і робота з ігровим API ростера; налаштування читаються з `OldKraken.DB.settings.roster`.
+- `ActivityCatalog.lua` — українські назви підземель і рейдів, рекомендовані рівні, іконки ролей і зображення; спільний для календаря та Group Finder.
 - `GroupFinder.lua` — модель оголошень, заявок, рішень і версійованої синхронізації.
 - `GroupFinderIntegration.lua` — прив’язка до гільдії/поточної групи, sender identity та збереження Group Finder у SavedVariables.
 - `GroupFinderUI.lua` — вікно гільдійного Group Finder.
 - `GroupFinderAPI.lua` — read-only діагностика нативного `C_LFGList`; не запускає пошук і не створює listing.
+- `GuildEvents.lua` — календар подій; автор події є джерелом істини для складу й заявок.
+- `Workshop.lua` — каталог професій і майстрів; кожен персонаж публікує лише власний знімок.
+- `WorkshopRecipes.lua` — пошук і зчитування рецептів; відфільтрований скан ніколи не вважається повним списком.
+- `WorkshopSync.lua` — версійовані знімки рецептів; ретранслюються лише отримані безпосередньо від власника.
+- `WorkshopOrders.lua` — замовлення; замовник є джерелом остаточного стану.
+- `WorkshopDeliveries.lua` — спостереження за підтвердженим обміном і поштою; сам не ініціює ні обмін, ні відправлення.
+- `Minimap.lua` — кнопка Old Kraken біля мінікарти, кут зберігається в `OldKraken.DB.settings.minimapAngle`.
 - Існуючі таблиці `settings`, `roster` та `events` зберігаються під час ініціалізації. Нові поля додаються без очищення наявних даних.
 - Поточна схема БД — `2`. Поле `version` залишається версією аддона, а `schemaVersion` використовується для міграцій структури даних.
 
@@ -249,19 +272,36 @@ MIT. Див. файл [LICENSE](LICENSE).
 Після публікації GitHub Release автоматично запускається GitHub Actions workflow
 `.github/workflows/package-release.yml`. Він читає список Lua-файлів безпосередньо з `OldKraken.toc`, перевіряє наявність кожного з них і додає їх разом із TOC, іконками та зображеннями рейдів із `Media` до `OldKraken.zip`. Тому нові Lua-модулі, внесені до TOC, не потрібно окремо додавати до команди пакування.
 
-Основні файли ZIP:
+Склад ZIP відповідає `OldKraken.toc` і `Media`; нічого з `tests/`, `docs/`, `README.md` чи `TESTING.md` у пакет не потрапляє:
 
 ```
 OldKraken/
   OldKraken.toc
   Database.lua
   Core.lua
+  UIHub.lua
   Communication.lua
   GuildRoster.lua
+  ActivityCatalog.lua
   GroupFinder.lua
   GroupFinderIntegration.lua
   GroupFinderUI.lua
+  GroupFinderAPI.lua
+  GuildEvents.lua
+  Workshop.lua
+  WorkshopRecipes.lua
+  WorkshopSync.lua
+  WorkshopOrders.lua
+  WorkshopDeliveries.lua
   Minimap.lua
+  Media/
+    OldKrakenKraken.tga
+    OldKrakenEmblem.tga
+    Raids/
+      BarrowDeeps.tga
+      HyjalSummit.tga
+      Onyxia.tga
+      CREDITS.txt
 ```
 
 Після успішного виконання workflow файл `OldKraken.zip` з'явиться серед assets відповідного GitHub Release. Встановлювати потрібно саме цей ZIP, а не стандартний архів **Source code (zip)**.
