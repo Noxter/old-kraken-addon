@@ -43,6 +43,38 @@ local roleCode = { ['']='U', tank='T', healer='H', dps='D', flex='F' }
 local codeRole = { U='', T='tank', H='healer', D='dps', F='flex' }
 local MAX_GROUPS = 100
 local GROUP_TTL = 3600
+local roleClasses = {
+    tank={WARRIOR=true,PALADIN=true,DRUID=true},
+    healer={PRIEST=true,PALADIN=true,DRUID=true,SHAMAN=true},
+}
+local classCache,classesDirty={},true
+local function plainString(value)
+    return not (type(issecretvalue)=='function' and issecretvalue(value)) and type(value)=='string'
+end
+function Finder:CanPerformRole(name,role)
+    if role=='dps' or role=='flex' then return true end
+    if not roleClasses[role] then return false end
+    local class
+    if name==self.identity and type(UnitClass)=='function' then
+        local _,token=UnitClass('player'); if plainString(token) then class=token end
+    end
+    if not class and classesDirty and type(GetNumGuildMembers)=='function' and type(GetGuildRosterInfo)=='function' then
+        classCache={}; classesDirty=false
+        for i=1,(tonumber(GetNumGuildMembers()) or 0) do
+            local member,_,_,_,_,_,_,_,_,_,token=GetGuildRosterInfo(i)
+            if plainString(member) and plainString(token) then classCache[member]=token end
+        end
+    end
+    class=class or classCache[name]
+    if class then return roleClasses[role][class]==true end
+    -- Keep pure model consumers usable without WoW's character APIs.
+    return type(UnitClass)~='function' and type(GetGuildRosterInfo)~='function'
+end
+if type(CreateFrame)=='function' then
+    local classEvents=CreateFrame('Frame')
+    classEvents:RegisterEvent('GUILD_ROSTER_UPDATE'); classEvents:RegisterEvent('PLAYER_GUILD_UPDATE')
+    classEvents:SetScript('OnEvent',function() classesDirty=true end)
+end
 
 local function countGroups(groups)
     local count = 0
@@ -85,6 +117,7 @@ function Finder:RoleAvailable(group, role, exclude)
 end
 
 function Finder:Initialize(identity, send)
+    classesDirty=true; classCache={}
     assert(validText(identity, 1, 128) and type(send) == 'function')
     self.identity, self.send = identity, send
     self.groups, self.requests, self.pending, self.syncPending, self.requestVersions = {}, {}, {}, {}, {}
@@ -99,6 +132,7 @@ function Finder:Create(title, category, description, maxSize, minLevel, maxLevel
     minLevel, maxLevel, role = tonumber(minLevel or 1), tonumber(maxLevel or 60), role or ''
     dungeon = dungeon or ''
     if role == '' then return false, 'role' end
+    if not self:CanPerformRole(self.identity,role) then return false, 'class_role' end
     if category == 'dungeon' and (maxSize ~= 5 or (role ~= 'tank' and role ~= 'healer' and role ~= 'dps')) then return false, 'roles' end
     if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and category ~= 'raid' and dungeon ~= '') then return false, 'invalid' end
     if not validText(title, 1, 100) or not categories[category]
@@ -293,6 +327,7 @@ function Finder:Prune()
 end
 
 function Finder:Apply(owner, id, role)
+    if not self:CanPerformRole(self.identity,role) then return false end
     local key = owner .. '\001' .. id
     local group = self.groups[key]
     if not roles[role] or role == '' or not group or group.closed or owner == self.identity or #group.members >= group.maxSize
@@ -337,6 +372,7 @@ function Finder:ReceiveJoin(sender, payload)
     local versionKey = id .. '\001' .. sender
     if self.requestVersions[versionKey] and self.requestVersions[versionKey] >= version then return false end
     if not self.requestVersions[versionKey] and countGroups(self.requestVersions) >= 2000 then return false end
+    if action=='apply' and not self:CanPerformRole(sender,role) then return false end
     if action == 'apply' and self.requests[id] and self.requests[id][sender] == nil
         and countGroups(self.requests[id]) >= 200 then return false end
     local isNew = action == 'apply' and (not self.requests[id] or self.requests[id][sender] == nil)
@@ -352,6 +388,7 @@ function Finder:Decide(id, applicant, accept)
     local requests = self.requests[id]
     if not group or not requests or requests[applicant] == nil then return false end
     if accept then
+        if not self:CanPerformRole(applicant,requests[applicant]) then return false end
         if #group.members >= group.maxSize then return false end
         if not self:RoleAvailable(group, requests[applicant]) then return false end
         for _, member in ipairs(group.members) do if member == applicant then return false end end

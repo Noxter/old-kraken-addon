@@ -220,6 +220,7 @@ local function refreshRequests()
         if entry then
             row.name:SetText(playerLabel(entry.name))
             row.roleStatus:SetText(roleLabel(entry.role or '') .. ' |cff9ba9bc·|r |cffffc36bОчікує|r')
+            row.accept:SetEnabled(Finder:CanPerformRole(entry.name,entry.role))
             row.group:SetText(entry.title)
             row.name:Show(); row.roleStatus:Show(); row.group:Show(); row.hover:Show(); row.accept:Show(); row.reject:Show()
         else
@@ -282,7 +283,7 @@ local function showRequests()
             end
             row.accept = button(f, 'Прийняти', 150, y - 10, 70, function() decide(true) end, nil, 'primary')
             row.reject = button(f, 'Відхилити', 225, y - 10, 70, function() decide(false) end)
-            row.accept:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Прийняти заявку'); GameTooltip:Show() end end)
+            row.accept:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(row.entry and not Finder:CanPerformRole(row.entry.name,row.entry.role) and 'Клас учасника не може виконувати цю роль або ще невідомий.' or 'Прийняти заявку'); GameTooltip:Show() end end)
             row.reject:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Відхилити заявку'); GameTooltip:Show() end end)
             row.accept:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
             row.reject:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
@@ -299,6 +300,7 @@ end
 
 refresh=function()
     if not window or not window:IsShown() then return end
+    if not Finder:CanPerformRole(Finder.identity,role) then role='dps'; UIDropDownMenu_SetText(window.roleButton,roleLabel(role)) end
     window.alertButton:SetText(Finder:GroupAlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     local lines = {}
     for key, group in pairs(Finder.groups or {}) do
@@ -566,6 +568,7 @@ refresh=function()
     window.createButton:SetShown(tab=='create')
     window.createButton:SetText('Зібрати групу')
     for _,control in ipairs(window.creationRoles) do
+        control:SetEnabled(Finder:CanPerformRole(Finder.identity,control.role))
         control:SetShown(tab=='create' and (category~='dungeon' or control.role~='flex'))
         control.active:SetShown(control.role==role)
     end
@@ -625,6 +628,7 @@ local function createWindow(parent)
             local choice = candidate
             local info = UIDropDownMenu_CreateInfo()
             info.text = 'Подати заявку: ' .. roleLabel(choice)
+            info.disabled = not Finder:CanPerformRole(Finder.identity,choice)
             info.notCheckable = true
             info.func = function()
                 local key = f.slotMenu.groupKey
@@ -850,7 +854,11 @@ local function createWindow(parent)
     f.categoryLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText('Категорія')
     f.roleButton = dropdown(f, 550, -330, 150, function()
-        return choices(category == 'dungeon' and {'tank','healer','dps'} or roles, coloredRoleLabels)
+        local allowed={}
+        for _,value in ipairs(category == 'dungeon' and {'tank','healer','dps'} or roles) do
+            if Finder:CanPerformRole(Finder.identity,value) then allowed[#allowed+1]=value end
+        end
+        return choices(allowed, coloredRoleLabels)
     end,
         function() return role end, function(value) role=value end)
     f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
@@ -1187,6 +1195,7 @@ local function paintAlertRoster(group)
                 local displayedRole=member and (slot.memberRole or '') or slot.role
                 local coords=atlas[displayedRole]
                 control.memberName=member; control.role=displayedRole; control.occupied=member~=nil
+                control:SetEnabled(member~=nil or Finder:CanPerformRole(Finder.identity,displayedRole))
                 control.icon:SetTexture(coords and 'Interface\\LFGFrame\\UI-LFG-ICON-ROLES' or 'Interface\\Icons\\INV_Misc_QuestionMark')
                 if coords then control.icon:SetTexCoord(unpack(coords)) else control.icon:SetTexCoord(0,1,0,1) end
                 control.icon:SetDesaturated(not member); control.icon:SetAlpha(member and 1 or 0.4)
@@ -1197,7 +1206,7 @@ local function paintAlertRoster(group)
                 control.label:SetText(member or roleLabel(slot.role))
                 control.label:SetTextColor(member and 1 or 0.85,member and 1 or 0.88,member and 1 or 0.93)
                 control.tooltipText=(member or 'Вільне місце')..'\n'..roleLabel(displayedRole)..' · '..state
-                if not member then control.tooltipText=control.tooltipText..'\nЛівий клік — подати заявку на цю роль.' end
+                if not member then control.tooltipText=control.tooltipText..(Finder:CanPerformRole(Finder.identity,displayedRole) and '\nЛівий клік — подати заявку на цю роль.' or '\nЦя роль недоступна вашому класу.') end
             end
         end
     end

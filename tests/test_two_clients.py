@@ -18,7 +18,7 @@ def client(name, realm):
         function GetGuildInfo() return 'Guild' end
         function GetRealmName() return realm end
         function GetNumGuildMembers() return 2 end
-        function GetGuildRosterInfo(i) if i == 1 then return 'Alice Moon' else return 'Bob Other Realm' end end
+        function GetGuildRosterInfo(i) return i==1 and 'Alice Moon' or 'Bob Other Realm','Member',0,60,'Class','Zone',nil,nil,true,'',i==1 and 'WARRIOR' or 'PALADIN' end
         function IsInGuild() return true end
         function GetServerTime() return 1700000000 end
         function GetTime() return 100 end
