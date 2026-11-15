@@ -3,6 +3,7 @@
 ## Notes: Ukrainian guild management tools for WoW Forever
 ## Author: Noxter
 ## Version: 0.4.0-alpha.3
+## IconTexture: Interface\AddOns\OldKraken\Media\OldKrakenKraken.tga
 ## SavedVariables: OldKrakenDB
 
 Database.lua
