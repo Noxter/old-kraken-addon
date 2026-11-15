@@ -20,6 +20,7 @@ local professionArt={
 }
 local active, identity, profile, store, records = false, nil, nil, nil, {}
 local nativeProfessions={}
+local nativeScan, lastNativeScan
 local professionRelayDirty={}
 local pending, queryPending, forceBroadcast, lastReply, nextScan = false, false, false, -60, 0
 local scanState
@@ -160,6 +161,7 @@ local function connect()
         if not usable(owner,'string') or owner=='' or #owner>128 or type(payload)~='string' or not decode(payload) then scope.professionRelays[owner]=nil end
     end
     nativeProfessions={}
+    nativeScan,lastNativeScan=nil,nil
     scanState=nil
     scanStarted,dropCandidate=type(GetTime)=='function' and GetTime() or nil,nil
     pending,queryPending,forceBroadcast,lastReply,nextScan=false,true,true,-60,0
@@ -167,11 +169,22 @@ local function connect()
 end
 function Workshop:RefreshNativeProfessions()
     if not active or type(C_Club)~='table' or type(C_Club.GetGuildClubId)~='function' or type(C_Club.GetClubMembers)~='function' or type(C_Club.GetMemberInfo)~='function' then return false end
+    local now=GetTime()
+    if nativeScan or (lastNativeScan and now-lastNativeScan<30) then return true end
     local ok,club=pcall(C_Club.GetGuildClubId); if not ok or not integer(club,1,9000000000000000) then return false end
     local got,members=pcall(C_Club.GetClubMembers,club); if not got or not usable(members,'table') then return false end
     local fresh={}
-    for index,memberID in ipairs(members) do
-        if index>10000 then break end
+    local job={profile=profile,identity=identity,index=1}
+    nativeScan=job
+    lastNativeScan=now
+    local function step()
+      if nativeScan~=job or not active or profile~=job.profile or identity~=job.identity then
+          if nativeScan==job then nativeScan=nil end
+          return
+      end
+      local stop=math.min(#members,job.index+24,10000)
+      for index=job.index,stop do
+        local memberID=members[index]
         local success,info=pcall(C_Club.GetMemberInfo,club,memberID)
         if success and usable(info,'table') and usable(info.name,'string') and info.name~='' then
             local list={}; local seen={}
@@ -183,8 +196,17 @@ function Workshop:RefreshNativeProfessions()
             end
             if #list>0 then fresh[info.name]=list end
         end
+      end
+      job.index=stop+1
+      if job.index<=math.min(#members,10000) then
+          if C_Timer and C_Timer.After then C_Timer.After(0,step) else step() end
+      else
+          nativeProfessions=fresh; nativeScan=nil
+          if C_Timer and C_Timer.After then changed() end
+      end
     end
-    nativeProfessions=fresh; return true
+    if C_Timer and C_Timer.After then C_Timer.After(0,step) else step() end
+    return true
 end
 function Workshop:GetMemberProfessions(name)
     if not active or not usable(name,'string') then return {} end

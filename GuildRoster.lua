@@ -9,6 +9,8 @@ local rosterFrame
 local rowFrames = {}
 local rosterData = {}
 local filteredData = {}
+local pendingLoad, pendingRender, refreshElapsed = false, false, 0
+local drawing = false
 
 local CLASS_ORDER = {
     "DRUID", "HUNTER", "MAGE", "PALADIN", "PRIEST",
@@ -348,6 +350,17 @@ local function CreateRosterWindow(parent)
         self:SetVerticalScroll(nextValue)
     end)
 
+    local previousScroll = scroll:GetScript('OnVerticalScroll')
+    scroll:SetScript('OnVerticalScroll', function(self, offset)
+        if previousScroll then previousScroll(self, offset) end
+        if not drawing then Roster:RenderVisible() end
+    end)
+    local previousResize = scroll:GetScript('OnSizeChanged')
+    scroll:SetScript('OnSizeChanged', function(self, width, height)
+        if previousResize then previousResize(self, width, height) end
+        if not drawing then Roster:RenderVisible() end
+    end)
+    frame:SetScript('OnShow', function() Roster:ScheduleRefresh(true) end)
     frame.scrollFrame = scroll
     frame.contentFrame = content
     rosterFrame = frame
@@ -375,7 +388,7 @@ local function CreateRow(index, parent)
         { x = 338, width = 90 },
         { x = 432, width = 140 },
         { x = 660, width = 70 },
-        { x = 660, width = 174 },
+        { x = 674, width = 160 },
 
     }
 
@@ -389,10 +402,12 @@ local function CreateRow(index, parent)
         cell:SetWordWrap(false)
         row.cells[cellIndex] = cell
     end
-    row.onlineDot = row:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    row.onlineDot = row:CreateTexture(nil, 'OVERLAY')
     row.onlineDot:SetPoint('LEFT', row, 'LEFT', 6, 0)
-    row.onlineDot:SetWidth(14)
-    row.onlineDot:SetHeight(ROW_HEIGHT)
+    row.onlineDot:SetWidth(8)
+    row.onlineDot:SetHeight(8)
+    row.addonDot = row:CreateTexture(nil, 'OVERLAY')
+    row.addonDot:SetSize(8, 8); row.addonDot:SetPoint('LEFT', row, 'LEFT', 660, 0)
     row.cellHovers = {}
     for _, cellIndex in ipairs({1, 2, 4, 5, 7}) do
         local hover = CreateFrame('Button', nil, row)
@@ -480,11 +495,29 @@ function Roster:Render()
     UpdateSummary()
     UpdateFilterButtonLabels()
 
-    local content = rosterFrame.contentFrame
-    content:SetHeight(math.max(1, #filteredData * ROW_HEIGHT))
+    self:RenderVisible()
+end
 
-    for index, member in ipairs(filteredData) do
+function Roster:RenderVisible()
+    if not rosterFrame or drawing then return end
+    drawing = true
+    local content = rosterFrame.contentFrame
+    local scroll = rosterFrame.scrollFrame
+    local viewport = tonumber((scroll:GetHeight())) or 440
+    if viewport <= 0 then viewport = 440 end
+    content:SetHeight(math.max(1, #filteredData * ROW_HEIGHT))
+    local offset = math.max(0, math.min(tonumber((scroll:GetVerticalScroll())) or 0, math.max(0, #filteredData * ROW_HEIGHT - viewport)))
+    if offset ~= (tonumber((scroll:GetVerticalScroll())) or 0) then scroll:SetVerticalScroll(offset) end
+    local first = math.floor(offset / ROW_HEIGHT) + 1
+    local count = math.max(0, math.min(math.ceil(viewport / ROW_HEIGHT) + 1, #filteredData - first + 1))
+    local comm = OldKraken.Communication
+    local localVersion = comm and comm.GetLocalVersion and comm:GetLocalVersion()
+    for index = 1, count do
+        local dataIndex = first + index - 1
+        local member = filteredData[dataIndex]
         local row = rowFrames[index] or CreateRow(index, content)
+        row:ClearAllPoints()
+        row:SetPoint('TOPLEFT', content, 'TOPLEFT', 0, -((dataIndex - 1) * ROW_HEIGHT))
         row.member = member
         local cells = row.cells
 
@@ -493,11 +526,10 @@ function Roster:Render()
         row.cellHovers[7]:Show()
 
         if HasAddon(member.name) then cells[7]:SetTextColor(0.25, 1, 0.25) else cells[7]:SetTextColor(0.7, 0.7, 0.7) end
-        local comm = OldKraken.Communication
         local version = comm and comm.GetRosterVersion and comm:GetRosterVersion(member.name)
-        local comparison = version and comm.CompareVersions and comm:CompareVersions(version, comm:GetLocalVersion())
-        local dot = HasAddon(member.name) and '|cff40ff40●|r' or '|cffa6adb8○|r'
-        cells[7]:SetText(dot .. ' (' .. (version or '?') .. ')')
+        local comparison = version and comm.CompareVersions and comm:CompareVersions(version, localVersion)
+        row.addonDot:SetTexture(HasAddon(member.name) and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
+        cells[7]:SetText('(' .. (version or '?') .. ')')
         local versionStatus = 'Версію не передано; оновіть аддон учасника та натисніть «Оновити».'
         if comparison == -1 then
             cells[7]:SetTextColor(1, 0.55, 0.15); versionStatus = 'Застаріла: версія старіша за вашу.'
@@ -516,12 +548,7 @@ function Roster:Render()
         cells[4]:SetText(SafeText(member.class))
         cells[5]:SetText(SafeText(member.zone))
         cells[6]:Hide()
-        row.onlineDot:SetText(member.isOnline and '●' or '○')
-        if member.isOnline then
-            row.onlineDot:SetTextColor(0.25, 1, 0.25)
-        else
-            row.onlineDot:SetTextColor(0.65, 0.68, 0.72)
-        end
+        row.onlineDot:SetTexture(member.isOnline and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
         row.cellHovers[4].fullText = SafeText(member.class)
@@ -554,12 +581,15 @@ function Roster:Render()
         end
     end
 
-    for index = #filteredData + 1, #rowFrames do
+    for index = count + 1, #rowFrames do
+        rowFrames[index].member = nil
         rowFrames[index]:Hide()
     end
+    drawing = false
 end
 
 function Roster:Load()
+    pendingLoad, pendingRender = false, false
     if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     local total = GetNumGuildMembers()
     total = tonumber(total) or 0
@@ -639,18 +669,24 @@ end
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
-eventFrame:SetScript("OnEvent", function()
-    if rosterFrame and rosterFrame:IsShown() then
-        Roster:Load()
-    end
+function Roster:ScheduleRefresh(reload)
+    pendingLoad = pendingLoad or reload == true
+    pendingRender = true
+end
+eventFrame:SetScript('OnUpdate', function(_, elapsed)
+    if not pendingRender then refreshElapsed = 0; return end
+    refreshElapsed = refreshElapsed + elapsed
+    if refreshElapsed < 0.15 then return end
+    refreshElapsed = 0
+    if not rosterFrame or not rosterFrame:IsShown() then return end
+    local reload = pendingLoad
+    pendingLoad, pendingRender = false, false
+    if reload then Roster:Load() else Roster:Render() end
 end)
+eventFrame:SetScript('OnEvent', function() Roster:ScheduleRefresh(true) end)
 if type(OldKraken.On)=='function' then
-    OldKraken:On('ROSTER_ADDON_CHANGED',function()
-        if rosterFrame and rosterFrame:IsShown() then Roster:Render() end
-    end)
-    OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function()
-        if rosterFrame and rosterFrame:IsShown() then Roster:Render() end
-    end)
+    OldKraken:On('ROSTER_ADDON_CHANGED',function() Roster:ScheduleRefresh(false) end)
+    OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function() Roster:ScheduleRefresh(false) end)
 end
 
 SLASH_OLDKRAKEN1 = "/okr"

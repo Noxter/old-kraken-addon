@@ -7,6 +7,7 @@ for f in p.glob('*.lua'):
     lua.execute('assert(loadstring(...))',f.read_text(encoding='utf-8'))
 setup="\nOldKraken = {\n    DB = {settings = {roster = {search='', status='all', class='ALL', sort='name', ascending=true}}},\n    UIStyle = {Window=function() end, Button=function() end, Dropdown=function() end, Panel=function() end, Input=function() end},\n}\nUISpecialFrames = {}\nSlashCmdList = {}\nUIParent = {}\nfunction UIDropDownMenu_SetText() end\nfunction UIDropDownMenu_SetWidth() end\nfunction UIDropDownMenu_JustifyText() end\nfunction UIDropDownMenu_Initialize() end\nfunction print() end\nfunction IsInGuild() return true end\nfunction GetNumGuildMembers() return 2 end\nfunction GetGuildRosterInfo(index)\n    if index == 1 then return 'Online Member', 'Member', 1, 60, 'Warrior', 'Dun Morogh', nil, nil, true, '', 'WARRIOR' end\n    return 'Offline Member', 'Member', 1, 60, 'Mage', 'Stormwind', nil, nil, false, '', 'MAGE'\nend\ninviteCalls = {}\nC_PartyInfo = {InviteUnit=function(name) inviteCalls[#inviteCalls + 1] = name; return true end}\n\nlocal methods = {}\nfunction methods:SetText(value) self.text = value end\nfunction methods:GetText() return self.text or '' end\nfunction methods:SetSize(width, height) self.width, self.height = width, height end\nfunction methods:SetEnabled(value) self.enabled = value end\nfunction methods:SetTextColor(...) self.textColor = {...} end\nfunction methods:SetJustifyH(value) self.justifyH = value end\nfunction methods:SetScript(name, callback) self.scripts[name] = callback end\nfunction methods:Show() self.shown = true end\nfunction methods:Hide() self.shown = false end\nfunction methods:SetShown(value) self.shown = value end\nfunction methods:IsShown() return self.shown == true end\nfunction methods:CreateFontString() return CreateFrame() end\nfunction methods:CreateTexture() return CreateFrame() end\nlocal meta = {__index=function(_, key)\n    if key == 'TitleText' or key == 'CloseButton' then return nil end\n    return methods[key] or function() end\nend}\ncreatedFrames = {}\nfunction CreateFrame(kind, name, parent, template)\n    local frame = setmetatable({scripts = {}, parent = parent, kind = kind, template = template}, meta)\n    if name then _G[name] = frame end\n    createdFrames[#createdFrames + 1] = frame\n    return frame\nend\n"
 lua.execute(setup)
+lua.execute("local probe=CreateFrame(); getmetatable(probe).__index(probe,'SetScript'); function probe:SetTexture(value) self.texture=value end; local meta=getmetatable(probe); local old=meta.__index; meta.__index=function(self,key) if key=='SetTexture' then return probe.SetTexture end; return old(self,key) end")
 lua.execute('''
 menuItems={}
 function UIDropDownMenu_CreateInfo() return {} end
@@ -32,8 +33,8 @@ for _, frame in ipairs(createdFrames) do
     if type(frame.member)=='table' then rows[frame.member.name]=frame end
 end
 local row=assert(rows['Online Member'])
-assert(row.onlineDot.text=='●' and row.onlineDot.textColor[2]==1)
-assert(rows['Offline Member'].onlineDot.text=='○')
+assert(row.onlineDot.texture:find('StatusOnline.tga',1,true))
+assert(rows['Offline Member'].onlineDot.texture:find('StatusOffline.tga',1,true))
 for _,frame in ipairs(createdFrames) do assert(frame.text~='СТАТУС') end
 row.scripts.OnClick(row,'LeftButton')
 assert(#menuItems==4 and not menuItems[2].disabled)
@@ -46,7 +47,7 @@ local offline=assert(rows['Offline Member'])
 offline.cellHovers[1].scripts.OnClick(); assert(menuItems[2].disabled and menuItems[3].disabled and not menuItems[4].disabled)
 for _,frame in ipairs(createdFrames) do assert(frame.text~='Учасники' and frame.text~='Аддон') end
 assert(row.cells[7].shown and row.cellHovers[7].shown)
-assert(row.cells[7].text:find('●',1,true) and offline.cells[7].text:find('○',1,true))
+assert(row.addonDot.texture:find('StatusOnline.tga',1,true) and offline.addonDot.texture:find('StatusOffline.tga',1,true))
 assert(row.cells[7].text:find('(0.4.0-alpha.2)',1,true) and row.cells[7].textColor[2]==0.55)
 assert(offline.cells[7].text:find('(?)',1,true))
 assert(row.cellHovers[7].fullText:find('Застаріла',1,true))
