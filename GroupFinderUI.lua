@@ -1148,15 +1148,18 @@ local function paintAlertRoster(group)
         local control=groupAlert.roleSlots[i]
         if slot and not control then
             control=CreateFrame('Button',nil,groupAlert)
-            control:SetSize(86,49); control:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',82+(i-1)*91,-53)
-            control.ring=control:CreateTexture(nil,'BACKGROUND'); control.ring:SetSize(30,30); control.ring:SetPoint('TOP',control,'TOP',0,0)
+            control:SetSize(92,91); control:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',116+(i-1)*98,-61)
+            control.ring=control:CreateTexture(nil,'BACKGROUND'); control.ring:SetSize(46,46); control.ring:SetPoint('TOP',control,'TOP',0,0)
             control.ring:SetTexture('Interface\\AddOns\\OldKraken\\Media\\RoleSlot.tga')
-            control.icon=control:CreateTexture(nil,'ARTWORK'); control.icon:SetSize(22,22); control.icon:SetPoint('CENTER',control.ring,'CENTER',0,0)
+            control.icon=control:CreateTexture(nil,'ARTWORK'); control.icon:SetSize(36,36); control.icon:SetPoint('CENTER',control.ring,'CENTER',0,0)
             control.label=control:CreateFontString(nil,'OVERLAY','GameFontHighlight')
             local fontPath,fontSize=control.label:GetFont()
             if fontPath then control.label:SetFont(fontPath,math.max(13,tonumber(fontSize) or 13),'OUTLINE') end
             control.label:SetShadowColor(0,0,0,1); control.label:SetShadowOffset(1,-1)
-            control.label:SetPoint('TOPLEFT',control,'TOPLEFT',0,-32); control.label:SetSize(86,19); control.label:SetJustifyH('CENTER'); control.label:SetWordWrap(false)
+            control.label:SetPoint('TOPLEFT',control,'TOPLEFT',0,-48); control.label:SetSize(92,21); control.label:SetJustifyH('CENTER'); control.label:SetWordWrap(false)
+            control.vacancy=control:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+            control.vacancy:SetPoint('TOPLEFT',control,'TOPLEFT',0,-70); control.vacancy:SetSize(92,18)
+            control.vacancy:SetJustifyH('CENTER'); control.vacancy:SetText('|cffbfc3caВільне місце|r')
             control:RegisterForClicks('LeftButtonUp','RightButtonUp')
             control:SetScript('OnClick',function(self,mouseButton)
                 if GameTooltip then GameTooltip:Hide() end
@@ -1203,7 +1206,8 @@ local function paintAlertRoster(group)
                 if not member then control.ring:SetVertexColor(0.4,0.44,0.5)
                 elseif group.partyObserved and member~=group.owner and not group.partyObserved[member] then control.ring:SetVertexColor(1,0.72,0.25)
                 else control.ring:SetVertexColor(0.3,1,0.55) end
-                control.label:SetText(member or roleLabel(slot.role))
+                control.label:SetText(member and ('|cffffd36b'..member..'|r') or roleLabel(slot.role))
+                control.vacancy:SetShown(not member)
                 control.label:SetTextColor(member and 1 or 0.85,member and 1 or 0.88,member and 1 or 0.93)
                 control.tooltipText=(member or 'Вільне місце')..'\n'..roleLabel(displayedRole)..' · '..state
                 if not member then control.tooltipText=control.tooltipText..(Finder:CanPerformRole(Finder.identity,displayedRole) and '\nЛівий клік — подати заявку на цю роль.' or '\nЦя роль недоступна вашому класу.') end
@@ -1221,6 +1225,18 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
         groupAlert.roleSlots = {}
         OldKraken.UIStyle.Button(groupAlert)
         groupAlert:SetSize(560, 100)
+        groupAlert.alertChrome=groupAlert:CreateTexture(nil,'BACKGROUND',nil,1)
+        groupAlert.alertChrome:SetAllPoints(groupAlert)
+        groupAlert.alertChrome:SetColorTexture(0.045,0.045,0.05,1)
+        for _,side in ipairs({'TOP','BOTTOM','LEFT','RIGHT'}) do
+            local edge=groupAlert:CreateTexture(nil,'OVERLAY')
+            if side=='TOP' or side=='BOTTOM' then
+                edge:SetPoint(side..'LEFT',groupAlert,side..'LEFT',0,0); edge:SetPoint(side..'RIGHT',groupAlert,side..'RIGHT',0,0); edge:SetHeight(2)
+            else
+                edge:SetPoint('TOP'..side,groupAlert,'TOP'..side,0,0); edge:SetPoint('BOTTOM'..side,groupAlert,'BOTTOM'..side,0,0); edge:SetWidth(2)
+            end
+            edge:SetColorTexture(0.42,0.43,0.46,1)
+        end
         groupAlert.alertAccent = groupAlert:CreateTexture(nil, 'ARTWORK')
         groupAlert.alertAccent:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 2, -2)
         groupAlert.alertAccent:SetPoint('TOPRIGHT', groupAlert, 'TOPRIGHT', -2, -2)
@@ -1324,7 +1340,11 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     end
     for _,control in ipairs(groupAlert.roleSlots or {}) do control:Hide() end
     local graphical=kind=='group' and rosterGroup~=nil
-    groupAlert:SetSize(560,graphical and 166 or 112)
+    groupAlert:SetSize(graphical and 620 or 560,graphical and 204 or 112)
+    groupAlert.alertAccent:SetShown(not graphical)
+    groupAlert.alertArt:SetSize(graphical and 90 or 60,graphical and 118 or 60)
+    groupAlert.alertChrome:SetShown(graphical)
+    local highlight=groupAlert:GetHighlightTexture(); if highlight then highlight:SetAlpha(graphical and 0 or 1) end
     groupAlert.kind, groupAlert.groupKey = kind, key
     local hasGroupArt = kind == 'group'
     groupAlert.alertArt:SetShown(hasGroupArt)
@@ -1340,7 +1360,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     else
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
     end
-    local textLeft = hasGroupArt and 82 or 18
+    local textLeft = graphical and 116 or (hasGroupArt and 82 or 18)
     groupAlert.alertCaption:ClearAllPoints()
     groupAlert.alertTitle:ClearAllPoints()
     groupAlert.alertSubtitle:ClearAllPoints()
@@ -1354,22 +1374,23 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     groupAlert.alertFooter:ClearAllPoints()
     groupAlert.alertFooter:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft-7,7)
     groupAlert.alertFooter:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-7,7)
-    groupAlert.alertFooter:SetHeight(graphical and 54 or 58)
+    groupAlert.alertFooter:SetHeight(graphical and 32 or 58)
     groupAlert.alertHint:ClearAllPoints()
     groupAlert.alertHint:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft,12)
     groupAlert.alertHint:SetPoint('RIGHT',groupAlert,'RIGHT',-12,0)
     groupAlert.alertHint:SetHeight(16)
     groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or 'Клік — відкрити')..'|r  |cffb0baca· перетягніть, щоб перемістити|r')
-    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,34)
+    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,12)
     if graphical then
         paintAlertRoster(rosterGroup)
         groupAlert.alertSubtitle:ClearAllPoints()
-        groupAlert.alertSubtitle:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',82,-108)
-        groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,34)
+        groupAlert.alertSubtitle:SetPoint('TOPLEFT',groupAlert,'TOPLEFT',116,-169)
+        groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,12)
         local extra=#rosterGroup.members>5 and (' · ще учасників: '..(#rosterGroup.members-5)) or ''
         groupAlert.alertSubtitle:SetText('|cffffd36bУ складі: '..#rosterGroup.members..' із '..rosterGroup.maxSize..'|r  ·  |cff69dc8cВільних місць: '..math.max(0,rosterGroup.maxSize-#rosterGroup.members)..'|r'..extra)
-        groupAlert.alertHint:SetText('|cff8ccfffВільна роль — подати заявку|r  ·  |cffe0e6efКлік по банеру — група|r')
+        groupAlert.alertHint:SetText(''); groupAlert.alertHint:Hide()
     else
+    groupAlert.alertHint:Show()
     groupAlert.alertSubtitle:SetText(subtitle)
     end
     groupAlert.remaining = ALERT_DURATION

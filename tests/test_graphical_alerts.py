@@ -16,7 +16,7 @@ end
 local group={id='graphics',owner='Tank Owner',title='Graphical group',category='dungeon',dungeon='rfc',role='tank',maxSize=5,minLevel=13,maxLevel=18,description='',members={'Tank Owner','Healer Friend'},memberRoles={['Healer Friend']='healer'},partyObserved={['Healer Friend']=true}}
 finder.groups[group.owner..'\\001'..group.id]=group
 OldKraken.listeners.GROUP_FINDER_NEW(group)
-assert(alert.height==166 and #alert.roleSlots==5)
+assert(alert.height==204 and #alert.roleSlots==5)
 local occupied=0
 for i,slot in ipairs(alert.roleSlots) do
     assert(slot:IsShown())
@@ -45,7 +45,7 @@ assert(alert.roleSlots[5].icon.texture:find('QuestionMark',1,true),'must not inv
 OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(group,'Applicant','healer')
 assert(alert.height==112)
 for _,slot in ipairs(alert.roleSlots) do assert(not slot:IsShown()) end
-finder:PreviewAlert('group'); assert(alert.roleSlots[1]:IsShown() and alert.height==166)
+finder:PreviewAlert('group'); assert(alert.roleSlots[1]:IsShown() and alert.height==204)
 group.category='raid'; group.maxSize=200; group.members={'Tank Owner'}
 for i=2,200 do group.members[i]='Raider '..i end
 OldKraken.listeners.GROUP_FINDER_NEW(group)

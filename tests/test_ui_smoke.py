@@ -227,12 +227,12 @@ local alert
 for _, frame in ipairs(createdFrames) do if rawget(frame, 'alertArt') then alert = frame; break end end
 assert(alert and alert.alertArt:IsShown() and alert.alertArt.texture == 131882,
     'Unexpected alert art: ' .. tostring(alert and alert.alertArt:IsShown()) .. ', ' .. tostring(alert and alert.alertArt.texture))
-assert(alert.alertArt.width == alert.alertArt.height)
+assert(alert.alertArt.width == 90 and alert.alertArt.height == 118)
 assert(alert.alertArt.texCoord[2] - alert.alertArt.texCoord[1]
     == alert.alertArt.texCoord[4] - alert.alertArt.texCoord[3])
 assert(alert.alertCaption.text == 'НОВЕ ОГОЛОШЕННЯ')
 assert(alert.alertTitle.text:find(wcGroup.title, 1, true))
-assert(alert.alertHint.text:find('Клік по банеру — група', 1, true))
+assert(alert.alertHint.text=='' and not alert.alertHint:IsShown())
 assert(alert.groupKey == wcGroup.owner .. '\\001' .. wcGroup.id)
 alert.scripts.OnClick(alert, 'LeftButton')
 assert(not alert:IsShown() and ui.details.text:find(wcGroup.title, 1, true))
