@@ -48,6 +48,7 @@ local categoryLabels = {dungeon='Підземелля', quest='Квести', wo
 local roles = {'tank', 'healer', 'dps', 'flex'}
 local roleLabels = {['']='Не визначено', tank='Танк', healer='Лікар', dps='DPS', flex='Гнучка'}
 local roleColors = {tank='ff66b3ff', healer='ff69dc8c', dps='ffff7a6e', flex='ffffd06a', ['']='ffb5b5b5'}
+local memberStateColors = {['автор']='ffffd35a', ['у групі']='ff69dc8c', ['резерв']='ffffc36b', ['невідомо']='ffb5b5b5'}
 local pendingLabels = {pending='Очікує', reject='Відхилено', closed='Закрито', retry='Подайте заявку знову'}
 local pendingColors = {pending='ffffc36b', reject='ffff7a6e', closed='ffb5b5b5', retry='ffffc36b'}
 local applicationBadges = {
@@ -403,8 +404,8 @@ refresh=function()
                 row = {}
                 row.name = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
                 row.name:SetWidth(155); row.name:SetHeight(20); row.name:SetJustifyH('LEFT'); row.name:SetWordWrap(false)
-                row.state = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-                row.state:SetWidth(155); row.state:SetHeight(16); row.state:SetJustifyH('LEFT'); row.state:SetWordWrap(false)
+                row.state = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+                row.state:SetWidth(285); row.state:SetHeight(16); row.state:SetJustifyH('LEFT'); row.state:SetWordWrap(false)
                 row.hover = CreateFrame('Frame', nil, window.detailsContent)
                 row.hover:SetSize(155, 22); row.hover:EnableMouse(true)
                 row.hover:SetScript('OnEnter', function(self)
@@ -481,9 +482,11 @@ refresh=function()
                 (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у групі' or 'резерв'))
             row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 40)
             local memberRole=i==1 and g.role or (g.memberRoles and g.memberRoles[name])
+            local coloredRole=roleLabel(memberRole or '')
+            local coloredState='|c' .. memberStateColors[state] .. state .. '|r'
             row.name:SetText((catalog.roleIcons[memberRole] or '') .. ' ' .. playerLabel(name)); row.name:Show()
-            row.state:ClearAllPoints(); row.state:SetPoint('TOPLEFT', row.name, 'BOTTOMLEFT', 0, 0); row.state:SetText(state); row.state:Show()
-            row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. ' (' .. state .. ')'; row.hover:Show()
+            row.state:ClearAllPoints(); row.state:SetPoint('TOPLEFT', row.name, 'BOTTOMLEFT', 0, 0); row.state:SetText(coloredRole .. ' |cff9ba9bc·|r ' .. coloredState); row.state:Show()
+            row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. '\nРоль: ' .. coloredRole .. '\nСтатус: ' .. coloredState; row.hover:Show()
             row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (i - 1) * 40)
             row.invite.memberName = name
             if canManage and i > 1 and g.partyObserved and not g.partyObserved[name] then row.invite:Show() else row.invite:Hide() end
