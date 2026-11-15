@@ -552,6 +552,9 @@ local function statusLabel(name,online)
     if online[name]==false then return '|cff999999офлайн|r' end
     return '|cff999999невідомо|r'
 end
+function Recipes:GetRosterPresentation() return onlineIndex() end
+function Recipes:FormatPlayerName(name,classes) return playerLabel(name,classes or {}) end
+function Recipes:FormatOnlineStatus(name,online) return statusLabel(name,online or {}) end
 local function recipeIcon(r)
     local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
     if r.item>0 and type(getIcon)=='function' then

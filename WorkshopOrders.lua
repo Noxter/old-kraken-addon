@@ -531,7 +531,10 @@ end)
 
 local listener=CreateFrame('Frame')
 for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE'}) do pcall(listener.RegisterEvent,listener,event) end
-listener:SetScript('OnEvent',function() connect() end)
+listener:SetScript('OnEvent',function(_,event)
+    connect()
+    if event=='GUILD_ROSTER_UPDATE' and refresh and window and window:IsShown() then refresh() end
+end)
 local function pumpRelay(scheduled,entries,kind,validation,encodeEntry)
     if #comm.queue>8 then return end
     local now=GetTime()
@@ -715,8 +718,24 @@ local function orderIcon(o)
     end
     return professionIcons[o.profession] or 134400
 end
+local function rosterPresentation()
+    local recipes=OldKraken.WorkshopRecipes
+    if recipes and type(recipes.GetRosterPresentation)=='function' then return recipes:GetRosterPresentation() end
+    return {},{}
+end
+local function playerLabel(name,classes)
+    local recipes=OldKraken.WorkshopRecipes
+    if recipes and type(recipes.FormatPlayerName)=='function' then return recipes:FormatPlayerName(name,classes) end
+    return name
+end
+local function onlineLabel(name,online)
+    local recipes=OldKraken.WorkshopRecipes
+    if recipes and type(recipes.FormatOnlineStatus)=='function' then return recipes:FormatOnlineStatus(name,online) end
+    return '|cff999999невідомо|r'
+end
 refresh=function()
     if not window or not window:IsShown() then return end
+    local online,classes=rosterPresentation()
     local list={}; local seen={}
     for _,source in ipairs({own,observed}) do for k,o in pairs(source) do
         local status=displayStatus(o)
@@ -760,7 +779,7 @@ refresh=function()
             else row.offer:Hide() end
             if o.owner==identity and o.status=='open' then
                 local applicants={}; for name in pairs(o.candidates) do applicants[#applicants+1]=name end; table.sort(applicants)
-                row.applicants:SetText(#applicants>0 and ('Відгуки: '..applicants[1]..(#applicants>1 and (' +'..(#applicants-1)) or '')) or 'Відгуків ще немає')
+                row.applicants:SetText(#applicants>0 and ('|cffffc36bВідгук:|r '..playerLabel(applicants[1],classes)..(#applicants>1 and (' +'..(#applicants-1)) or '')) or 'Відгуків ще немає')
                 row.applicants:Show()
                 if #applicants>0 then
                     row.choose:SetText(stateKey=='expired' and 'Термін минув' or ('Обрати ('..#applicants..')'))
@@ -795,7 +814,7 @@ refresh=function()
         local coloredState=string.format('|cff%02x%02x%02x%s|r',math.floor(stateColor[1]*255+0.5),math.floor(stateColor[2]*255+0.5),math.floor(stateColor[3]*255+0.5),state)
         local hasRecipe=(o.itemID or 0)>0 or (o.recipeID or 0)>0
         local masters=hasRecipe and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:FindMasters(o.itemID or 0,o.recipeID or 0) or {}
-        local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..(GetServerTime()-masters[i].seen>604800 and ' · застаріло' or '')..')' end
+        local names={}; for i=1,math.min(#masters,3) do names[#names+1]=playerLabel(masters[i].name,classes)..' ('..date('%d.%m',masters[i].seen)..(GetServerTime()-masters[i].seen>604800 and ' · застаріло' or '')..')' end
         local known=hasRecipe and ('\n|cff9ba9bcВідомі майстри:|r '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\n|cffffc36bПошук за професією; знання рецепта не підтверджено.|r'
         local tally=scope and scope.orderDeliveryTallies[identity] and scope.orderDeliveryTallies[identity][selected]
         local progress=''
@@ -812,7 +831,7 @@ refresh=function()
         end
         local deadlineColor=statusKey=='expired' and '|cffff7770' or '|cffffffff'
         local note=o.note~='' and ('\n\n|cff9ba9bcКоментар:|r '..o.note) or ''
-        window.details:SetText('|cffffd35a'..o.item..' ×'..o.quantity..'|r\n|cff9ba9bc'..professionNames[o.profession]..'|r · '..coloredState..'\n\n|cff9ba9bcЗамовник:|r |cff9bcaff'..o.owner..'|r'..(o.relayed and '\n|cffffc36bДані через гільдію; можуть бути застарілими.|r' or '')..'\n|cff9ba9bcМайстер:|r '..(o.worker and ('|cff9bcaff'..o.worker..'|r') or '|cff9ba9bcне обрано|r')..'\n\n|cff9ba9bcВинагорода:|r |cffffd35a'..o.reward..' зол.|r\n|cff9ba9bcРесурси:|r '..materialNames[o.materials]..'\n|cff9ba9bcТермін:|r '..deadlineColor..date('%d.%m.%Y %H:%M',o.deadline)..'|r'..known..progress..note..(pending and (pending.receiptRev and '\n\n|cffffc36bПідтверджено; очікується оновлення стану.|r' or '\n\n|cffffc36bОчікується підтвердження замовника; дія передається через гільдію.|r') or ''))
+        window.details:SetText('|cffffd35a'..o.item..' ×'..o.quantity..'|r\n|cff9ba9bc'..professionNames[o.profession]..'|r · '..coloredState..'\n\n|cff9ba9bcЗамовник:|r '..playerLabel(o.owner,classes)..(o.relayed and '\n|cffffc36bДані через гільдію; можуть бути застарілими.|r' or '')..'\n|cff9ba9bcМайстер:|r '..(o.worker and (playerLabel(o.worker,classes)..' · '..onlineLabel(o.worker,online)) or '|cff9ba9bcне обрано|r')..'\n\n|cff9ba9bcВинагорода:|r |cffffd35a'..o.reward..' зол.|r\n|cff9ba9bcРесурси:|r '..materialNames[o.materials]..'\n|cff9ba9bcТермін:|r '..deadlineColor..date('%d.%m.%Y %H:%M',o.deadline)..'|r'..known..progress..note..(pending and (pending.receiptRev and '\n\n|cffffc36bПідтверджено; очікується оновлення стану.|r' or '\n\n|cffffc36bОчікується підтвердження замовника; дія передається через гільдію.|r') or ''))
         local detailsHeight=o.owner==identity and o.status=='open' and 110 or 215
         window.detailsScroll:SetSize(340,detailsHeight)
         window.detailsContent:SetHeight(math.max(detailsHeight,window.details:GetStringHeight()+8))
@@ -830,14 +849,23 @@ refresh=function()
             for i,name in ipairs(names) do
                 local row=window.candidates[i]
                 if not row then
-                    row=CreateFrame('Frame',nil,window.candidateContent); row:SetSize(330,28)
-                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); row.label:SetPoint('LEFT',row,'LEFT',0,0); row.label:SetWidth(200); row.label:SetJustifyH('LEFT')
-                    row.choose=button(row,'Обрати',210,0,100,function(self) if not ownerAction(selected,'choose',self:GetParent().person) then showError() end end)
+                    row=CreateFrame('Frame',nil,window.candidateContent); row:SetSize(330,46)
+                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(200,18); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
+                    row.status=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); row.status:SetPoint('TOPLEFT',row,'TOPLEFT',0,-18); row.status:SetSize(200,16); row.status:SetJustifyH('LEFT'); row.status:SetWordWrap(false)
+                    row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(200,34); row.hover:EnableMouse(true)
+                    row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.playerText then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.playerText); GameTooltip:AddLine(self.statusText,1,1,1,true); GameTooltip:Show() end end)
+                    row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+                    row.choose=button(row,'Обрати',210,-7,100,function(self) if not ownerAction(selected,'choose',self:GetParent().person) then showError() end end)
                     window.candidates[i]=row
                 end
-                row.person=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.candidateContent,'TOPLEFT',0,-(i-1)*30); row.label:SetText(name); row:Show()
+                local state=statusKey=='expired' and '|cffff7a6eТермін минув|r' or '|cffffc36bОчікує вибору|r'
+                local title=playerLabel(name,classes); local info=state..' |cff9ba9bc·|r '..onlineLabel(name,online)
+                row.person=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.candidateContent,'TOPLEFT',0,-(i-1)*48)
+                row.label:SetText(title); row.status:SetText(info); row.hover.playerText=title; row.hover.statusText=info
+                if statusKey=='expired' then row.choose:Disable() else row.choose:Enable() end
+                row:Show()
             end
-            window.candidateContent:SetHeight(math.max(90,#names*30)); window.candidateTitle:Show(); window.candidateScroll:Show()
+            window.candidateContent:SetHeight(math.max(96,#names*48)); window.candidateTitle:Show(); window.candidateScroll:Show()
         else window.candidateTitle:Hide(); window.candidateScroll:Hide() end
     else
         window.details:SetText('|cff9ba9bcОберіть замовлення зі списку.|r'); window.detailsScroll:SetSize(340,215); window.detailsContent:SetHeight(215); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.reopen:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
@@ -919,8 +947,9 @@ local function createWindow(parent)
             local target=menu.orderKey; local o=target and own[target]
             if not o or o.status~='open' or o.deadline<GetServerTime() then return end
             local names={}; for name in pairs(o.candidates) do names[#names+1]=name end; table.sort(names)
+            local online,classes=rosterPresentation()
             for _,name in ipairs(names) do
-                local person=name; local item=UIDropDownMenu_CreateInfo(); item.text=person; item.notCheckable=true
+                local person=name; local item=UIDropDownMenu_CreateInfo(); item.text=playerLabel(person,classes)..' · |cffffc36bОчікує|r · '..onlineLabel(person,online); item.notCheckable=true
                 item.func=function() if not ownerAction(target,'choose',person) then showError() end end
                 UIDropDownMenu_AddButton(item,level)
             end
@@ -965,8 +994,8 @@ local function createWindow(parent)
     f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(330,110); detailsScroll:SetScrollChild(f.detailsContent)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(330); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-225))
-    f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-244)); f.candidateScroll:SetSize(340,90)
-    f.candidateContent=CreateFrame('Frame',nil,f.candidateScroll); f.candidateContent:SetSize(330,90); f.candidateScroll:SetScrollChild(f.candidateContent); f.candidates={}
+    f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-244)); f.candidateScroll:SetSize(340,96)
+    f.candidateContent=CreateFrame('Frame',nil,f.candidateScroll); f.candidateContent:SetSize(330,96); f.candidateScroll:SetScrollChild(f.candidateContent); f.candidates={}
     f.offer=button(f,'Запропонувати',495,y(-345),130,function() if not selected or not intent(selected,'offer') then showError() end end)
     f.withdraw=button(f,'Відмовитися',495,y(-345),130,function() if not selected or not intent(selected,'withdraw') then showError() end end)
     f.delivered=button(f,'Передав',630,y(-345),100,function() if not selected or not intent(selected,'delivered') then showError() end end)
