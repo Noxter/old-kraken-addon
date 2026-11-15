@@ -20,6 +20,7 @@ local professionArt={
 }
 local active, identity, profile, store, records = false, nil, nil, nil, {}
 local nativeProfessions={}
+local ownProfessionCache
 local nativeScan, lastNativeScan
 local professionRelayDirty={}
 local pending, queryPending, forceBroadcast, lastReply, nextScan = false, false, false, -60, 0
@@ -304,8 +305,9 @@ for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE
     pcall(listener.RegisterEvent,listener,event)
 end
 listener:SetScript('OnEvent',function(_,event)
+    ownProfessionCache=nil
     if event=='PLAYER_LOGIN' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect(); changed()
-    elseif active then nextScan=0 end
+    elseif active then nextScan=0; changed() end
 end)
 if C_Timer and type(C_Timer.NewTicker)=='function' then
     C_Timer.NewTicker(3,function()
@@ -495,6 +497,22 @@ if OldKraken.UIHub then
 end
 function Workshop:HasProfession(id)
     if not active or not identity then return false end
+    if type(GetProfessions)=='function' and type(GetProfessionInfo)=='function' then
+        if not ownProfessionCache then
+            ownProfessionCache={}
+            local result={pcall(GetProfessions)}
+            if result[1] then
+                for i=2,7 do
+                    local index=result[i]
+                    if integer(index,1,100000) then
+                        local info={pcall(GetProfessionInfo,index)}
+                        if info[1] and integer(info[8],1,1000000) then ownProfessionCache[info[8]]=true end
+                    end
+                end
+            end
+        end
+        return ownProfessionCache[id]==true
+    end
     local record=records[identity]
     if type(record)~='table' or type(record.list)~='table' then return false end
     for _,entry in ipairs(record.list) do if type(entry)=='table' and entry.id==id then return true end end

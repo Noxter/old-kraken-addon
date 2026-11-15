@@ -626,6 +626,35 @@ local function recipeIcon(r)
     end
     return 134400
 end
+local requestedItems,pendingItems={},{}
+function Recipes:ItemLabel(id)
+    local name,icon
+    if C_Item and type(C_Item.GetItemNameByID)=='function' then
+        local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and safeText(value,1,160) then name=value end
+    end
+    if not name and type(GetItemInfo)=='function' then
+        local ok,value=pcall(GetItemInfo,id); if ok and safeText(value,1,160) then name=value end
+    end
+    local getIcon=C_Item and C_Item.GetItemIconByID or GetItemIcon
+    if type(getIcon)=='function' then local ok,value=pcall(getIcon,id); if ok and (usable(value,'number') or usable(value,'string')) then icon=value end end
+    if not name then
+        pendingItems[id]=true
+        local now=GetTime()
+        if not requestedItems[id] or now-requestedItems[id]>=5 then
+            requestedItems[id]=now
+            if C_Item and type(C_Item.RequestLoadItemDataByID)=='function' then pcall(C_Item.RequestLoadItemDataByID,id) end
+        end
+    end
+    return '|T'..tostring(icon or 134400)..':22:22:0:0|t |cffffffff'..(name or 'Завантаження назви…')..'|r'
+end
+local itemEvents=CreateFrame('Frame')
+for _,event in ipairs({'GET_ITEM_INFO_RECEIVED','ITEM_DATA_LOAD_RESULT'}) do pcall(itemEvents.RegisterEvent,itemEvents,event) end
+itemEvents:SetScript('OnEvent',function(_,_,id,success)
+    if pendingItems[id] and success~=false then
+        pendingItems[id]=nil; changed()
+        OldKraken:Fire('WORKSHOP_ITEM_DATA_CHANGED')
+    end
+end)
 local function reagentText(r)
     if type(C_TradeSkillUI)~='table' or type(C_TradeSkillUI.GetRecipeSchematic)~='function' then return 'Матеріали: дані гри недоступні.' end
     local ok,schematic=pcall(C_TradeSkillUI.GetRecipeSchematic,r.recipe,false)
@@ -636,11 +665,10 @@ local function reagentText(r)
         if usable(slot,'table') and usable(slot.reagents,'table') then
             local reagent=slot.reagents[1]; local id=usable(reagent,'table') and reagent.itemID
             if integer(id,1,100000000) then
-                local name; if type(GetItemInfo)=='function' then local got,value=pcall(GetItemInfo,id); if got and safeText(value,1,120) then name=value end end
                 local amount=integer(slot.quantityRequired,1,10000) and slot.quantityRequired or 1
                 local getCount=type(C_Item)=='table' and C_Item.GetItemCount or GetItemCount
                 local countText=''; if type(getCount)=='function' then local got,value=pcall(getCount,id); if got and integer(value,0,10000000) then countText=' · у сумках: '..value end end
-                lines[#lines+1]=(name or ('Предмет #'..id))..' ×'..amount..countText
+                lines[#lines+1]=Recipes:ItemLabel(id)..' |cffffd36b×'..amount..'|r'..countText
             end
         end
     end

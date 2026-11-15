@@ -134,6 +134,7 @@ local function displayStatus(o)
     return o.status
 end
 local function canCraft(o)
+    if not OldKraken.Workshop or not OldKraken.Workshop:HasProfession(o.profession) then return false,false end
     if (o.itemID or 0)>0 or (o.recipeID or 0)>0 then
         return OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0),false
     end
@@ -215,6 +216,8 @@ local function create(item,qty,reward,note,recipe)
 end
 local function intent(k,action)
     local o=get(k); if not active or not o or o.owner==identity or intents[k] then return false end
+    if action=='offer' and not canCraft(o) then return false end
+    if action=='delivered' and (not OldKraken.Workshop or not OldKraken.Workshop:HasProfession(o.profession)) then return false end
     if action=='offer' and (o.status~='open' or o.deadline<GetServerTime() or o.candidates[identity]) then return false end
     if action=='withdraw' and not ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity)) then return false end
     if action=='delivered' and not (o.status=='assigned' and o.worker==identity) then return false end
@@ -372,7 +375,9 @@ local function receiveOrder(sender,payload,isRelay)
     confirmPending(k,o,not isRelay)
     if not isRelay and not previous and o.status=='open' and o.rev==1 and GetServerTime()-o.created<=120 then
         local settings=OldKraken.DB and OldKraken.DB.settings
-        local matches,manual=canCraft(o)
+        local matches=OldKraken.Workshop and OldKraken.Workshop:HasProfession(o.profession)
+        local known=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0)
+        local manual=not known
         if type(settings)=='table' and settings.workshopOrderAlerts~=false and matches then
             notify('Нове замовлення: '..o.item,professionNames[o.profession]..' · '..o.owner..(manual and ' · рецепт не підтверджено' or ''),k)
         end
@@ -764,7 +769,7 @@ refresh=function()
             local canWithdraw=o.owner~=identity and not intents[entry.key]
                 and ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity))
             row.withdraw:SetShown(canWithdraw and true or false)
-            if o.owner~=identity and stateKey=='open' then
+            if o.owner~=identity and stateKey=='open' and canCraft(o) then
                 row.offer:Show()
                 row.offer:SetWidth(canWithdraw and 99 or 203)
                 if intents[entry.key] then row.offer:SetText('Очікується відповідь'); row.offer:Disable()
@@ -784,7 +789,7 @@ refresh=function()
                 row.applicants:SetText('|cff9ba9bcМайстер:|r '..playerLabel(o.worker,classes))
                 row.applicants:Show(); row.choose:Hide()
             else row.applicants:Hide(); row.choose:Hide() end
-            if o.worker==identity and o.owner~=identity and o.status=='assigned' then
+            if o.worker==identity and o.owner~=identity and o.status=='assigned' and OldKraken.Workshop and OldKraken.Workshop:HasProfession(o.profession) then
                 row.progress:SetText(intents[entry.key] and 'Очікується відповідь' or 'Передав')
                 row.progress:SetWidth(canWithdraw and 99 or 203)
                 if intents[entry.key] then row.progress:Disable() else row.progress:Enable() end
@@ -819,7 +824,7 @@ refresh=function()
             local mats={}; for id,n in pairs(type(tally.materials)=='table' and tally.materials or {}) do
                 if int(id,1,100000000) and int(n,1,10000000) then
                     local name; if type(GetItemInfo)=='function' then local ok,value=pcall(GetItemInfo,id); if ok and textOK(value,1,160) then name=value end end
-                    mats[#mats+1]=(name or ('#'..id))..' ×'..n
+                    mats[#mats+1]=(OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.ItemLabel and OldKraken.WorkshopRecipes:ItemLabel(id) or name or 'Завантаження назви…')..' ×'..n
                 end
             end; table.sort(mats)
             local money=tonumber(tally.money) or 0
@@ -834,9 +839,9 @@ refresh=function()
         window.detailsScroll:SetSize(350,detailsHeight)
         window.detailsContent:SetHeight(math.max(detailsHeight,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
-        window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending)
+        window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending and canCraft(o))
         window.withdraw:SetShown(not isOwner and not pending and ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity)))
-        window.delivered:SetShown(not isOwner and not pending and o.status=='assigned' and o.worker==identity)
+        window.delivered:SetShown(not isOwner and not pending and o.status=='assigned' and o.worker==identity and OldKraken.Workshop and OldKraken.Workshop:HasProfession(o.profession))
         window.finish:SetShown(isOwner and o.status=='delivered')
         window.cancel:SetShown(isOwner and o.status~='done' and o.status~='cancelled')
         window.reopen:SetShown(isOwner and o.status=='assigned' and o.deadline<GetServerTime() and GetServerTime()+86400<=o.created+2592000)
@@ -1137,3 +1142,6 @@ function Orders:ShowCreatePanel(show)
 end
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',changed)
 OldKraken:On('WORKSHOP_INDEX_CHANGED',changed)
+
+OldKraken:On('WORKSHOP_ITEM_DATA_CHANGED',changed)
+OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',changed)
