@@ -15,6 +15,7 @@ local selectRecipe,selectedEntry,viewOwner
 local professionContext, selectedMaster, tab, mastersOnline = nil, nil, 'recipes', false
 local restoringView=false
 local resultQuery
+local tabStates={}
 local recipeChanged=false
 local scanStatus='Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
 local render, matches
@@ -46,10 +47,12 @@ local function connect()
     local realm=type(GetRealmName)=='function' and GetRealmName()
     if not name or not safeText(guild,1,128) or not usable(realm,'string') or not OldKraken.DB then
         active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts={},{}
+        tabStates={}
         if frame then frame:Hide() end; return
     end
     local k=realm..'\001'..guild
     if active and identity==name and profile==k then return end
+    tabStates={}
     local db=OldKraken.DB; if type(db.workshop)~='table' then db.workshop={} end
     if type(db.workshop.recipeCatalog)~='table' then db.workshop.recipeCatalog={} end
     recipeCatalog,catalogCursor,catalogPending=db.workshop.recipeCatalog,nil,true
@@ -567,7 +570,7 @@ render=function()
     if not frame or not frame:IsShown() then return end
     local online,classes=onlineIndex(); local list={}; local grouped={}
     local mastersView=tab=='masters' and not selectRecipe
-    local filter=(professionContext or mastersView) and lower((frame.query:GetText() or ''):match('^%s*(.-)%s*$')) or ''
+    local filter=(professionContext or mastersView or selectRecipe) and lower((frame.query:GetText() or ''):match('^%s*(.-)%s*$')) or ''
     if not mastersView then filter=filter:match('item:(%d+)') or filter end
     if frame.TitleText then frame.TitleText:SetText(professionContext and ('Old Kraken — '..professionNames[professionContext]) or 'Old Kraken — Пошук рецептів') end
     frame.searchLabel:SetText(mastersView and 'Пошук майстра за ім’ям' or 'Пошук рецепта або предмета')
@@ -677,6 +680,30 @@ render=function()
     end
     resizeInfo()
 end
+local function switchTab(nextTab)
+    if tab==nextTab then return end
+    local key=professionContext or 0
+    local states=tabStates[key] or {}; tabStates[key]=states
+    states[tab]={query=frame.query:GetText() or '',offset=offset,owner=viewOwner,
+        selected=selectedEntry,master=selectedMaster,online=mastersOnline}
+    local saved=states[nextTab] or {}
+    tab=nextTab
+    viewOwner,selectedEntry,selectedMaster=saved.owner,saved.selected,saved.master
+    offset,mastersOnline=saved.offset or 0,saved.online==true
+    if selectedEntry then
+        local stored=people[selectedEntry.owner] and people[selectedEntry.owner][selectedEntry.record.recipe]
+        selectedEntry=validRecord(stored) and {owner=selectedEntry.owner,record=stored} or nil
+    end
+    if selectedMaster and OldKraken.Workshop then
+        local name,profession=selectedMaster.name,selectedMaster.profession or professionContext
+        selectedMaster=nil
+        for _,master in ipairs(OldKraken.Workshop:GetProfessionMasters(profession)) do
+            if master.name==name then master.profession=profession; selectedMaster=master; break end
+        end
+    end
+    restoringView=true; frame.query:SetText(saved.query or ''); restoringView=false
+    render()
+end
 local function createWindow(parent)
     local f
     if parent then
@@ -694,12 +721,8 @@ local function createWindow(parent)
         f.context=f:CreateFontString(nil,'OVERLAY','GameFontNormal')
         f.context:SetPoint('TOPLEFT',f,'TOPLEFT',20,-40)
     end
-    local function changeTab(nextTab)
-        tab=nextTab; viewOwner=nil
-        selectedEntry=nil; selectedMaster=nil; offset=0; f.query:SetText(''); render()
-    end
-    f.recipeTab=button(f,'Рецепти',20,-38,120,function() changeTab('recipes') end)
-    f.masterTab=button(f,'Майстри',148,-38,120,function() changeTab('masters') end)
+    f.recipeTab=button(f,'Рецепти',20,-38,120,function() switchTab('recipes') end)
+    f.masterTab=button(f,'Майстри',148,-38,120,function() switchTab('masters') end)
     for _,item in ipairs({f.recipeTab,f.masterTab}) do
         item.activeBar=item:CreateTexture(nil,'ARTWORK'); item.activeBar:SetPoint('BOTTOMLEFT',item,'BOTTOMLEFT',2,1); item.activeBar:SetSize(116,2)
         item.activeBar:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
@@ -707,7 +730,14 @@ local function createWindow(parent)
     f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(f.query)
     f.query:SetSize(300,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-74); f.query:SetAutoFocus(false)
     f.searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',455,-49)
-    f.query:SetScript('OnTextChanged',function() if (professionContext or tab=='masters') and not restoringView then selectedEntry=nil; selectedMaster=nil; offset=0; render() end end)
+    f.query:SetScript('OnTextChanged',function()
+        if restoringView then return end
+        if professionContext or tab=='masters' or selectRecipe then
+            selectedEntry=nil; selectedMaster=nil; offset=0
+            if selectRecipe then addCached('') end
+            render()
+        end
+    end)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local function submitSearch()
         if professionContext or tab=='masters' then offset=0; render(); f.query:ClearFocus(); return end
@@ -769,10 +799,12 @@ function Recipes:SelectTab(nextTab)
     if not OldKraken.Workshop or OldKraken.Workshop.currentView~='recipes' then
         self:Show(); if not active or not frame then return end
         addCached('')
+        restoringView=true; frame.query:SetText(''); restoringView=false
         if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     end
-    selectRecipe=nil; tab=nextTab; viewOwner=nil; selectedEntry=nil; selectedMaster=nil; offset=0
-    frame.query:SetText(''); render()
+    selectRecipe=nil
+    switchTab(nextTab)
+    render()
 end
 function Recipes:CaptureView()
     return {profession=professionContext,master=selectedMaster,tab=tab,online=mastersOnline,
@@ -884,6 +916,7 @@ function Recipes:Choose(callback)
     if type(callback)~='function' then return end
     self:Show(); if not active or not frame then return end
     selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; resultQuery=nil; activeQuery=nil; offset=0
+    restoringView=true; frame.query:SetText(''); restoringView=false
     for name,items in pairs(people) do
         if safeText(name,1,128) and type(items)=='table' then
             for _,r in pairs(items) do
