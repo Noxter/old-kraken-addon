@@ -295,22 +295,6 @@ end
 render=function()
     if not frame then return end
     frame.heading:SetText(scanState=='checking' and 'Перевіряємо зміни професій…' or (scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути майстрів.'))
-    local pageCount = 1
-    frame.pageTotal = pageCount
-
-    if active and store and type(store.records)=='table' then
-        local total = 0
-        for _,record in pairs(store.records) do
-            if type(record)=='table' and type(record.list)=='table' then total = total + #record.list end
-        end
-        if total > 0 then pageCount = math.max(1, math.ceil(total / 12)) end
-    end
-    frame.pageTotal = pageCount
-    frame.pageIndex = math.max(1, math.min(frame.pageIndex or 1, pageCount))
-    if frame.page then frame.page:SetText(string.format('%d / %d', frame.pageIndex, pageCount)) end
-    if frame.previousPage then frame.previousPage:SetShown(pageCount > 1 and frame.pageIndex > 1) end
-    if frame.nextPage then frame.nextPage:SetShown(pageCount > 1 and frame.pageIndex < pageCount) end
-
     local summaries=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:GetProfessionSummaries() or {}
     for _,card in ipairs(frame.professionCards) do
         local summary=summaries[card.profession]
@@ -360,16 +344,6 @@ local function createWindow(parent)
     end
     button(content,'Оновити',590,y(-43),120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
     f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-52))
-    f.pageIndex=1
-    f.page=content:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.page:SetPoint('TOPLEFT',content,'TOPLEFT',418,y(-44)); f.page:SetWidth(64); f.page:SetText('1 / 1')
-    f.previousPage=button(content,'<',362,y(-42),24,function()
-        if f.pageIndex>1 then f.pageIndex=f.pageIndex-1; render() end
-    end)
-    f.previousPage:Hide()
-    f.nextPage=button(content,'>',494,y(-42),24,function()
-        if f.pageIndex<f.pageTotal then f.pageIndex=f.pageIndex+1; render() end
-    end)
-    f.nextPage:Hide()
     f.professionCards={}
     for i,p in ipairs(professions) do
         local entry=p; local col=(i-1)%3; local line=math.floor((i-1)/3)

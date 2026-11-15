@@ -110,6 +110,10 @@ lua.execute('''
 OldKraken.Communication = {RegisterHandler=function() end}
 function OldKraken.Communication:SendProtocol() return true end
 OldKraken.GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end}
+OldKraken.WorkshopRecipes = {
+    GetProfessionSummaries=function() return {[171]={recipes=3,members=2}} end,
+    ShowProfession=function(_, id) selectedProfession=id end,
+}
 function OldKraken:On() end
 ''')
 lua.execute((root / 'Workshop.lua').read_text(encoding='utf-8'))
@@ -128,16 +132,18 @@ local scope = {records={['Tester Realm']={timestamp=GetServerTime(),list={{id=17
 OldKraken.DB.workshop.guilds['Test Realm\\001Guild'] = scope
 OldKraken.Workshop:Show()
 local workshopFrame = OldKraken.UIHub.pages.workshop.frame
-assert(workshopFrame.page.text == '1 / 1')
 assert(workshopFrame.width == 900 and workshopFrame.height == 590)
-assert(not workshopFrame.previousPage:IsShown() and not workshopFrame.nextPage:IsShown())
-assert(workshopFrame.page.point[4] == 418 and workshopFrame.page.width == 64)
+assert(rawget(workshopFrame, 'page') == nil and rawget(workshopFrame, 'previousPage') == nil and rawget(workshopFrame, 'nextPage') == nil)
+assert(#workshopFrame.professionCards == 12)
+local alchemy = workshopFrame.professionCards[1]
+assert(alchemy.profession == 171 and alchemy.detail.text == '3 рецептів · 2 майстрів')
+alchemy.scripts.OnClick(alchemy)
+assert(selectedProfession == 171, 'profession card did not open its profession')
 
 for i=2,13 do scope.records['Tester Realm'].list[i] = {id=171,rank=i,maximum=75} end
 OldKraken.Workshop:Show()
-assert(workshopFrame.page.text == '1 / 2')
-assert(workshopFrame.previousPage:IsShown() and workshopFrame.nextPage:IsShown())
-assert(workshopFrame.previousPage.point[4] == 362 and workshopFrame.nextPage.point[4] == 494)
-workshopFrame.nextPage.scripts.OnClick()
-assert(workshopFrame.page.text == '2 / 2', 'next page did not advance: '..tostring(workshopFrame.page.text))
+assert(#workshopFrame.professionCards == 12 and rawget(workshopFrame, 'page') == nil)
+local fishing = workshopFrame.professionCards[12]
+fishing.scripts.OnClick(fishing)
+assert(selectedProfession == 356, 'profession cards changed when saved records increased')
 ''')
