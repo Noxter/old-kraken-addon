@@ -236,15 +236,6 @@ local function CreateRosterWindow(parent)
         frame.TitleText:SetText("Old Kraken — Guild Roster")
     end
 
-    local refreshButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    OldKraken.UIStyle.Button(refreshButton)
-    refreshButton:SetSize(92, 24)
-    refreshButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -38, -30)
-    refreshButton:SetText("Оновити")
-    refreshButton:SetScript("OnClick", function()
-        Roster:RequestUpdate()
-    end)
-
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
     OldKraken.UIStyle.Input(searchBox)
     searchBox:SetSize(190, 24)
