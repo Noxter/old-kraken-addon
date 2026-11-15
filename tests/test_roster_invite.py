@@ -44,9 +44,8 @@ row.scripts.OnClick(row,'RightButton'); assert(#menuItems==4)
 row.cellHovers[2].scripts.OnEnter(row.cellHovers[2]); assert(tooltipText=='Member')
 local offline=assert(rows['Offline Member'])
 offline.cellHovers[1].scripts.OnClick(); assert(menuItems[2].disabled and menuItems[3].disabled and not menuItems[4].disabled)
-local tab
-for _,frame in ipairs(createdFrames) do if frame.text=='Аддон' then tab=frame end end
-assert(tab); tab.scripts.OnClick()
+for _,frame in ipairs(createdFrames) do assert(frame.text~='Учасники' and frame.text~='Аддон') end
+assert(row.cells[7].shown and row.cellHovers[7].shown)
 assert(row.cells[7].text:find('●',1,true) and offline.cells[7].text:find('○',1,true))
 assert(row.cells[7].text:find('(0.4.0-alpha.2)',1,true) and row.cells[7].textColor[2]==0.55)
 assert(offline.cells[7].text:find('(?)',1,true))

@@ -30,7 +30,6 @@ local SORT_LABELS = {
 }
 
 local settings
-local addonView = false
 local addonFilter = 'all'
 
 local function HasAddon(name)
@@ -134,7 +133,7 @@ local function MatchesFilters(member)
         return false
     end
 
-    if addonView and addonFilter ~= 'all' then
+    if addonFilter ~= 'all' then
         local installed = HasAddon(member.name)
         if addonFilter == 'yes' and not installed then return false end
         if addonFilter == 'unknown' and installed then return false end
@@ -305,25 +304,11 @@ local function CreateRosterWindow(parent)
     end)
     frame.classDropdown = classDropdown
 
-    frame.viewButtons = {}
-    for i, label in ipairs({'Учасники', 'Аддон'}) do
-        local isAddon = i == 2
-        local tab = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
-        OldKraken.UIStyle.Button(tab); tab:SetSize(100, 22)
-        tab:SetPoint('TOPLEFT', frame, 'TOPLEFT', 18 + (i-1)*104, -8)
-        tab:SetText(label)
-        tab:SetScript('OnClick', function()
-            addonView = isAddon; frame.scrollFrame:SetVerticalScroll(0)
-            if isAddon and OldKraken.Communication.RequestRosterPresence then OldKraken.Communication:RequestRosterPresence() end
-            Roster:Render()
-        end)
-        frame.viewButtons[i] = tab
-    end
     local filter = CreateFrame('Frame', 'OldKrakenRosterAddonFilter', frame, 'UIDropDownMenuTemplate')
     OldKraken.UIStyle.Dropdown(filter); filter:SetPoint('TOPLEFT', frame, 'TOPLEFT', 570, -36)
-    UIDropDownMenu_SetWidth(filter, 200)
+    UIDropDownMenu_SetWidth(filter, 160)
     UIDropDownMenu_Initialize(filter, function(_, level)
-        for _, entry in ipairs({{'all','Усі'}, {'yes','Встановлено'}, {'unknown','Не підтверджено'}}) do
+        for _, entry in ipairs({{'all','Аддон: усі'}, {'yes','Є аддон'}, {'unknown','Немає аддона'}}) do
             local value, label = entry[1], entry[2]
             local info = UIDropDownMenu_CreateInfo()
             info.text = label; info.checked = addonFilter == value
@@ -331,7 +316,7 @@ local function CreateRosterWindow(parent)
             UIDropDownMenu_AddButton(info, level)
         end
     end)
-    UIDropDownMenu_SetText(filter, 'Усі'); frame.addonFilter = filter
+    UIDropDownMenu_SetText(filter, 'Аддон: усі'); frame.addonFilter = filter
 
     local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -72)
@@ -492,17 +477,7 @@ function Roster:Render()
     end
     table.sort(filteredData, SortMembers)
 
-    rosterFrame.addonFilter:SetShown(addonView)
-    rosterFrame.addonHeader:SetShown(addonView)
-
-    rosterFrame.viewButtons[1]:SetEnabled(addonView)
-    rosterFrame.viewButtons[2]:SetEnabled(not addonView)
     UpdateSummary()
-    if addonView then
-        local comm = OldKraken.Communication
-        local version = comm and comm.GetLocalVersion and comm:GetLocalVersion() or '?'
-        rosterFrame.summaryText:SetText('Ваша версія: ' .. version .. ' | Помаранчева — старіша за вашу; блакитна — новіша; сіра — невідома.')
-    end
     UpdateFilterButtonLabels()
 
     local content = rosterFrame.contentFrame
@@ -513,9 +488,9 @@ function Roster:Render()
         row.member = member
         local cells = row.cells
 
-        cells[7]:SetShown(addonView)
+        cells[7]:Show()
 
-        row.cellHovers[7]:SetShown(addonView)
+        row.cellHovers[7]:Show()
 
         if HasAddon(member.name) then cells[7]:SetTextColor(0.25, 1, 0.25) else cells[7]:SetTextColor(0.7, 0.7, 0.7) end
         local comm = OldKraken.Communication
