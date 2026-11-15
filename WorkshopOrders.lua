@@ -813,7 +813,7 @@ local function createWindow(parent)
         f:SetMovable(true); f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
         OldKraken.UIStyle.Window(f)
     end
-    f:SetSize(900,embedded and 590 or 650); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
+    f:SetSize(900,embedded and 590 or 650); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(not embedded)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Замовлення') end
     local views={all='Усі замовлення',available='Доступні мені',mine='Мої замовлення',work='Моя робота'}
     dropdown(f,'OldKrakenOrdersView',18,y(-42),190,{'all','available','mine','work'},views,function() return view end,function(v) view=v; offset=0; refresh() end)
