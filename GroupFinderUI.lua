@@ -1144,8 +1144,11 @@ local function paintAlertRoster(group)
             control.ring=control:CreateTexture(nil,'BACKGROUND'); control.ring:SetSize(30,30); control.ring:SetPoint('TOP',control,'TOP',0,0)
             control.ring:SetTexture('Interface\\AddOns\\OldKraken\\Media\\RoleSlot.tga')
             control.icon=control:CreateTexture(nil,'ARTWORK'); control.icon:SetSize(22,22); control.icon:SetPoint('CENTER',control.ring,'CENTER',0,0)
-            control.label=control:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-            control.label:SetPoint('TOPLEFT',control,'TOPLEFT',0,-33); control.label:SetSize(86,14); control.label:SetJustifyH('CENTER'); control.label:SetWordWrap(false)
+            control.label=control:CreateFontString(nil,'OVERLAY','GameFontHighlight')
+            local fontPath,fontSize=control.label:GetFont()
+            if fontPath then control.label:SetFont(fontPath,math.max(13,tonumber(fontSize) or 13),'OUTLINE') end
+            control.label:SetShadowColor(0,0,0,1); control.label:SetShadowOffset(1,-1)
+            control.label:SetPoint('TOPLEFT',control,'TOPLEFT',0,-32); control.label:SetSize(86,19); control.label:SetJustifyH('CENTER'); control.label:SetWordWrap(false)
             control:RegisterForClicks('LeftButtonUp','RightButtonUp')
             control:SetScript('OnClick',function(self,mouseButton)
                 if GameTooltip then GameTooltip:Hide() end
@@ -1160,9 +1163,7 @@ local function paintAlertRoster(group)
                     end
                     if Finder:Apply(current.owner,current.id,self.role) then
                         Finder:Changed()
-                        self.label:SetText('Заявку подано')
-                        groupAlert.alertSubtitle:SetText('Заявку на роль '..roleLabel(self.role)..' надіслано.\nОчікуйте рішення автора збору.')
-                        groupAlert.remaining=ALERT_DURATION; groupAlert:SetAlpha(1)
+                        groupAlert:Hide()
                     else
                         print('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.')
                     end
@@ -1194,7 +1195,7 @@ local function paintAlertRoster(group)
                 elseif group.partyObserved and member~=group.owner and not group.partyObserved[member] then control.ring:SetVertexColor(1,0.72,0.25)
                 else control.ring:SetVertexColor(0.3,1,0.55) end
                 control.label:SetText(member or roleLabel(slot.role))
-                control.label:SetTextColor(member and 0.92 or 0.6,member and 0.95 or 0.65,member and 1 or 0.7)
+                control.label:SetTextColor(member and 1 or 0.85,member and 1 or 0.88,member and 1 or 0.93)
                 control.tooltipText=(member or 'Вільне місце')..'\n'..roleLabel(displayedRole)..' · '..state
                 if not member then control.tooltipText=control.tooltipText..'\nЛівий клік — подати заявку на цю роль.' end
             end

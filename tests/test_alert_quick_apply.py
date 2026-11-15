@@ -20,7 +20,7 @@ local sequence=finder.requestSequence
 healer.scripts.OnClick(healer,'LeftButton')
 assert(finder.pending[key]=='pending' and finder.pendingRoles[key]=='healer')
 assert(finder.requestSequence>sequence and opened==0)
-assert(alert:IsShown() and healer.label.text=='Заявку подано')
+assert(not alert:IsShown(),'successful quick apply must dismiss the notification')
 sequence=finder.requestSequence
 alert.roleSlots[3].scripts.OnClick(alert.roleSlots[3],'LeftButton')
 assert(finder.requestSequence==sequence and opened==0,'pending applications must not be duplicated')
