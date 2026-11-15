@@ -10,7 +10,7 @@ SYNC = (ROOT / "WorkshopSync.lua").read_text(encoding="utf-8")
 def client(name, records):
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.globals().player = name
-    lua.globals().seed_records = records
+    lua.globals().seed_records = lua.table_from(records, recursive=True)
     lua.execute("""
         now=100; serverNow=1700000000; outgoing={}; handlers={}; ticker=nil
         imported={}; importedMeta={}
