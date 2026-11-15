@@ -313,16 +313,31 @@ local function resolveProduct(r)
         if ok and safeText(name,1,120) then r.product=name end
     end
 end
-local function addCached(query)
+local function textFilter(text)
+    return lower((text or ''):match('^%s*(.-)%s*$'))
+end
+local function matchesFilter(r,filter)
+    if filter=='' then return true end
+    local recipe=filter:match('^recipe:(%d+)$')
+    if recipe then return r.recipe==tonumber(recipe) end
+    filter=filter:match('item:(%d+)') or filter
+    return lower(r.name):find(filter,1,true)~=nil or lower(r.product):find(filter,1,true)~=nil or tostring(r.item):find(filter,1,true)~=nil
+end
+local function addCached(query,filter)
     resultQuery=query
     resultSet={}
     local limit=query:match('^prof:%d+$') and 5000 or 500
+    local found=0
     for name,items in pairs(people) do
         if safeText(name,1,128) and type(items)=='table' then
             for _,r in pairs(items) do
-                if count(resultSet)>=limit then return end
+                if found>=limit then return end
                 resolveProduct(r)
-                if matches(r,query) then resultSet[name..'\001'..r.recipe]={owner=name,record=r} end
+                if matches(r,query) and (not filter or matchesFilter(r,filter)) then
+                    local key=name..'\001'..r.recipe
+                    if not resultSet[key] then found=found+1 end
+                    resultSet[key]={owner=name,record=r}
+                end
             end
         end
     end
@@ -570,8 +585,7 @@ render=function()
     if not frame or not frame:IsShown() then return end
     local online,classes=onlineIndex(); local list={}; local grouped={}
     local mastersView=tab=='masters' and not selectRecipe
-    local filter=(professionContext or mastersView or selectRecipe) and lower((frame.query:GetText() or ''):match('^%s*(.-)%s*$')) or ''
-    if not mastersView then filter=filter:match('item:(%d+)') or filter end
+    local filter=textFilter(frame.query:GetText())
     if frame.TitleText then frame.TitleText:SetText(professionContext and ('Old Kraken — '..professionNames[professionContext]) or 'Old Kraken — Пошук рецептів') end
     frame.searchLabel:SetText(mastersView and 'Пошук майстра за ім’ям' or 'Пошук рецепта або предмета')
     if professionContext then
@@ -641,7 +655,7 @@ render=function()
     local byRecipe=not selectRecipe and not viewOwner and (professionContext or (activeQuery and activeQuery.query:match('^prof:%d+$')))
     for _,entry in pairs(resultSet) do
         if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
-            and (filter=='' or lower(entry.record.name):find(filter,1,true) or lower(entry.record.product):find(filter,1,true) or tostring(entry.record.item):find(filter,1,true)) then
+            and matchesFilter(entry.record,filter) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
                 if not old or (online[entry.owner] and not online[old.owner]) or ((online[entry.owner] and true or false)==(online[old.owner] and true or false) and entry.record.seen>old.record.seen) then grouped[id]=entry end
@@ -702,6 +716,7 @@ local function switchTab(nextTab)
         end
     end
     restoringView=true; frame.query:SetText(saved.query or ''); restoringView=false
+    if nextTab=='recipes' and not professionContext then addCached('',textFilter(saved.query)) end
     render()
 end
 local function createWindow(parent)
@@ -729,14 +744,13 @@ local function createWindow(parent)
     end
     f.query=CreateFrame('EditBox',nil,f,'InputBoxTemplate'); OldKraken.UIStyle.Input(f.query)
     f.query:SetSize(300,24); f.query:SetPoint('TOPLEFT',f,'TOPLEFT',24,-74); f.query:SetAutoFocus(false)
+    f.query:SetText('')
     f.searchLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.searchLabel:SetPoint('TOPLEFT',f,'TOPLEFT',455,-49)
     f.query:SetScript('OnTextChanged',function()
         if restoringView then return end
-        if professionContext or tab=='masters' or selectRecipe then
-            selectedEntry=nil; selectedMaster=nil; offset=0
-            if selectRecipe then addCached('') end
-            render()
-        end
+        selectedEntry=nil; selectedMaster=nil; offset=0
+        if tab~='masters' and not professionContext then addCached('',textFilter(f.query:GetText())) end
+        render()
     end)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
     local function submitSearch()
@@ -828,6 +842,7 @@ function Recipes:RestoreView(state)
         end
     end
     restoringView=true; frame.query:SetText(state.query or ''); restoringView=false
+    if tab=='recipes' and not professionContext then addCached('',textFilter(state.query)) end
     frame.status:SetText(state.status or ''); render()
 end
 function Recipes:Show()
@@ -837,6 +852,8 @@ function Recipes:Show()
         OldKraken.Workshop:Navigate('recipes')
     elseif not frame then frame=createWindow() end
     professionContext,selectedMaster,tab,viewOwner,selectRecipe=nil,nil,'recipes',nil,nil
+    restoringView=true; frame.query:SetText(''); restoringView=false
+    addCached('')
     frame:Show(); render()
 end
 function Recipes:ExportSnapshot()
