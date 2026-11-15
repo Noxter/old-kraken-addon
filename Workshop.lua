@@ -45,8 +45,18 @@ local function integer(value, low, high)
     return value
 end
 local function count(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
+local scheduleRenderPending=false
+local function scheduleRender()
+    if scheduleRenderPending then return end
+    if not (frame and frame:IsShown() and (not frame.professionView or frame.professionView:IsShown())) then return end
+    local function flush()
+        scheduleRenderPending=false
+        if frame and frame:IsShown() and (not frame.professionView or frame.professionView:IsShown()) then if render then render() end end
+    end
+    if C_Timer and C_Timer.After then scheduleRenderPending=true; C_Timer.After(0.15,flush) else flush() end
+end
 local function changed()
-    if render then render() end
+    scheduleRender()
     if type(OldKraken.Fire)=='function' then OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED') end
 end
 -- Nil or invalid indexes and temporarily unavailable APIs are not removals.
@@ -317,7 +327,7 @@ local function button(parent,text,x,y,width,callback,variant)
     b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(text); b:SetScript('OnClick',callback); return b
 end
 render=function()
-    if not frame then return end
+    if not frame or not frame:IsShown() or (frame.professionView and not frame.professionView:IsShown()) then return end
     frame.heading:SetText(scanState=='checking' and 'Перевіряємо зміни професій…' or (scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути майстрів.'))
     local summaries=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:GetProfessionSummaries() or {}
     for _,card in ipairs(frame.professionCards) do
@@ -418,7 +428,8 @@ local function createWindow(parent)
     content:HookScript('OnShow',render)
     f:Hide(); return f
 end
-OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() if frame and frame:IsShown() then render() end end)
+OldKraken:On('WORKSHOP_RECIPES_CHANGED',scheduleRender)
+OldKraken:On('WORKSHOP_INDEX_CHANGED',scheduleRender)
 function Workshop:UpdateTabs()
     if not frame or not frame.professionView then return end
     local view=self.currentView

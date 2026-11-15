@@ -413,9 +413,17 @@ refresh=function()
     local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
     local members = g and g.members or {}
     local top = window.details:GetStringHeight() + 5
-    for i = 1, math.max(#members, #window.memberRows) do
+    local viewport=tonumber((window.detailsScroll:GetHeight())) or 210
+    if viewport<=0 then viewport=210 end
+    local oldScroll=tonumber((window.detailsScroll:GetVerticalScroll())) or 0
+    local scrollTop=math.max(0,math.min(oldScroll,math.max(0,math.max(210,top+#members*40+4)-viewport)))
+    if scrollTop~=oldScroll then window.detailsScroll:SetVerticalScroll(scrollTop) end
+    local first=math.max(1,math.floor((scrollTop-top)/40)+1)
+    local visibleCount=math.max(0,math.min(math.ceil(viewport/40)+1,#members-first+1))
+    for i = 1, math.max(visibleCount, #window.memberRows) do
+        local dataIndex=first+i-1
         local row = window.memberRows[i]
-        if i <= #members then
+        if i <= visibleCount then
             if not row then
                 row = {}
                 row.name = window.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
@@ -493,22 +501,22 @@ refresh=function()
                 end)
                 window.memberRows[i] = row
             end
-            local name = members[i]
-            local state = i == 1 and 'автор' or
+            local name = members[dataIndex]
+            local state = dataIndex == 1 and 'автор' or
                 (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у групі' or 'резерв'))
-            row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (i - 1) * 40)
-            local memberRole=i==1 and g.role or (g.memberRoles and g.memberRoles[name])
+            row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, -top - (dataIndex - 1) * 40)
+            local memberRole=dataIndex==1 and g.role or (g.memberRoles and g.memberRoles[name])
             local coloredRole=roleLabel(memberRole or '')
             local coloredState='|c' .. memberStateColors[state] .. state .. '|r'
             row.name:SetText((catalog.roleIcons[memberRole] or '') .. ' ' .. playerLabel(name)); row.name:Show()
             row.state:ClearAllPoints(); row.state:SetPoint('TOPLEFT', row.name, 'BOTTOMLEFT', 0, 0); row.state:SetText(coloredRole .. ' |cff9ba9bc·|r ' .. coloredState); row.state:Show()
             row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. '\nРоль: ' .. coloredRole .. '\nСтатус: ' .. coloredState; row.hover:Show()
-            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (i - 1) * 40)
+            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (dataIndex - 1) * 40)
             row.invite.memberName = name
-            if canManage and i > 1 and g.partyObserved and not g.partyObserved[name] then row.invite:Show() else row.invite:Hide() end
-            row.remove:ClearAllPoints(); row.remove:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 265, -top - (i - 1) * 40)
+            if canManage and dataIndex > 1 and g.partyObserved and not g.partyObserved[name] then row.invite:Show() else row.invite:Hide() end
+            row.remove:ClearAllPoints(); row.remove:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 265, -top - (dataIndex - 1) * 40)
             row.remove.memberName = name
-            if canManage and i > 1 then row.remove:Show() else row.remove:Hide() end
+            if canManage and dataIndex > 1 then row.remove:Show() else row.remove:Hide() end
         elseif row then
             row.name:Hide(); row.state:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
         end
@@ -769,6 +777,14 @@ local function createWindow(parent)
     f.listPage:SetWidth(44); f.listPage:SetJustifyH('CENTER')
     f.detailsScroll = CreateFrame('ScrollFrame', nil, f, 'UIPanelScrollFrameTemplate')
     f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.detailsScroll:SetSize(300, 175)
+    local previousDetailsScroll=f.detailsScroll:GetScript('OnVerticalScroll')
+    local detailsScrollPending=false
+    f.detailsScroll:SetScript('OnVerticalScroll',function(self,value)
+        if previousDetailsScroll then previousDetailsScroll(self,value) end
+        if detailsScrollPending then return end
+        local function update() detailsScrollPending=false; refresh() end
+        if C_Timer and C_Timer.After then detailsScrollPending=true; C_Timer.After(0,update) else update() end
+    end)
     f.detailsContent = CreateFrame('Frame', nil, f.detailsScroll)
     f.detailsContent:SetSize(300, 86); f.detailsScroll:SetScrollChild(f.detailsContent)
     f.details = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
@@ -916,16 +932,22 @@ if OldKraken.UIHub then
         return window
     end)
 end
-OldKraken:On('GROUP_FINDER_CHANGED', refresh)
-OldKraken:On('GROUP_FINDER_CHANGED', refreshRequests)
+local peopleDirty=false
+local scheduleRefreshPending=false
+local function scheduleRefresh()
+    if scheduleRefreshPending then return end
+    if not ((window and window:IsShown()) or (requestsWindow and requestsWindow:IsShown())) then return end
+    local function flush()
+        scheduleRefreshPending=false
+        if (window and window:IsShown()) or (requestsWindow and requestsWindow:IsShown()) then if peopleDirty then refreshPeople(); peopleDirty=false end; refresh(); refreshRequests() end
+    end
+    if C_Timer and C_Timer.After then scheduleRefreshPending=true; C_Timer.After(0.15,flush) else flush() end
+end
+OldKraken:On('GROUP_FINDER_CHANGED', scheduleRefresh)
 local peopleEvents = CreateFrame('Frame')
 peopleEvents:RegisterEvent('GUILD_ROSTER_UPDATE')
 peopleEvents:RegisterEvent('GROUP_ROSTER_UPDATE')
-peopleEvents:SetScript('OnEvent', function()
-    if (window and window:IsShown()) or (requestsWindow and requestsWindow:IsShown()) then
-        refreshPeople(); refresh(); refreshRequests()
-    end
-end)
+peopleEvents:SetScript('OnEvent', function() peopleDirty=true; scheduleRefresh() end)
 OldKraken:On('GROUP_FINDER_ALERT_SETTING', function()
     if groupAlert and groupAlert.kind == 'group' and not Finder:GroupAlertsEnabled() then groupAlert:Hide() end
     refresh()

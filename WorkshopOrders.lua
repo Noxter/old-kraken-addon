@@ -68,7 +68,17 @@ local function me()
     if type(b)=='string' and b~='' then a=a..' '..b end
     return nameOK(a) and a or nil
 end
-local function changed() if refresh then refresh() end end
+local changedPending=false
+local function changed()
+    if changedPending then return end
+    if not (window and window:IsShown()) then return end
+    local function flush()
+        changedPending=false
+        if window and window:IsShown() then if refresh then refresh() end end
+    end
+    if C_Timer and C_Timer.After then changedPending=true; C_Timer.After(0.15,flush) else flush() end
+end
+
 local function notify(title,subtitle,k) OldKraken:Fire('WORKSHOP_ORDER_NOTICE',title,subtitle,k) end
 local function encode(o)
     local fields={o.owner,o.id,o.rev,o.created,o.deadline,o.profession,o.item,o.quantity,o.reward,o.materials,o.note,o.status,o.worker or ''}
@@ -827,7 +837,16 @@ refresh=function()
         if isOwner and o.status=='open' then
             local names={}; for name in pairs(o.candidates) do names[#names+1]=name end; table.sort(names)
             window.candidateTitle:SetText(#names>0 and 'Оберіть майстра:' or 'Пропозицій майстрів поки немає')
-            for i,name in ipairs(names) do
+            local scroll=window.candidateScroll
+            local height=tonumber((scroll:GetHeight())) or 96
+            if height<=0 then height=96 end
+            local top=math.max(0,math.min(tonumber((scroll:GetVerticalScroll())) or 0,math.max(0,#names*48-height)))
+            if top~=(tonumber((scroll:GetVerticalScroll())) or 0) then scroll:SetVerticalScroll(top) end
+            local first=math.floor(top/48)+1
+            local count=math.max(0,math.min(math.ceil(height/48)+1,#names-first+1))
+            for i=1,count do
+                local dataIndex=first+i-1
+                local name=names[dataIndex]
                 local row=window.candidates[i]
                 if not row then
                     row=CreateFrame('Frame',nil,window.candidateContent); row:SetSize(330,46)
@@ -841,7 +860,7 @@ refresh=function()
                 end
                 local state=statusKey=='expired' and '|cffff7a6eТермін минув|r' or '|cffffc36bОчікує вибору|r'
                 local title=playerLabel(name,classes); local info=state..' |cff9ba9bc·|r '..onlineLabel(name,online)
-                row.person=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.candidateContent,'TOPLEFT',0,-(i-1)*48)
+                row.person=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.candidateContent,'TOPLEFT',0,-(dataIndex-1)*48)
                 row.label:SetText(title); row.status:SetText(info); row.hover.playerText=title; row.hover.statusText=info
                 if statusKey=='expired' then row.choose:Disable() else row.choose:Enable() end
                 row:Show()
@@ -982,6 +1001,11 @@ local function createWindow(parent)
     f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-225))
     f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-244)); f.candidateScroll:SetSize(340,96)
     f.candidateContent=CreateFrame('Frame',nil,f.candidateScroll); f.candidateContent:SetSize(330,96); f.candidateScroll:SetScrollChild(f.candidateContent); f.candidates={}
+    local previousScroll=f.candidateScroll:GetScript('OnVerticalScroll')
+    f.candidateScroll:SetScript('OnVerticalScroll',function(self,value)
+        if previousScroll then previousScroll(self,value) end
+        changed()
+    end)
     f.offer=button(f,'Запропонувати',495,y(-345),130,function() if not selected or not intent(selected,'offer') then showError() end end)
     f.withdraw=button(f,'Відмовитися',495,y(-345),130,function() if not selected or not intent(selected,'withdraw') then showError() end end)
     f.delivered=button(f,'Передав',630,y(-345),100,function() if not selected or not intent(selected,'delivered') then showError() end end)
@@ -1098,4 +1122,5 @@ end
 function Orders:ShowCreatePanel(show)
     if window and window.createForm then window.createForm:SetShown(show) end
 end
-OldKraken:On('WORKSHOP_RECIPES_CHANGED',function() changed() end)
+OldKraken:On('WORKSHOP_RECIPES_CHANGED',changed)
+OldKraken:On('WORKSHOP_INDEX_CHANGED',changed)

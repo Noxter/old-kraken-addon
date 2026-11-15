@@ -18,6 +18,11 @@ local restoringView=false
 local resultQuery
 local tabStates={}
 local recipeChanged=false
+local indexRevision=0
+local summaryCache,itemIndex={},{}
+local indexedRevision=-1
+local indexJob,searchJob
+local ownItems,ownItemsRevision={},-1
 local scanStatus='Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
 local render, matches
 local function usable(v,t) return not (type(issecretvalue)=='function' and issecretvalue(v)) and type(v)==t end
@@ -37,7 +42,17 @@ local function myName()
     if usable(b,'string') and b~='' then a=a..' '..b end
     if safeText(a,1,128) then return a end
 end
-local function changed() if render then render() end end
+local changedPending=false
+local function changed()
+    if changedPending then return end
+    if not (frame and frame:IsShown()) then return end
+    local function flush()
+        changedPending=false
+        if frame and frame:IsShown() then if render then render() end end
+    end
+    if C_Timer and C_Timer.After then changedPending=true; C_Timer.After(0.15,flush) else flush() end
+end
+
 local function validRecord(r)
     return type(r)=='table' and integer(r.recipe,1,100000000) and integer(r.item,0,100000000)
         and integer(r.profession,1,1000000) and professionNames[r.profession] and integer(r.seen,1,GetServerTime()+600)
@@ -50,12 +65,14 @@ local function connect()
         if Recipes.CancelPicker then Recipes:CancelPicker() end
         active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts={},{}
         tabStates={}
+        indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
         if frame then frame:Hide() end; return
     end
     local k=realm..'\001'..guild
     if active and identity==name and profile==k then return end
     if Recipes.CancelPicker then Recipes:CancelPicker() end
     tabStates={}
+    indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
     local db=OldKraken.DB; if type(db.workshop)~='table' then db.workshop={} end
     if type(db.workshop.recipeCatalog)~='table' then db.workshop.recipeCatalog={} end
     recipeCatalog,catalogCursor,catalogPending=db.workshop.recipeCatalog,nil,true
@@ -176,7 +193,7 @@ local function recordLearned(r,deferRefresh)
         if not recipeCatalog[r.recipe] then catalogSize=catalogSize+1 end
         recipeCatalog[r.recipe]={recipe=r.recipe,item=r.item,profession=r.profession,seen=r.seen,name=r.name,product=r.product}
     end
-    recipeChanged=true
+    indexRevision=indexRevision+1; recipeChanged=true
     if pendingLearned[r.recipe] then
         if #sendQueue<100 then
             pendingLearned[r.recipe]=nil; learnAttempts[r.recipe]=nil
@@ -202,7 +219,7 @@ local function forgetRecipe(id,deferRefresh)
     if #sendQueue<100 then
         sendQueue[#sendQueue+1]={kind='WRFORGET',payload=codec._pack({removed.recipe,removed.item,removed.profession,removed.seen,removed.name,removed.product}),expires=GetTime()+600}
     end
-    recipeChanged=true; if not deferRefresh then changed() end; return true
+    indexRevision=indexRevision+1; recipeChanged=true; if not deferRefresh then changed() end; return true
 end
 function Recipes:ForgetProfession(profession,expectedIdentity,expectedProfile)
     if not active or not professionNames[profession] or identity~=expectedIdentity or profile~=expectedProfile then return false end
@@ -326,25 +343,69 @@ local function matchesFilter(r,filter)
     filter=filter:match('item:(%d+)') or filter
     return lower(r.name):find(filter,1,true)~=nil or lower(r.product):find(filter,1,true)~=nil or tostring(r.item):find(filter,1,true)~=nil
 end
+local function scanCachedRecords(visit,done,valid)
+    local owners={}; for name in pairs(people) do owners[#owners+1]=name end
+    local source=people
+    local ownerIndex,records,recordIndex,currentOwner=1,nil,1,nil
+    local function step()
+        if people~=source or (valid and not valid()) then return end
+        local budget=200
+        while budget>0 and ownerIndex<=#owners do
+            if not records then
+                currentOwner=owners[ownerIndex]; records={}; recordIndex=1
+                if safeText(currentOwner,1,128) and type(source[currentOwner])=='table' then
+                    for _,r in pairs(source[currentOwner]) do records[#records+1]=r end
+                end
+            end
+            local r=records[recordIndex]
+            if r then
+                recordIndex=recordIndex+1; budget=budget-1
+                if visit(currentOwner,r)==false then done(); return end
+            else ownerIndex=ownerIndex+1; records=nil; budget=budget-1 end
+        end
+        if ownerIndex>#owners then done()
+        elseif C_Timer and C_Timer.After then C_Timer.After(0,step) else return step() end
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(0,step) else step() end
+end
+local function ensureRecipeIndex()
+    if indexedRevision==indexRevision or indexJob then return end
+    local job={revision=indexRevision}; indexJob=job
+    local summaries,seen,items={},{},{}
+    scanCachedRecords(function(name,r)
+        if validRecord(r) then
+            local summary=summaries[r.profession] or {recipes=0,members=0}; summaries[r.profession]=summary
+            local id=r.profession..':'..r.recipe
+            if not seen[id] then seen[id]=true; summary.recipes=summary.recipes+1 end
+            local who=r.profession..':'..name
+            if not seen[who] then seen[who]=true; summary.members=summary.members+1 end
+            if r.item>0 then
+                local owners=items[r.item] or {}; items[r.item]=owners
+                owners[name]=math.max(owners[name] or 0,r.seen)
+            end
+        end
+    end,function()
+        summaryCache,itemIndex=summaries,items; indexedRevision=job.revision; indexJob=nil
+        OldKraken:Fire('WORKSHOP_INDEX_CHANGED')
+    end,function() return indexJob==job end)
+end
 local function addCached(query,filter,professionFilter)
     resultQuery=query
     resultSet={}
     local limit=query:match('^prof:%d+$') and 5000 or 500
     local found=0
-    for name,items in pairs(people) do
-        if safeText(name,1,128) and type(items)=='table' then
-            for _,r in pairs(items) do
-                if found>=limit then return end
-                resolveProduct(r)
-                if matches(r,query) and (not filter or matchesFilter(r,filter)) and (not professionFilter or professionFilter==0 or r.profession==professionFilter)
-                    and (not selectRecipe or (OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession))) then
-                    local key=name..'\001'..r.recipe
-                    if not resultSet[key] then found=found+1 end
-                    resultSet[key]={owner=name,record=r}
-                end
+    local job={}; searchJob=job
+    scanCachedRecords(function(name,r)
+        if found>=limit then return false end
+        resolveProduct(r)
+        if matches(r,query) and (not professionFilter or professionFilter==0 or r.profession==professionFilter) then
+            if (not filter or matchesFilter(r,filter)) and (not selectRecipe or (OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession))) then
+                local key=name..'\001'..r.recipe
+                if not resultSet[key] then found=found+1 end
+                resultSet[key]={owner=name,record=r}
             end
         end
-    end
+    end,function() changed() end,function() return searchJob==job end)
 end
 local function search(value)
     if not active or not safeText(value,1,200) then print('Old Kraken: введіть назву або посилання на предмет.'); return false end
@@ -414,7 +475,7 @@ comm:RegisterHandler('WRBATCH',function(sender,_,payload)
             end
         end
     end
-    if updated then changed(); recipeChanged=true end
+    if updated then changed(); indexRevision=indexRevision+1; recipeChanged=true end
 end)
 comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if not active or not activeQuery or GetTime()>activeQuery.untilTime or not safeText(sender,1,128) then return end
@@ -427,7 +488,7 @@ comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     local stored=storeRecipe(sender,r,false); if not stored then return end
     local k=sender..'\001'..r.recipe
     if resultSet[k] or count(resultSet)<500 then resultSet[k]={owner=sender,record=stored} end
-    changed(); recipeChanged=true
+    changed(); indexRevision=indexRevision+1; recipeChanged=true
 end)
 comm:RegisterHandler('WRLEARN',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
@@ -445,13 +506,13 @@ comm:RegisterHandler('WRLEARN',function(sender,_,payload)
         if matches(stored,activeQuery.query) and (resultSet[k] or count(resultSet)<500) then resultSet[k]={owner=sender,record=stored}
         elseif resultSet[k] then resultSet[k]=nil end
     end
-    changed(); recipeChanged=true
+    changed(); indexRevision=indexRevision+1; recipeChanged=true
 end)
 comm:RegisterHandler('WRFORGET',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
     local f=codec._unpackFields(payload,6); if not f or #f~=6 then return end
     local r={recipe=tonumber(f[1]),item=tonumber(f[2]),profession=tonumber(f[3]),seen=tonumber(f[4]),name=f[5],product=f[6],deleted=true}
-    if validRecord(r) and storeTombstone(sender,r,false) then changed(); recipeChanged=true end
+    if validRecord(r) and storeTombstone(sender,r,false) then changed(); indexRevision=indexRevision+1; recipeChanged=true end
 end)
 
 local events=CreateFrame('Frame')
@@ -927,25 +988,12 @@ function Recipes:ImportSnapshot(owner,records,relayed,allowOverride)
             end
         end
     end
-    recipeChanged=true; changed(); return true
+    indexRevision=indexRevision+1; recipeChanged=true; changed(); return true
 end
 function Recipes:ValidateSnapshotRecord(r) return validRecord(r) and (r.deleted==nil or r.deleted==true) and true or false end
 function Recipes:GetProfessionSummaries()
-    local result,seen={},{}
-    for name,items in pairs(people) do
-        if safeText(name,1,128) and type(items)=='table' then
-            for _,r in pairs(items) do
-                if validRecord(r) then
-                    local summary=result[r.profession] or {recipes=0,members=0}; result[r.profession]=summary
-                    local id=r.profession..':'..r.recipe
-                    if not seen[id] then seen[id]=true; summary.recipes=summary.recipes+1 end
-                    local who=r.profession..':'..name
-                    if not seen[who] then seen[who]=true; summary.members=summary.members+1 end
-                end
-            end
-        end
-    end
-    return result
+    ensureRecipeIndex()
+    return summaryCache
 end
 function Recipes:ShowProfession(profession,forceNavigation)
     if not professionNames[profession] then return end
@@ -982,14 +1030,15 @@ end
 function Recipes:FindMasters(itemID,recipeID)
     local found={}
     if not integer(itemID,0,100000000) or not integer(recipeID,0,100000000) or (itemID==0 and recipeID==0) then return {} end
-    for name,items in pairs(people) do
-        if safeText(name,1,128) and type(items)=='table' then
-            for _,r in pairs(items) do
-                if validRecord(r) and ((itemID>0 and r.item==itemID) or (recipeID>0 and r.recipe==recipeID)) then
-                    if not found[name] or r.seen>found[name] then found[name]=r.seen end
-                end
-            end
+    if recipeID>0 then
+        for name,records in pairs(people) do
+            local r=type(records)=='table' and records[recipeID]
+            if safeText(name,1,128) and validRecord(r) then found[name]=r.seen end
         end
+    end
+    if itemID>0 then
+        ensureRecipeIndex()
+        for name,seen in pairs(itemIndex[itemID] or {}) do found[name]=math.max(found[name] or 0,seen) end
     end
     local out={}; for name,seen in pairs(found) do out[#out+1]={name=name,seen=seen} end
     table.sort(out,function(a,b) return a.name<b.name end); return out
@@ -998,10 +1047,14 @@ function Recipes:Knows(itemID,recipeID)
     if not active or not identity or not integer(itemID,0,100000000) or not integer(recipeID,0,100000000) or (itemID==0 and recipeID==0) then return false end
     local own=people[identity]
     if type(own)~='table' then return false end
-    for _,r in pairs(own) do
-        if validRecord(r) and ((itemID>0 and r.item==itemID) or (recipeID>0 and r.recipe==recipeID)) then return true end
+    if recipeID>0 and validRecord(own[recipeID]) then return true end
+    if itemID==0 then return false end
+    if ownItemsRevision~=indexRevision then
+        ownItems={}
+        for _,r in pairs(own) do if validRecord(r) and r.item>0 then ownItems[r.item]=true end end
+        ownItemsRevision=indexRevision
     end
-    return false
+    return ownItems[itemID]==true
 end
 function Recipes:ShowMasters(itemID,recipeID)
     self:Show(true); if not active or not frame then return end
@@ -1010,4 +1063,5 @@ function Recipes:ShowMasters(itemID,recipeID)
     frame.query:SetText(query); frame.status:SetText('Відомі майстри; дата показує останнє зчитування рецепта.')
     search(query); frame:Raise()
 end
-OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function() if tab=='masters' then render() end end)
+OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function() if tab=='masters' then changed() end end)
+OldKraken:On('WORKSHOP_INDEX_CHANGED',changed)
