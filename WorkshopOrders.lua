@@ -12,7 +12,7 @@ local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.
 local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
 local dirty,relayDirty,sequence,nextSync,lastQueries,nextDisplay={}, {},0,0,{},0
-local requestDirty,paymentDirty,actionRelayDirty,paymentRelayDirty,resultDirty,resultRelayDirty={},{},{},{},{},{}
+local requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
 local nextRelaySweep=0
 local lastSnapshotQuery=-60
 local RELAY_LIMIT,RELAY_TTL=1000,2592000
@@ -128,7 +128,7 @@ local function connect()
     local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
     if not name or not textOK(guild,1,128) or type(realm)~='string' or not OldKraken.DB then
         active,identity,profile,scope,own,observed,intents,dirty,relayDirty=false,nil,nil,nil,{}, {}, {}, {}, {}
-        requestDirty,paymentDirty,actionRelayDirty,paymentRelayDirty,resultDirty,resultRelayDirty={},{},{},{},{},{}
+        requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
         if window then window:Hide() end; return
     end
     local guildKey=realm..'\001'..guild
@@ -138,10 +138,11 @@ local function connect()
     if type(db.workshop.guilds[guildKey])~='table' then db.workshop.guilds[guildKey]={} end
     scope=db.workshop.guilds[guildKey]
     for _,field in ipairs({'orderOwners','orderObserved','orderIntents','orderSequences','orderRelays','orderDeliveryTallies','orderActionRelays','orderPaymentRelays','orderResults','orderResultRelays','orderDrafts'}) do if type(scope[field])~='table' then scope[field]={} end end
+    scope.orderActionRelays={}; scope.orderPaymentRelays={}
     if type(scope.orderDeliveryTallies[name])~='table' then scope.orderDeliveryTallies[name]={} end
     active,identity,profile=true,name,guildKey
     own,observed,intents,dirty,relayDirty={}, {}, {}, {}, {}
-    requestDirty,paymentDirty,actionRelayDirty,paymentRelayDirty,resultDirty,resultRelayDirty={},{},{},{},{},{}
+    requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
     local function loadOrders(source,target,requireOwner)
         if type(source)~='table' then return end
         for k,o in pairs(source) do
@@ -170,7 +171,7 @@ local function connect()
             requestDirty[k]=true
         end
     end end
-    for _,config in ipairs({{scope.orderActionRelays,'action',actionRelayDirty},{scope.orderPaymentRelays,'payment',paymentRelayDirty},{scope.orderResults,'result',resultDirty},{scope.orderResultRelays,'result',resultRelayDirty}}) do
+    for _,config in ipairs({{scope.orderResults,'result',resultDirty},{scope.orderResultRelays,'result',resultRelayDirty}}) do
         local entries,kind,scheduled=config[1],config[2],config[3]; local count=0
         for k,entry in pairs(entries) do
             if count>=RELAY_LIMIT or not validRelay(entry,kind) or k~=relayKey(entry.owner,entry.id,entry.actor) then entries[k]=nil
@@ -350,11 +351,6 @@ local function receiveOrder(sender,payload,isRelay)
     if not previous and size(observed)>=100 then return end
     if not isRelay then
         scope.orderRelays[k]=payload
-        for relay,entry in pairs(scope.orderPaymentRelays) do
-            if entry.owner==o.owner and entry.id==o.id and (o.worker~=entry.actor or (o.assignment or 0)~=entry.assignment or (o.paidByWorker or 0)>=entry.amount or o.status=='done' or o.status=='cancelled' or o.status=='deleted') then
-                scope.orderPaymentRelays[relay]=nil; paymentRelayDirty[relay]=nil
-            end
-        end
     end
     observed[k]=o
     confirmPending(k,o,not isRelay)
@@ -427,18 +423,10 @@ comm:RegisterHandler('WOREQ',function(sender,_,payload)
     if not active or not nameOK(sender) or sender==identity then return end
     local f=codec._unpackFields(payload,5); if not f or (#f~=4 and #f~=5) then return end
     local request=decodeAction(sender,f,1); if not request then return end
-    if request.owner==identity then applyRequest(request)
-    else
-        local k=relayKey(request.owner,request.id,request.actor); local result=scope.orderResultRelays[k]
-        if result and result.version==request.version and result.action==request.action and result.assignment==request.assignment then scheduleRelay(resultRelayDirty,k)
-        else k=putRelay(scope.orderActionRelays,request,'action'); if k then scheduleRelay(actionRelayDirty,k) end end
-    end
+    if request.owner==identity then applyRequest(request) end
 end)
 comm:RegisterHandler('WOACT',function(sender,_,payload)
-    if not active or not nameOK(sender) or sender==identity then return end
-    local f=codec._unpackFields(payload,6); if not f or #f~=6 or f[1]~=identity or f[3]==sender then return end
-    local request=decodeAction(f[3],{f[1],f[2],f[4],f[5],f[6]},1)
-    if request then applyRequest(request) end
+    -- A relayer cannot prove the identity of the actor claimed in the payload.
 end)
 local function applyPayment(entry)
     local k=key(identity,entry.id); local o=own[k]
@@ -453,14 +441,10 @@ comm:RegisterHandler('WOPAY',function(sender,_,payload)
     local f=codec._unpackFields(payload,4); if not f or #f~=4 then return end
     local entry={owner=f[1],id=f[2],actor=sender,assignment=tonumber(f[3]),amount=tonumber(f[4]),stored=GetServerTime()}
     if not validRelay(entry,'payment') then return end
-    if entry.owner==identity then applyPayment(entry)
-    else local k=putRelay(scope.orderPaymentRelays,entry,'payment'); if k then scheduleRelay(paymentRelayDirty,k) end end
+    if entry.owner==identity then applyPayment(entry) end
 end)
 comm:RegisterHandler('WOPAYR',function(sender,_,payload)
-    if not active or not nameOK(sender) or sender==identity then return end
-    local f=codec._unpackFields(payload,5); if not f or #f~=5 or f[1]~=identity or f[3]==sender then return end
-    local entry={owner=f[1],id=f[2],actor=f[3],assignment=tonumber(f[4]),amount=tonumber(f[5]),stored=GetServerTime()}
-    if validRelay(entry,'payment') then applyPayment(entry) end
+    -- A relayer cannot prove the identity of the worker claimed in the payload.
 end)
 local function decodeResult(payload)
     local f=codec._unpackFields(payload,8); if not f or #f~=8 then return nil end
@@ -489,8 +473,6 @@ comm:RegisterHandler('WORESULT',function(sender,_,payload)
     local k=putRelay(scope.orderResultRelays,entry,'result')
     if k then
         scheduleRelay(resultRelayDirty,k)
-        local request=scope.orderActionRelays[k]
-        if request and request.version<=entry.version then scope.orderActionRelays[k]=nil; actionRelayDirty[k]=nil end
     end
 end)
 comm:RegisterHandler('WORESR',function(sender,_,payload)
@@ -523,8 +505,6 @@ comm:RegisterHandler('WOQUERY',function(sender,_,payload)
         for k in pairs(own) do dirty[k]=true end
         for k in pairs(scope.orderRelays) do relayDirty[k]=true end
     end
-    for k,entry in pairs(scope.orderActionRelays) do if entry.owner==sender then scheduleRelay(actionRelayDirty,k) end end
-    for k,entry in pairs(scope.orderPaymentRelays) do if entry.owner==sender then scheduleRelay(paymentRelayDirty,k) end end
     for k,entry in pairs(scope.orderResults) do if entry.owner==identity and entry.actor==sender then resultDirty[k]=true end end
     for k,entry in pairs(scope.orderResultRelays) do if entry.actor==sender then scheduleRelay(resultRelayDirty,k) end end
 end)
@@ -561,7 +541,7 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     end
     if now>=nextRelaySweep then
         nextRelaySweep=now+180
-        for _,config in ipairs({{scope.orderActionRelays,'action',actionRelayDirty},{scope.orderPaymentRelays,'payment',paymentRelayDirty},{scope.orderResults,'result',resultDirty},{scope.orderResultRelays,'result',resultRelayDirty}}) do
+        for _,config in ipairs({{scope.orderResults,'result',resultDirty},{scope.orderResultRelays,'result',resultRelayDirty}}) do
             local entries,kind,scheduled=config[1],config[2],config[3]
             for k,entry in pairs(entries) do
                 if not validRelay(entry,kind) then entries[k]=nil; scheduled[k]=nil end
@@ -598,8 +578,6 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
         if not payload or comm:SendProtocol('WORELAY',payload) then relayDirty[relayKey]=nil end
     end
     pumpRelay(resultDirty,scope.orderResults,'WORESULT','result',resultPayload)
-    pumpRelay(actionRelayDirty,scope.orderActionRelays,'WOACT','action',function(e) return codec._pack({e.owner,e.id,e.actor,e.action,string.format('%.0f',e.version),e.assignment}) end)
-    pumpRelay(paymentRelayDirty,scope.orderPaymentRelays,'WOPAYR','payment',function(e) return codec._pack({e.owner,e.id,e.actor,e.assignment,e.amount}) end)
     pumpRelay(resultRelayDirty,scope.orderResultRelays,'WORESR','result',resultPayload)
 end) end
 

@@ -189,6 +189,51 @@ def test_orders():
     ''')
 
 
+def test_relayed_actions_cannot_impersonate_worker():
+    alice = client('Alice')
+    tick(alice)
+    alice.execute('''
+        OldKraken.WorkshopOrders:Show()
+        local f=OldKrakenWorkshopOrdersFrame
+        f.item:SetText('Security potion')
+        f.reward:SetText('5')
+        selectOption(OldKrakenOrderProfession,171)
+        click('Опублікувати')
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        for k,v in pairs(s.orderOwners['Alice Mon']) do orderKey=k; order=v end
+        assert(order and order.status=='open')
+
+        handlers.WOREQ('Bob Mon','GUILD',OldKraken.GroupFinder._pack({order.owner,order.id,'offer','1','0'}))
+        OldKraken.WorkshopOrders:Show(orderKey)
+        local choose=OldKrakenWorkshopOrdersFrame.candidates[1].choose
+        choose.scripts.OnClick(choose)
+        assert(order.status=='assigned' and order.worker=='Bob Mon')
+        assignment=order.assignment
+        revision=order.rev
+        wasCandidate=order.candidates['Bob Mon']
+        paid=order.paidByWorker or 0
+
+        local forgedAction=OldKraken.GroupFinder._pack({order.owner,order.id,'Bob Mon','withdraw','99',assignment})
+        handlers.WOACT('Mallory Mon','GUILD',forgedAction)
+        assert(order.status=='assigned' and order.worker=='Bob Mon' and order.rev==revision)
+        assert(order.candidates['Bob Mon']==wasCandidate)
+
+        local forgedPayment=OldKraken.GroupFinder._pack({order.owner,order.id,'Bob Mon',assignment,'1000'})
+        handlers.WOPAYR('Mallory Mon','GUILD',forgedPayment)
+        assert((order.paidByWorker or 0)==paid and order.rev==revision, 'forged relay payment changed order state')
+
+        handlers.WOPAY('Bob Mon','GUILD',OldKraken.GroupFinder._pack({order.owner,order.id,assignment,'1000'}))
+        assert(order.paidByWorker==1000 and order.rev==revision+1, 'direct worker payment was not applied')
+    ''')
+    carol = client('Carol')
+    carol.execute('''
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        handlers.WOREQ('Bob Mon','GUILD',OldKraken.GroupFinder._pack({'Alice Mon','order-id','offer','1','0'}))
+        handlers.WOPAY('Bob Mon','GUILD',OldKraken.GroupFinder._pack({'Alice Mon','order-id','1','1000'}))
+        assert(next(s.orderActionRelays)==nil and next(s.orderPaymentRelays)==nil)
+    ''')
+
+
 def test_incomplete_profession_scan():
     lua = client('Tester')
     tick(lua)
@@ -347,6 +392,7 @@ def test_embedded_orders():
 
 if __name__ == '__main__':
     test_orders()
+    test_relayed_actions_cannot_impersonate_worker()
     test_embedded_orders()
     test_incomplete_profession_scan()
     test_partial_recipe_scan_retains_records()
