@@ -1147,8 +1147,27 @@ local function paintAlertRoster(group)
             control.label=control:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
             control.label:SetPoint('TOPLEFT',control,'TOPLEFT',0,-33); control.label:SetSize(86,14); control.label:SetJustifyH('CENTER'); control.label:SetWordWrap(false)
             control:RegisterForClicks('LeftButtonUp','RightButtonUp')
-            control:SetScript('OnClick',function(_,mouseButton)
+            control:SetScript('OnClick',function(self,mouseButton)
                 if GameTooltip then GameTooltip:Hide() end
+                if mouseButton=='LeftButton' and self and not self.occupied then
+                    local key=groupAlert.groupKey
+                    local current=key and Finder.groups[key]
+                    if not current or current.closed then
+                        print('Old Kraken: набір уже недоступний.'); return
+                    end
+                    if Finder.pending[key]=='pending' then
+                        print('Old Kraken: заявку вже подано; очікуйте рішення автора.'); return
+                    end
+                    if Finder:Apply(current.owner,current.id,self.role) then
+                        Finder:Changed()
+                        self.label:SetText('Заявку подано')
+                        groupAlert.alertSubtitle:SetText('Заявку на роль '..roleLabel(self.role)..' надіслано.\nОчікуйте рішення автора збору.')
+                        groupAlert.remaining=ALERT_DURATION; groupAlert:SetAlpha(1)
+                    else
+                        print('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.')
+                    end
+                    return
+                end
                 local click=groupAlert:GetScript('OnClick'); if click then click(groupAlert,mouseButton) end
             end)
             control:RegisterForDrag('LeftButton')
@@ -1177,6 +1196,7 @@ local function paintAlertRoster(group)
                 control.label:SetText(member or roleLabel(slot.role))
                 control.label:SetTextColor(member and 0.92 or 0.6,member and 0.95 or 0.65,member and 1 or 0.7)
                 control.tooltipText=(member or 'Вільне місце')..'\n'..roleLabel(displayedRole)..' · '..state
+                if not member then control.tooltipText=control.tooltipText..'\nЛівий клік — подати заявку на цю роль.' end
             end
         end
     end
@@ -1267,7 +1287,11 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
             if alertKind == 'request' then showRequests() end
         end)
         groupAlert:SetScript('OnUpdate', function(self, elapsed)
-            if self.dragging then return end
+            if self.dragging or self:IsMouseOver() then
+                self.remaining=ALERT_DURATION
+                self:SetAlpha(1)
+                return
+            end
             self.remaining = (self.remaining or 0) - elapsed
             if self.remaining <= ALERT_FADE_DURATION then
                 self:SetAlpha(math.max(0, self.remaining / ALERT_FADE_DURATION))
