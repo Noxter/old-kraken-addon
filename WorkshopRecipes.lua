@@ -795,6 +795,12 @@ local function switchTab(nextTab)
     if nextTab=='recipes' and not professionContext then addCached('',textFilter(saved.query)) end
     render()
 end
+local function readableFont(text,size,spacing)
+    local font=text:GetFont()
+    if font then text:SetFont(font,size,'OUTLINE') end
+    text:SetShadowColor(0,0,0,1); text:SetShadowOffset(1,-1)
+    if spacing then text:SetSpacing(spacing) end
+end
 local function createWindow(parent)
     local f
     if parent then
@@ -903,7 +909,7 @@ local function createWindow(parent)
         place(f.onlineOnly,490,-62,175,26); place(f.pickProfession,474,-59)
         place(f.count,20,-96)
         for i,row in ipairs(rows) do
-            place(row,20,-116-(i-1)*35,450,33)
+            place(row,20,-116-(i-1)*35,450,34)
             row.icon:SetSize(27,27)
             row.name:ClearAllPoints(); row.name:SetPoint('TOPLEFT',row,'TOPLEFT',37,-4); row.name:SetWidth(403)
             row.meta:ClearAllPoints(); row.meta:SetPoint('BOTTOMLEFT',row,'BOTTOMLEFT',37,4); row.meta:SetWidth(403)
@@ -921,6 +927,17 @@ local function createWindow(parent)
         place(f.status,20,-506); f.status:SetWidth(560)
         place(f.cancelPick,680,-497,160,24)
     end
+    for _,row in ipairs(rows) do
+        readableFont(row.name,parent and 14 or 12)
+        readableFont(row.meta,parent and 12 or 10)
+    end
+    readableFont(f.detailTitle,16,2)
+    f.detailTitle:SetHeight(48)
+    readableFont(f.detailInfo,14,3)
+    readableFont(f.detailReagents,13,3)
+    readableFont(f.searchLabel,13)
+    readableFont(f.count,12)
+    if parent then readableFont(f.context,14) end
     f.cancelPick:Hide()
     if not parent then f:SetScript('OnHide',function() Recipes:CancelPicker() end) end
     f:Hide(); return f

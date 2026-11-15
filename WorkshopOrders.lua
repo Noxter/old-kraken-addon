@@ -25,6 +25,12 @@ local saveDraft,restoreDraft,clearDraft
 local restoringDraft=false
 local recipePlaceholder='Обрати рецепт'
 
+local function readableFont(text,size,spacing)
+    local font=text:GetFont()
+    if font then text:SetFont(font,size,'OUTLINE') end
+    text:SetShadowColor(0,0,0,1); text:SetShadowOffset(1,-1)
+    if spacing then text:SetSpacing(spacing) end
+end
 local function textOK(s,min,max) return type(s)=='string' and #s>=min and #s<=max and not s:find('[%z\1-\31\127]') end
 local function int(n,min,max) return type(n)=='number' and n==n and n%1==0 and n>=min and n<=max end
 local function key(owner,id) return owner..'\001'..id end
@@ -853,6 +859,7 @@ refresh=function()
                     row=CreateFrame('Frame',nil,window.candidateContent); row:SetSize(330,46)
                     row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(200,18); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
                     row.status=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); row.status:SetPoint('TOPLEFT',row,'TOPLEFT',0,-18); row.status:SetSize(200,16); row.status:SetJustifyH('LEFT'); row.status:SetWordWrap(false)
+                    readableFont(row.label,14); readableFont(row.status,12)
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(200,34); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.playerText then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.playerText); GameTooltip:AddLine(self.statusText,1,1,1,true); GameTooltip:Show() end end)
                     row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
@@ -919,7 +926,10 @@ local function createWindow(parent)
         card.delete:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити замовлення'); GameTooltip:Show() end end)
         card.delete:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         card.delete:Hide()
+        readableFont(card.title,embedded and 14 or 13)
+        readableFont(card.meta,embedded and 12 or 11)
         card.reward=label('GameFontHighlight',embedded and -57 or -42); card.state=label('GameFontNormal',embedded and -82 or -59)
+        readableFont(card.reward,13); readableFont(card.state,13)
         card.offer=button(card,'Запропонувати допомогу',8,embedded and -150 or -104,203,function(self)
             local k=self:GetParent().entryKey
             if not k or not intent(k,'offer') then showError() end
@@ -943,6 +953,7 @@ local function createWindow(parent)
         end)
         card.applicants=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
         card.applicants:SetPoint('TOPLEFT',card,'TOPLEFT',8,embedded and -112 or -80); card.applicants:SetWidth(203); card.applicants:SetJustifyH('LEFT'); card.applicants:SetWordWrap(false)
+        readableFont(card.applicants,12)
         card.menu=CreateFrame('Frame','OldKrakenOrderCardMenu'..i,card,'UIDropDownMenuTemplate')
         UIDropDownMenu_Initialize(card.menu,function(menu,level)
             local target=menu.orderKey; local o=target and own[target]
@@ -999,6 +1010,7 @@ local function createWindow(parent)
     local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-105)); detailsScroll:SetSize(350,embedded and 225 or 110); f.detailsScroll=detailsScroll
     f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(340,embedded and 225 or 110); detailsScroll:SetScrollChild(f.detailsContent)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(340); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    readableFont(f.details,14,3)
     f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(embedded and -342 or -225))
     f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(embedded and -362 or -244)); f.candidateScroll:SetSize(350,embedded and 116 or 96)
     f.candidateContent=CreateFrame('Frame',nil,f.candidateScroll); f.candidateContent:SetSize(330,96); f.candidateScroll:SetScrollChild(f.candidateContent); f.candidates={}
