@@ -23,6 +23,7 @@ local chosenRecipe
 local refresh
 local saveDraft,restoreDraft,clearDraft
 local restoringDraft=false
+local recipePlaceholder='Обрати рецепт'
 
 local function textOK(s,min,max) return type(s)=='string' and #s>=min and #s<=max and not s:find('[%z\1-\31\127]') end
 local function int(n,min,max) return type(n)=='number' and n==n and n%1==0 and n>=min and n<=max end
@@ -621,9 +622,10 @@ end
 saveDraft=function()
     if restoringDraft or not active or not scope or not identity or not window or not window.orderForm then return end
     local form=window.orderForm
-    scope.orderDrafts[identity]={item=form.item:GetText() or '',quantity=form.quantity:GetText() or '',
+    local item=form.item:GetText() or ''
+    scope.orderDrafts[identity]={item=item==recipePlaceholder and '' or item,quantity=form.quantity:GetText() or '',
         reward=form.reward:GetText() or '',note=form.note:GetText() or '',profession=profession,
-        materials=materials,deadline=deadline,recipe=chosenRecipe and {item=chosenRecipe.item,recipe=chosenRecipe.recipe} or nil}
+        materials=materials,deadline=deadline,recipe=chosenRecipe and {item=chosenRecipe.item,recipe=chosenRecipe.recipe,owner=chosenRecipe.owner} or nil}
 end
 restoreDraft=function()
     if not active or not window or not window.orderForm then return end
@@ -634,11 +636,11 @@ restoreDraft=function()
     profession=professionNames[draft.profession] and draft.profession or 0
     materials=materialNames[draft.materials] and draft.materials or 'customer'
     deadline=deadlineNames[draft.deadline] and draft.deadline or 86400
-    form.item:SetText(value(draft.item,'')); form.quantity:SetText(value(draft.quantity,'1'))
+    local item=value(draft.item,''); form.item:SetText(item~='' and item or (window.embedded and recipePlaceholder or '')); form.quantity:SetText(value(draft.quantity,'1'))
     form.reward:SetText(value(draft.reward,'0')); form.note:SetText(value(draft.note,''))
     local recipe=draft.recipe
     chosenRecipe=type(recipe)=='table' and int(recipe.item,0,100000000) and int(recipe.recipe,1,100000000)
-        and {item=recipe.item,recipe=recipe.recipe} or nil
+        and {item=recipe.item,recipe=recipe.recipe,owner=nameOK(recipe.owner) and recipe.owner or nil} or nil
     UIDropDownMenu_SetText(window.professionMenu,professionNames[profession] or 'Оберіть професію')
     UIDropDownMenu_SetText(window.materialsMenu,materialNames[materials])
     UIDropDownMenu_SetText(window.deadlineMenu,deadlineNames[deadline])
@@ -787,11 +789,14 @@ refresh=function()
     local o=selected and get(selected)
     local pending=selected and intents[selected]
     if o then
-        local state=displayStatus(o)=='expired' and (o.status=='assigned' and 'У роботі · прострочено' or 'Термін минув') or statusNames[o.status]
+        local statusKey=displayStatus(o)
+        local state=statusKey=='expired' and (o.status=='assigned' and 'У роботі · прострочено' or 'Термін минув') or statusNames[o.status]
+        local stateColor=statusColors[statusKey] or statusColors.expired
+        local coloredState=string.format('|cff%02x%02x%02x%s|r',math.floor(stateColor[1]*255+0.5),math.floor(stateColor[2]*255+0.5),math.floor(stateColor[3]*255+0.5),state)
         local hasRecipe=(o.itemID or 0)>0 or (o.recipeID or 0)>0
         local masters=hasRecipe and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:FindMasters(o.itemID or 0,o.recipeID or 0) or {}
         local names={}; for i=1,math.min(#masters,3) do names[#names+1]=masters[i].name..' ('..date('%d.%m',masters[i].seen)..(GetServerTime()-masters[i].seen>604800 and ' · застаріло' or '')..')' end
-        local known=hasRecipe and ('\nВідомі майстри: '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\nПошук за професією; знання рецепта не підтверджено.'
+        local known=hasRecipe and ('\n|cff9ba9bcВідомі майстри:|r '..(#names>0 and table.concat(names,', ') or 'немає даних')..(#masters>3 and (' +'..(#masters-3)) or '')) or '\n|cffffc36bПошук за професією; знання рецепта не підтверджено.|r'
         local tally=scope and scope.orderDeliveryTallies[identity] and scope.orderDeliveryTallies[identity][selected]
         local progress=''
         if type(tally)=='table' and tally.worker==o.worker and (tally.assignment or 0)==(o.assignment or 0) then
@@ -802,11 +807,15 @@ refresh=function()
                 end
             end; table.sort(mats)
             local money=tonumber(tally.money) or 0
-            progress='\nОбмін: речі '..tostring(tally.items or 0)..'/'..o.quantity..' · оплата '..math.floor(money/10000)..'з '..math.floor(money%10000/100)..'с '..(money%100)..'м / '..o.reward..'з'
-            if #mats>0 then progress=progress..'\nМатеріали: '..table.concat(mats,', ') end
+            progress='\n|cff9ba9bcОбмін:|r речі '..tostring(tally.items or 0)..'/'..o.quantity..' · оплата '..math.floor(money/10000)..'з '..math.floor(money%10000/100)..'с '..(money%100)..'м / '..o.reward..'з'
+            if #mats>0 then progress=progress..'\n|cff9ba9bcМатеріали:|r '..table.concat(mats,', ') end
         end
-        window.details:SetText(o.item..' ×'..o.quantity..'\n'..professionNames[o.profession]..' · '..state..'\nЗамовник: '..o.owner..(o.relayed and '\nСтан отримано через гільдію; може бути застарілим.' or '')..'\nВинагорода: '..o.reward..' зол. · Ресурси: '..materialNames[o.materials]..'\nТермін: '..date('%d.%m.%Y %H:%M',o.deadline)..'\nМайстер: '..(o.worker or 'не обрано')..known..progress..'\n'..o.note..(pending and (pending.receiptRev and '\nПідтверджено; очікується оновлення стану.' or '\nОчікується підтвердження замовника; дія передається через гільдію.') or ''))
-        window.detailsContent:SetHeight(math.max(132,window.details:GetStringHeight()+8))
+        local deadlineColor=statusKey=='expired' and '|cffff7770' or '|cffffffff'
+        local note=o.note~='' and ('\n\n|cff9ba9bcКоментар:|r '..o.note) or ''
+        window.details:SetText('|cffffd35a'..o.item..' ×'..o.quantity..'|r\n|cff9ba9bc'..professionNames[o.profession]..'|r · '..coloredState..'\n\n|cff9ba9bcЗамовник:|r |cff9bcaff'..o.owner..'|r'..(o.relayed and '\n|cffffc36bДані через гільдію; можуть бути застарілими.|r' or '')..'\n|cff9ba9bcМайстер:|r '..(o.worker and ('|cff9bcaff'..o.worker..'|r') or '|cff9ba9bcне обрано|r')..'\n\n|cff9ba9bcВинагорода:|r |cffffd35a'..o.reward..' зол.|r\n|cff9ba9bcРесурси:|r '..materialNames[o.materials]..'\n|cff9ba9bcТермін:|r '..deadlineColor..date('%d.%m.%Y %H:%M',o.deadline)..'|r'..known..progress..note..(pending and (pending.receiptRev and '\n\n|cffffc36bПідтверджено; очікується оновлення стану.|r' or '\n\n|cffffc36bОчікується підтвердження замовника; дія передається через гільдію.|r') or ''))
+        local detailsHeight=o.owner==identity and o.status=='open' and 110 or 215
+        window.detailsScroll:SetSize(340,detailsHeight)
+        window.detailsContent:SetHeight(math.max(detailsHeight,window.details:GetStringHeight()+8))
         local isOwner=o.owner==identity
         window.offer:SetShown(not isOwner and o.status=='open' and o.deadline>=GetServerTime() and not o.candidates[identity] and not pending)
         window.withdraw:SetShown(not isOwner and not pending and ((o.status=='open' and o.candidates[identity]) or (o.status=='assigned' and o.worker==identity)))
@@ -831,7 +840,7 @@ refresh=function()
             window.candidateContent:SetHeight(math.max(90,#names*30)); window.candidateTitle:Show(); window.candidateScroll:Show()
         else window.candidateTitle:Hide(); window.candidateScroll:Hide() end
     else
-        window.details:SetText('Оберіть замовлення зі списку.'); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.reopen:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
+        window.details:SetText('|cff9ba9bcОберіть замовлення зі списку.|r'); window.detailsScroll:SetSize(340,215); window.detailsContent:SetHeight(215); window.offer:Hide(); window.withdraw:Hide(); window.delivered:Hide(); window.finish:Hide(); window.cancel:Hide(); window.reopen:Hide(); window.masters:Hide(); window.candidateTitle:Hide(); window.candidateScroll:Hide()
     end
 end
 local function createWindow(parent)
@@ -847,6 +856,7 @@ local function createWindow(parent)
         f:SetMovable(true); f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart',f.StartMoving); f:SetScript('OnDragStop',f.StopMovingOrSizing)
         OldKraken.UIStyle.Window(f)
     end
+    f.embedded=embedded
     f:SetSize(900,embedded and 590 or 650); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(not embedded)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Замовлення') end
     local views={all='Усі замовлення',available='Доступні мені',mine='Мої замовлення',work='Моя робота'}
@@ -950,8 +960,9 @@ local function createWindow(parent)
     search:SetPoint('TOPLEFT',f,'TOPLEFT',265,y(-344)); search:SetSize(195,22); search:SetAutoFocus(false)
     search:SetScript('OnTextChanged',function(self) searchQuery=lower(self:GetText() or ''); offset=0; refresh() end)
     search:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
-    local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-80)); detailsScroll:SetSize(340,132)
-    f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(330,132); detailsScroll:SetScrollChild(f.detailsContent)
+    local detailsHeader=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); detailsHeader:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-80)); detailsHeader:SetText('Деталі замовлення')
+    local detailsScroll=CreateFrame('ScrollFrame','OldKrakenOrderDetailsScroll',f,'UIPanelScrollFrameTemplate'); detailsScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-105)); detailsScroll:SetSize(340,110); f.detailsScroll=detailsScroll
+    f.detailsContent=CreateFrame('Frame',nil,detailsScroll); f.detailsContent:SetSize(330,110); detailsScroll:SetScrollChild(f.detailsContent)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT'); f.details:SetWidth(330); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
     f.candidateTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); f.candidateTitle:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-225))
     f.candidateScroll=CreateFrame('ScrollFrame','OldKrakenOrdersCandidatesScroll',f,'UIPanelScrollFrameTemplate'); f.candidateScroll:SetPoint('TOPLEFT',f,'TOPLEFT',495,y(-244)); f.candidateScroll:SetSize(340,90)
@@ -975,25 +986,32 @@ local function createWindow(parent)
     local function formY(standalone,compact) return embedded and compact or standalone end
     local heading=form:CreateFontString(nil,'OVERLAY','GameFontNormal')
     heading:SetPoint('TOPLEFT',form,'TOPLEFT',18,formY(-395,-38)); heading:SetText('Нове замовлення')
-    form.item=input(form,'Предмет або посилання',18,formY(-420,-64),embedded and 350 or 300,'')
+    local professionMenu
+    local function chooseRecipe()
+        if not OldKraken.WorkshopRecipes then showError(); return end
+        OldKraken.WorkshopRecipes:Choose(function(r,owner)
+            if not nameOK(owner) or owner==identity or not professionNames[r.profession] then return end
+            profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
+            form.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe,owner=owner}
+            saveDraft()
+        end,profession)
+    end
+    if embedded then
+        local recipeLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); recipeLabel:SetPoint('TOPLEFT',form,'TOPLEFT',18,formY(-420,-64)); recipeLabel:SetText('Рецепт')
+        form.item=button(form,recipePlaceholder,18,formY(-438,-82),350,chooseRecipe)
+    else
+        form.item=input(form,'Предмет або посилання',18,formY(-420,-64),300,'')
+        form.item:SetScript('OnTextChanged',function() if not restoringDraft then chosenRecipe=nil; saveDraft() end end)
+        button(form,'Обрати рецепт',560,formY(-438,-64),160,chooseRecipe)
+    end
     form.quantity=input(form,'Кількість',embedded and 380 or 335,formY(-420,-64),65,'1')
     form.reward=input(form,'Винагорода (зол.)',embedded and 465 or 420,formY(-420,-64),embedded and 90 or 120,'0')
-    form.item:SetScript('OnTextChanged',function() if not restoringDraft then chosenRecipe=nil; saveDraft() end end)
     form.note=input(form,'Коментар',18,formY(-475,-115),360,'')
     for _,field in ipairs({form.quantity,form.reward,form.note}) do field:SetScript('OnTextChanged',saveDraft) end
     local professionChoices={[0]='Оберіть професію'}; for id,name in pairs(professionNames) do professionChoices[id]=name end
-    local professionMenu=dropdown(form,'OldKrakenOrderProfession',400,formY(-492,-132),embedded and 155 or 170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v then chosenRecipe=nil end; profession=v; saveDraft() end)
+    professionMenu=dropdown(form,'OldKrakenOrderProfession',400,formY(-492,-132),embedded and 155 or 170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v and chosenRecipe then chosenRecipe=nil; form.item:SetText(embedded and recipePlaceholder or '') end; profession=v; saveDraft() end)
     f.professionMenu=professionMenu
     f.orderForm=form
-    button(form,'Обрати рецепт',embedded and 570 or 560,formY(-438,-64),embedded and 130 or 160,function()
-        if not OldKraken.WorkshopRecipes then showError(); return end
-        OldKraken.WorkshopRecipes:Choose(function(r)
-            if not professionNames[r.profession] then return end
-            profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
-            form.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe}
-            saveDraft()
-        end)
-    end)
     local profLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); profLabel:SetPoint('TOPLEFT',form,'TOPLEFT',400,formY(-475,-115)); profLabel:SetText('Професія')
     f.materialsMenu=dropdown(form,'OldKrakenOrderMaterials',embedded and 570 or 580,formY(-492,-132),embedded and 130 or 140,{'customer','crafter','mixed'},materialNames,function() return materials end,function(v) materials=v; saveDraft() end)
     local matLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); matLabel:SetPoint('TOPLEFT',form,'TOPLEFT',embedded and 570 or 580,formY(-475,-115)); matLabel:SetText('Ресурси')
@@ -1001,6 +1019,8 @@ local function createWindow(parent)
     local dueLabel=form:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); dueLabel:SetPoint('TOPLEFT',form,'TOPLEFT',18,formY(-533,-180)); dueLabel:SetText('Термін')
     button(form,'Опублікувати',embedded and 530 or 650,formY(-548,-197),160,function()
         if not professionNames[profession] then print('Old Kraken: оберіть професію або рецепт.'); return end
+        if form.item:GetText()==recipePlaceholder or form.item:GetText()=='' then print('Old Kraken: оберіть рецепт для замовлення.'); return end
+        if chosenRecipe and chosenRecipe.owner==identity then print('Old Kraken: для замовлення оберіть рецепт іншого майстра.'); return end
         if create(form.item:GetText(),form.quantity:GetText(),form.reward:GetText(),form.note:GetText(),chosenRecipe) then
             clearDraft()
             if embedded and OldKraken.Workshop then OldKraken.Workshop:Show('orders') end
@@ -1023,11 +1043,14 @@ function Orders:Show(k)
     window:Show(); refresh()
 end
 function Orders:SupportsProfession(id) return professionNames[id]~=nil end
-function Orders:ShowRecipe(r)
+function Orders:ShowRecipe(r,owner)
     if type(r)~='table' or not professionNames[r.profession] or not int(r.recipe,1,100000000) or not int(r.item,0,100000000) then
         print('Old Kraken: замовлення для цієї професії недоступне.'); return
     end
     connect(); if not active then return end
+    if not nameOK(owner) or owner==identity then
+        print('Old Kraken: для замовлення оберіть рецепт іншого майстра.'); return
+    end
     if OldKraken.UIHub and OldKraken.Workshop then
         OldKraken.UIHub:ShowPage('workshop')
     else self:Show() end
@@ -1037,7 +1060,7 @@ function Orders:ShowRecipe(r)
     profession=r.profession
     UIDropDownMenu_SetText(window.professionMenu,professionNames[profession])
     form.item:SetText(r.product~='' and r.product or r.name)
-    chosenRecipe={item=r.item,recipe=r.recipe}
+    chosenRecipe={item=r.item,recipe=r.recipe,owner=owner}
     saveDraft()
     if not OldKraken.UIHub then form:Raise() end
 end

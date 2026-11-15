@@ -12,6 +12,7 @@ local forgetChecks,lastScanProfession={},nil
 local frame,rows,offset,resultSet=nil,{},0,{}
 local PAGE_SIZE=10
 local selectRecipe,selectedEntry,viewOwner
+local pickerProfession=0
 local professionContext, selectedMaster, tab, mastersOnline = nil, nil, 'recipes', false
 local restoringView=false
 local resultQuery
@@ -325,7 +326,7 @@ local function matchesFilter(r,filter)
     filter=filter:match('item:(%d+)') or filter
     return lower(r.name):find(filter,1,true)~=nil or lower(r.product):find(filter,1,true)~=nil or tostring(r.item):find(filter,1,true)~=nil
 end
-local function addCached(query,filter)
+local function addCached(query,filter,professionFilter)
     resultQuery=query
     resultSet={}
     local limit=query:match('^prof:%d+$') and 5000 or 500
@@ -335,7 +336,8 @@ local function addCached(query,filter)
             for _,r in pairs(items) do
                 if found>=limit then return end
                 resolveProduct(r)
-                if matches(r,query) and (not filter or matchesFilter(r,filter)) then
+                if matches(r,query) and (not filter or matchesFilter(r,filter)) and (not professionFilter or professionFilter==0 or r.profession==professionFilter)
+                    and (not selectRecipe or (OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession))) then
                     local key=name..'\001'..r.recipe
                     if not resultSet[key] then found=found+1 end
                     resultSet[key]={owner=name,record=r}
@@ -350,7 +352,7 @@ local function search(value)
     local q=item and ('item:'..item) or lower(value:match('^%s*(.-)%s*$'))
     if not safeText(q,3,80) then print('Old Kraken: введіть назву або посилання на предмет.'); return false end
     local now=GetTime()
-    offset=0; addCached(q)
+    offset=0; addCached(q,nil,selectRecipe and pickerProfession or nil)
     if now-lastQuery<10 then
         if activeQuery and activeQuery.query~=q then activeQuery=nil end
         changed(); print('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.'); return false
@@ -589,7 +591,7 @@ render=function()
     local mastersView=tab=='masters' and not selectRecipe
     local filter=textFilter(frame.query:GetText())
     if frame.TitleText then frame.TitleText:SetText(professionContext and ('Old Kraken — '..professionNames[professionContext]) or 'Old Kraken — Пошук рецептів') end
-    frame.searchLabel:SetText(mastersView and 'Пошук майстра за ім’ям' or 'Пошук рецепта або предмета')
+    frame.searchLabel:SetText(selectRecipe and 'Фільтр за професією' or (mastersView and 'Пошук майстра за ім’ям' or 'Пошук рецепта або предмета'))
     if professionContext then
         frame.status:SetText(viewOwner and ('Рецепти майстра: '..viewOwner..' · дані можуть бути неповними.') or 'Дані можуть бути неповними або застарілими.')
     end
@@ -601,6 +603,7 @@ render=function()
     if frame.embedded then frame.context:SetText(selectRecipe and 'Оберіть рецепт для замовлення' or (professionContext and professionNames[professionContext] or (mastersView and 'Усі професії' or 'Усі рецепти'))) end
     frame.masterRecipes:SetShown(mastersView and selectedMaster~=nil)
     frame.cancelPick:SetShown(selectRecipe~=nil)
+    frame.pickProfession:SetShown(selectRecipe~=nil)
     frame.onlineOnly:SetShown(mastersView and true or false)
     if mastersView then
         frame.onlineOnly:SetText(mastersOnline and 'Лише онлайн: так' or 'Лише онлайн: ні')
@@ -658,10 +661,13 @@ render=function()
     local byRecipe=not selectRecipe and not viewOwner and (professionContext or (activeQuery and activeQuery.query:match('^prof:%d+$')))
     for _,entry in pairs(resultSet) do
         if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
+            and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and matchesFilter(entry.record,filter) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
-                if not old or (online[entry.owner] and not online[old.owner]) or ((online[entry.owner] and true or false)==(online[old.owner] and true or false) and entry.record.seen>old.record.seen) then grouped[id]=entry end
+                local other=entry.owner~=identity
+                local oldOther=old and old.owner~=identity
+                if not old or (other and not oldOther) or (other==oldOther and ((online[entry.owner] and not online[old.owner]) or ((online[entry.owner] and true or false)==(online[old.owner] and true or false) and entry.record.seen>old.record.seen))) then grouped[id]=entry end
             else list[#list+1]=entry end
         end
     end
@@ -676,21 +682,21 @@ render=function()
             local r=entry.record; row.entry=entry
             row.icon:SetTexture(recipeIcon(r))
             row.name:SetText(r.product~='' and r.product or r.name)
-            row.meta:SetText((GetServerTime()-r.seen>604800 and '|cffffb347застаріло|r · ' or '')..playerLabel(entry.owner,classes)..' · '..professionNames[r.profession]..' · '..statusLabel(entry.owner,online))
+            row.meta:SetText((selectRecipe and entry.owner==identity and '|cffffb347Ваш рецепт|r · ' or '')..(GetServerTime()-r.seen>604800 and '|cffffb347застаріло|r · ' or '')..playerLabel(entry.owner,classes)..' · '..professionNames[r.profession]..' · '..statusLabel(entry.owner,online))
             if selectedEntry and selectedEntry.owner==entry.owner and selectedEntry.record.recipe==r.recipe then row:LockHighlight() else row:UnlockHighlight() end
             row:Show()
         else row.entry=nil; row:UnlockHighlight(); row:Hide() end
     end
     local entry=selectedEntry; local r=entry and entry.record
     frame.detailIcon:SetShown(r~=nil); frame.whisper:SetShown(r~=nil and entry.owner~=identity)
-    frame.order:SetShown(r~=nil and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false)
+    frame.order:SetShown(r~=nil and entry.owner~=identity and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false)
     if r then
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(r.product~='' and r.product or r.name)
         local masters=Recipes:FindMasters(r.item,r.recipe); local names={}
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
         for i=1,math.min(#masters,8) do local m=masters[i]; names[#names+1]=playerLabel(m.name,classes)..' · '..statusLabel(m.name,online)..(GetServerTime()-m.seen>604800 and ' · |cffffb347застаріло|r' or '') end
-        frame.detailInfo:SetText(professionNames[r.profession]..'\nЗбережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..'\n'..(#names>0 and table.concat(names,'\n') or 'Немає даних')..(#masters>8 and '\n…' or ''))
+        frame.detailInfo:SetText(professionNames[r.profession]..'\nЗбережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..'\n'..(#names>0 and table.concat(names,'\n') or 'Немає даних')..(#masters>8 and '\n…' or '')..(entry.owner==identity and '\n\nЦе ваш рецепт. Оберіть рецепт іншого майстра, щоб створити замовлення.' or ''))
         frame.detailReagents:SetText(reagentText(r))
     else
         frame.detailTitle:SetText('Оберіть рецепт'); frame.detailInfo:SetText('Перегляньте збережені рецепти або знайдіть предмет.'); frame.detailReagents:SetText('')
@@ -752,7 +758,7 @@ local function createWindow(parent)
     f.query:SetScript('OnTextChanged',function()
         if restoringView then return end
         selectedEntry=nil; selectedMaster=nil; offset=0
-        if tab~='masters' and not professionContext then addCached('',textFilter(f.query:GetText())) end
+        if tab~='masters' and not professionContext then addCached('',textFilter(f.query:GetText()),selectRecipe and pickerProfession or nil) end
         render()
     end)
     f.query:SetScript('OnEscapePressed',function(self) self:ClearFocus() end)
@@ -763,15 +769,29 @@ local function createWindow(parent)
     f.query:SetScript('OnEnterPressed',submitSearch)
     button(f,'Знайти',335,-74,105,submitSearch,'primary')
     f.onlineOnly=button(f,'Лише онлайн: ні',455,-74,160,function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end)
+    f.pickProfession=CreateFrame('Frame','OldKrakenRecipePickerProfession',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f.pickProfession)
+    f.pickProfession:SetPoint('TOPLEFT',f,'TOPLEFT',439,-71); UIDropDownMenu_SetWidth(f.pickProfession,160)
+    UIDropDownMenu_Initialize(f.pickProfession,function(_,level)
+        local ids={0}; for id in pairs(professionNames) do if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(id) then ids[#ids+1]=id end end
+        table.sort(ids,function(a,b) if a==b then return false elseif a==0 then return true elseif b==0 then return false end; return professionNames[a]<professionNames[b] end)
+        for _,id in ipairs(ids) do
+            local value=id; local info=UIDropDownMenu_CreateInfo(); info.text=value==0 and 'Усі професії' or professionNames[value]; info.value=value; info.checked=pickerProfession==value
+            info.func=function() pickerProfession=value; offset=0; UIDropDownMenu_SetText(f.pickProfession,info.text); addCached('',textFilter(f.query:GetText()),pickerProfession); render() end
+            UIDropDownMenu_AddButton(info,level)
+        end
+    end)
+    f.pickProfession:Hide()
     f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-104)
     for i=1,PAGE_SIZE do
         rows[i]=button(f,'',20,-125-(i-1)*26,410,function(self)
             f.infoScroll:SetVerticalScroll(0)
             if self.entry and tab=='masters' and not selectRecipe then selectedMaster=self.entry; render()
             elseif self.entry and selectRecipe then
+                if self.entry.owner==identity then print('Old Kraken: для замовлення оберіть рецепт іншого майстра.'); return end
+                local entry=self.entry
                 local callback=selectRecipe; Recipes:CancelPicker()
                 if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Back() else f:Hide() end
-                callback(self.entry.record)
+                callback(entry.record,entry.owner)
             elseif self.entry then selectedEntry=self.entry; render() end
         end)
         rows[i].icon=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].icon:SetSize(21,21); rows[i].icon:SetPoint('LEFT',rows[i],'LEFT',3,0)
@@ -788,7 +808,7 @@ local function createWindow(parent)
         local name=tab=='masters' and selectedMaster and selectedMaster.name or (selectedEntry and selectedEntry.owner)
         if name and name~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(name) end
     end)
-    f.order=button(f,'Замовити',570,-410,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record) end end,'primary')
+    f.order=button(f,'Замовити',570,-410,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record,selectedEntry.owner) end end,'primary')
     f.masterRecipes=button(f,'Рецепти майстра',570,-410,160,function()
         if not selectedMaster then return end
         if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Navigate('recipes',true) end
@@ -815,7 +835,7 @@ function Recipes:CreatePanel(parent)
 end
 function Recipes:RefreshPanel() render() end
 function Recipes:IsPicking() return selectRecipe~=nil end
-function Recipes:CancelPicker() selectRecipe=nil end
+function Recipes:CancelPicker() selectRecipe=nil; pickerProfession=0 end
 function Recipes:GetTab() return selectRecipe and 'recipes' or tab end
 function Recipes:SelectTab(nextTab)
     if nextTab~='recipes' and nextTab~='masters' then return end
@@ -945,21 +965,15 @@ function Recipes:ShowMemberProfession(name,profession)
         render()
     end
 end
-function Recipes:Choose(callback)
+function Recipes:Choose(callback,profession)
     if type(callback)~='function' then return end
     self:Show(); if not active or not frame then return end
     selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; resultQuery=nil; activeQuery=nil; offset=0
+    pickerProfession=professionNames[profession] and profession or 0
     restoringView=true; frame.query:SetText(''); restoringView=false
-    for name,items in pairs(people) do
-        if safeText(name,1,128) and type(items)=='table' then
-            for _,r in pairs(items) do
-                if count(resultSet)>=500 then break end
-                if validRecord(r) then resolveProduct(r); resultSet[name..'\001'..r.recipe]={owner=name,record=r} end
-            end
-        end
-        if count(resultSet)>=500 then break end
-    end
-    frame.status:SetText('Оберіть предмет або рецепт кліком. За потреби знайдіть інший за назвою.')
+    UIDropDownMenu_SetText(frame.pickProfession,pickerProfession==0 and 'Усі професії' or professionNames[pickerProfession])
+    addCached('',nil,pickerProfession)
+    frame.status:SetText('Оберіть рецепт іншого майстра. Власні рецепти позначено у списку.')
     frame:Raise(); render()
 end
 function Recipes:FindMasters(itemID,recipeID)
