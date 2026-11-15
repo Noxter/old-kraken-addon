@@ -65,7 +65,7 @@ function methods:GetFontString()
     return fontString
 end
 local meta = {__index=function(_, k)
-    if k == 'TitleText' or k == 'CloseButton' or k == 'template' then return nil end
+    if k == 'TitleText' or k == 'CloseButton' or k == 'template' or k == 'activityPicker' then return nil end
     return methods[k] or function() end
 end}
 createdFrames = {}
@@ -161,18 +161,26 @@ assert(#ui.visible == 1 and hasTitle('Tank needs healer'))
 assert(not ui.previousPageButton:IsShown() and not ui.nextPageButton:IsShown() and not ui.listPage:IsShown())
 
 selectTab('create')
+local function selectActivityCard(value)
+    ui.dungeonButton.scripts.OnClick()
+    local picker=assert(ui.activityPicker)
+    for _,card in ipairs(picker.cards) do
+        if card.entry and card.entry.value==value then card.scripts.OnClick(card); assert(not picker:IsShown()); return end
+    end
+    error('Activity card not found: '..value)
+end
 ui.titleBox:SetText('')
 ui.descriptionBox:SetText('Fresh listing')
 ui.maxBox:SetText('5')
 ui.minBox:SetText('20')
 ui.maxLevelBox:SetText('30')
-selectDropdown(ui.dungeonButton, 'rfc')
+selectActivityCard('rfc')
 local firstDungeonTitle = ui.titleBox:GetText()
-selectDropdown(ui.dungeonButton, 'wc')
+selectActivityCard('wc')
 assert(firstDungeonTitle == 'Вогненна прірва (RFC)')
 assert(ui.titleBox:GetText() == 'Печери Стогонів (WC)')
 ui.titleBox:SetText('Created from form')
-selectDropdown(ui.dungeonButton, 'rfc')
+selectActivityCard('rfc')
 assert(ui.titleBox:GetText() == 'Created from form')
 ui.createButton.scripts.OnClick()
 local created
