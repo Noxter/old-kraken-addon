@@ -43,16 +43,36 @@ local copyFrame, memberMenu
 local function CopyName(name)
     if not copyFrame then
         copyFrame = CreateFrame('Frame', 'OldKrakenCopyNameFrame', UIParent, 'BasicFrameTemplateWithInset')
-        copyFrame:SetSize(330, 100); copyFrame:SetPoint('CENTER'); copyFrame:SetFrameStrata('DIALOG')
+        copyFrame:SetSize(400, 138); copyFrame:SetPoint('CENTER')
+        OldKraken.UIStyle.Window(copyFrame)
+        copyFrame:SetFrameStrata('FULLSCREEN_DIALOG'); copyFrame:SetFrameLevel(100)
+        copyFrame:EnableMouse(true)
         table.insert(UISpecialFrames, 'OldKrakenCopyNameFrame')
         if copyFrame.TitleText then copyFrame.TitleText:SetText("Скопіювати ім'я — Ctrl+C") end
         local edit = CreateFrame('EditBox', nil, copyFrame, 'InputBoxTemplate')
-        edit:SetSize(280, 26); edit:SetPoint('CENTER'); edit:SetAutoFocus(false)
+        OldKraken.UIStyle.Input(edit)
+        edit:SetSize(350, 28); edit:SetPoint('TOPLEFT',copyFrame,'TOPLEFT',24,-67); edit:SetAutoFocus(false)
+        edit:SetTextInsets(6,6,0,0)
+        local hint=copyFrame:CreateFontString(nil,'OVERLAY','GameFontHighlight')
+        hint:SetPoint('TOPLEFT',copyFrame,'TOPLEFT',20,-38)
+        hint:SetText('Ім’я виділено: Ctrl+C — скопіювати, Esc — закрити')
         edit:SetScript('OnEscapePressed', function() copyFrame:Hide() end)
         edit:SetScript('OnEnterPressed', function() copyFrame:Hide() end)
+        edit:SetScript('OnEditFocusGained',function(self) self:HighlightText() end)
+        edit:SetScript('OnMouseUp',function(self) self:SetFocus(); self:HighlightText() end)
+        copyFrame:SetScript('OnHide',function() edit:ClearFocus() end)
         copyFrame.edit = edit
     end
+    copyFrame:SetFrameStrata('FULLSCREEN_DIALOG')
     copyFrame:Show(); copyFrame.edit:SetText(name); copyFrame.edit:SetFocus(); copyFrame.edit:HighlightText()
+    -- Dropdown cleanup may change focus after its action callback returns.
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0,function()
+            if copyFrame:IsShown() and copyFrame.edit:GetText()==name then
+                copyFrame.edit:SetFocus(); copyFrame.edit:HighlightText()
+            end
+        end)
+    end
 end
 
 local function ShowMemberMenu(row)
