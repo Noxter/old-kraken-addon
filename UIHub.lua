@@ -17,12 +17,40 @@ Hub.geometry = {
     titleRowTop = PAD_TOP, titleHeight = TITLE_HEIGHT, spacing = SPACING,
 }
 
+local NAV_ACTIVE_BG = {0.102, 0.141, 0.302, 1}
+local NAV_ACTIVE_EDGE = {0.478, 0.541, 0.980, 1}
+local NAV_INACTIVE_BG = {0.08, 0.095, 0.125, 1}
+local NAV_INACTIVE_EDGE = {0.20, 0.23, 0.29, 0.85}
+
 local function updateButtons()
+    local activeLabel = colors.white or {1, 1, 1}
+    local inactiveLabel = colors.mutedText or {0.63, 0.67, 0.73}
     for key, button in pairs(Hub.buttons) do
         local selected = key == Hub.currentPage
-        button.activeBar:SetShown(selected)
-        local labelColor = selected and colors.brandGold or colors.text
-        local shortcutColor = selected and colors.brandGold or colors.mutedText
+        button.activeBar:Hide()
+        local fillColor = selected and (colors.sel or NAV_ACTIVE_BG) or (colors.button or NAV_INACTIVE_BG)
+        local edgeColor = selected and (colors.selEdge or NAV_ACTIVE_EDGE) or (colors.buttonEdge or NAV_INACTIVE_EDGE)
+        if button.activeFillParts then
+            for _, t in ipairs(button.activeFillParts) do
+                t:SetVertexColor(fillColor[1], fillColor[2], fillColor[3], fillColor[4] or 1)
+                t.color = fillColor
+                t:SetShown(selected)
+            end
+            for _, t in ipairs(button.activeRingParts) do
+                t:SetVertexColor(edgeColor[1], edgeColor[2], edgeColor[3], edgeColor[4] or 1)
+                t.color = edgeColor
+                t:SetShown(selected)
+            end
+        elseif button.activeFill then
+            button.activeFill:SetColorTexture(fillColor[1], fillColor[2], fillColor[3], fillColor[4] or 1)
+            button.activeFill:SetShown(selected)
+            for _, edge in ipairs(button.activeEdges or {}) do
+                edge:SetColorTexture(edgeColor[1], edgeColor[2], edgeColor[3], edgeColor[4] or 1)
+                edge:SetShown(selected)
+            end
+        end
+        local labelColor = selected and activeLabel or inactiveLabel
+        local shortcutColor = selected and colors.brandGold or inactiveLabel
         button.label:SetTextColor(labelColor[1], labelColor[2], labelColor[3])
         button.shortcut:SetTextColor(shortcutColor[1], shortcutColor[2], shortcutColor[3])
     end
@@ -30,22 +58,49 @@ end
 
 local function createPageButton(page)
     local button = CreateFrame('Button', nil, Hub.frame, 'UIPanelButtonTemplate')
-    OldKraken.UIStyle.Button(button)
+    OldKraken.UIStyle.Button(button, nil, {rounded = true})
     button:SetSize(164, 39)
     button:SetPoint('TOPLEFT', Hub.frame, 'TOPLEFT', 14, -NAV_TOP - (page.index - 1) * NAV_STEP)
     button:SetScript('OnClick', function() Hub:ShowPage(page.key) end)
+
+    local base = 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\'
+    local function slice(file, layer, sublayer)
+        local parts = {}
+        for i, range in ipairs({{0, 0.25}, {0.25, 0.75}, {0.75, 1}}) do
+            local t = button:CreateTexture(nil, layer, nil, sublayer)
+            t:SetTexture(base .. file)
+            t:SetTexCoord(range[1], range[2], 0, 1)
+            t:SetPoint('TOP', button, 'TOP', 0, 0)
+            t:SetPoint('BOTTOM', button, 'BOTTOM', 0, 0)
+            if i == 1 then t:SetPoint('LEFT', button, 'LEFT', 0, 0); t:SetWidth(6)
+            elseif i == 3 then t:SetPoint('RIGHT', button, 'RIGHT', 0, 0); t:SetWidth(6)
+            else t:SetPoint('LEFT', parts[1], 'RIGHT', 0, 0); t:SetPoint('RIGHT', button, 'RIGHT', -6, 0) end
+            t:Hide()
+            parts[i] = t
+        end
+        return parts
+    end
+
+    button.activeFillParts = slice('PillFill.tga', 'BACKGROUND', 1)
+    button.activeRingParts = slice('PillRing.tga', 'BORDER', 1)
+    button.activeFill = button.activeFillParts[2]
+    button.activeEdges = button.activeRingParts
+    button.activeBorder = button.activeEdges[1]
 
     button.activeBar = button:CreateTexture(nil, 'ARTWORK')
     button.activeBar:SetPoint('TOPLEFT', button, 'TOPLEFT', 1, -6)
     button.activeBar:SetSize(3, 27)
     button.activeBar:SetColorTexture(unpack(colors.brandGold))
+    button.activeBar:Hide()
 
     button.shortcut = button:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(button.shortcut, 13) end
     button.shortcut:SetPoint('LEFT', button, 'LEFT', 12, 0)
     button.shortcut:SetWidth(24)
     button.shortcut:SetText(page.shortcut)
 
     button.label = button:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(button.label, 14) end
     button.label:SetPoint('LEFT', button, 'LEFT', 38, 0)
     button.label:SetJustifyH('LEFT')
     button.label:SetText(page.title)
@@ -94,11 +149,13 @@ local function createWindow()
     Hub.brandMark.texture:SetTexture(OldKraken.UIStyle.EmblemPath())
 
     local brand = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(brand, 15, true) end
     brand:SetPoint('TOPLEFT', frame, 'TOPLEFT', 64, -(HEADER_HEIGHT + 20))
     brand:SetText('OLD KRAKEN')
     brand:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3])
 
     local subtitle = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(subtitle, 11) end
     subtitle:SetPoint('TOPLEFT', brand, 'BOTTOMLEFT', 0, -3)
     subtitle:SetText('ГІЛЬДІЙНИЙ ЦЕНТР')
     subtitle:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3])
@@ -114,6 +171,7 @@ local function createWindow()
     Hub.contentRule:SetPoint('TOPLEFT', Hub.content, 'TOPLEFT', PAD_X, -(PAD_TOP + TITLE_HEIGHT + 1))
     Hub.contentRule:SetSize(PAGE_WIDTH, 1)
     Hub.contentRule:SetColorTexture(unpack(colors.panelEdge))
+    Hub.contentRule:Hide()
     Hub.frame = frame
     for _, page in ipairs(Hub.pageOrder) do createPageButton(page) end
     return frame

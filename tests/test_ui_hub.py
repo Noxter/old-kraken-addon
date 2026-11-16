@@ -10,6 +10,11 @@ OldKraken = {name = 'OldKraken', UIStyle = {
     Colors = {
         brandGold = {0.88, 0.69, 0.32, 1},
         panelEdge = {0.33, 0.26, 0.14, 0.68},
+        button = {0.08, 0.095, 0.125, 1},
+        buttonEdge = {0.20, 0.23, 0.29, 0.85},
+        sel = {0.102, 0.141, 0.302, 1},
+        selEdge = {0.478, 0.541, 0.980, 1},
+        white = {1, 1, 1, 1},
         text = {0.93, 0.94, 0.96},
         mutedText = {0.63, 0.67, 0.73},
     },
@@ -83,11 +88,14 @@ hub:ShowPage('roster')
 assert(built.roster and built.roster.parent == hub.content)
 assert(built.roster:IsShown() and hub.frame:IsShown())
 assert(not built.groups and not built.events)
-assert(hub.buttons.roster.activeBar:IsShown())
-assert(not hub.buttons.groups.activeBar:IsShown())
-assert(hub.buttons.roster.activeBar.color[1] == OldKraken.UIStyle.Colors.brandGold[1])
-assert(hub.buttons.roster.label.textColor[1] == OldKraken.UIStyle.Colors.brandGold[1])
-assert(hub.buttons.groups.label.textColor[1] == OldKraken.UIStyle.Colors.text[1])
+assert(hub.buttons.roster.activeFill:IsShown() and not hub.buttons.roster.activeBar:IsShown())
+assert(hub.buttons.roster.activeBorder:IsShown())
+assert(hub.buttons.roster.activeFill.color[1] == 0.102 and hub.buttons.roster.activeBorder.color[1] == 0.478)
+assert(hub.buttons.roster.label.textColor[1] == OldKraken.UIStyle.Colors.white[1])
+assert(hub.buttons.roster.shortcut.textColor[1] == OldKraken.UIStyle.Colors.brandGold[1])
+assert(not hub.buttons.groups.activeFill:IsShown() and not hub.buttons.groups.activeBorder:IsShown())
+assert(hub.buttons.groups.label.textColor[1] == OldKraken.UIStyle.Colors.mutedText[1])
+assert(hub.buttons.groups.shortcut.textColor[1] == OldKraken.UIStyle.Colors.mutedText[1])
 assert(hub.brandMark.texture.texture == OldKraken.UIStyle.EmblemPath())
 assert(hub.brandMark.width == 40 and hub.brandMark.height == 40)
 assert(hub.frame.width == 1140 and hub.frame.height == 680)
@@ -99,7 +107,7 @@ assert(hub.buttons.groups.point[5] ~= hub.buttons.events.point[5])
 
 hub.buttons.groups.scripts.OnClick()
 assert(built.groups:IsShown() and not built.roster:IsShown())
-assert(hub.currentPage == 'groups' and hub.buttons.groups.activeBar:IsShown())
+assert(hub.currentPage == 'groups' and hub.buttons.groups.activeFill:IsShown() and hub.buttons.groups.activeBorder:IsShown() and not hub.buttons.roster.activeFill:IsShown())
 
 hub:Toggle('groups')
 assert(not hub.frame:IsShown() and not built.groups:IsShown())

@@ -49,7 +49,9 @@ for _,frame in ipairs(createdFrames) do assert(frame.text~='Учасники' an
 assert(row.cells[7].shown and row.cellHovers[7].shown)
 assert(row.addonDot.texture:find('StatusOnline.tga',1,true) and offline.addonDot.texture:find('StatusOffline.tga',1,true))
 assert(row.cells[7].text == '0.4.0-alpha.2' and row.cells[7].textColor[2]==0.55)
-assert(offline.cells[7].text == '?')
+assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'warning')
+assert(offline.cells[7].text == '?' and offline.cells[7].textColor[1] == 0.7)
+assert(not offline.versionBadge:IsShown())
 assert(row.cellHovers[7].fullText:find('Застаріла',1,true))
 assert(OldKrakenRosterFrame.totalChip.label.text == 'Учасників 2')
 assert(OldKrakenRosterFrame.onlineChip.label.text:find('1', 1, true))
@@ -62,6 +64,29 @@ menuItems[3].func(); assert(row.member.name=='Offline Member' and row:IsShown())
 row.scripts.OnClick(row,'RightButton'); assert(menuItems[1].text=='Offline Member')
 OldKrakenRosterResetButton.scripts.OnClick()
 assert(row:IsShown() and offline:IsShown() and OldKrakenRosterFrame.summaryText.text == 'Показано 2 з 2')
+local origGetVersion = OldKraken.Communication.GetRosterVersion
+local origCompare = OldKraken.Communication.CompareVersions
+-- State 2: addon detected without version -> green dot and green '?' without badge border.
+function OldKraken.Communication:GetRosterVersion() return nil end
+OldKraken.GuildRoster:Render()
+assert(row.addonDot.texture:find('StatusOnline.tga', 1, true))
+assert(not row.versionBadge:IsShown() and row.cells[7].text == '?')
+assert(row.cells[7].textColor[1] == 0.25 and row.cells[7].textColor[2] == 1 and row.cells[7].textColor[3] == 0.25)
+-- State 3: version received with success / info / neutral comparisons.
+function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Member' then return '0.4.0-alpha.3' end end
+function OldKraken.Communication:CompareVersions() return 0 end
+OldKraken.GuildRoster:Render()
+assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'success' and row.cells[7].textColor[2] == 1)
+function OldKraken.Communication:CompareVersions() return 1 end
+OldKraken.GuildRoster:Render()
+assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'info' and row.cells[7].textColor[3] == 1)
+function OldKraken.Communication:CompareVersions() return nil end
+OldKraken.GuildRoster:Render()
+assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'neutral' and row.cells[7].textColor[1] == 0.7)
+assert(row.cellHovers[7].fullText:find('Не вдалося порівняти', 1, true))
+OldKraken.Communication.GetRosterVersion = origGetVersion
+OldKraken.Communication.CompareVersions = origCompare
+OldKraken.GuildRoster:Render()
 ''')
 lua2=LuaRuntime(unpack_returned_tuples=True)
 lua2.execute('''

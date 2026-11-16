@@ -45,7 +45,7 @@ jobs:
           test -f Media/OldKrakenEmblem.tga || { echo "Missing saved alternate emblem"; exit 1; }
           mkdir -p package/OldKraken/Media
           cp Media/OldKrakenKraken.tga Media/OldKrakenEmblem.tga package/OldKraken/Media/
-          cp Media/RoleSlot.tga Media/StatusOnline.tga Media/StatusOffline.tga package/OldKraken/Media/
+          cp Media/RoleSlot.tga Media/StatusOnline.tga Media/StatusOffline.tga Media/PillFill.tga Media/PillRing.tga Media/RoleIcons.tga Media/IconTrash.tga Media/Font.ttf package/OldKraken/Media/
           mkdir -p package/OldKraken/Media/Raids
           for raid in BarrowDeeps HyjalSummit Onyxia; do
             test -f "Media/Raids/$raid.tga" || { echo "Missing raid image: $raid"; exit 1; }

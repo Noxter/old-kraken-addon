@@ -14,16 +14,16 @@ OldKraken.UIStyle.Colors = {
     panelEdge = {0.33, 0.26, 0.14, 0.68},
     button = {0.08, 0.095, 0.125, 1},
     buttonEdge = {0.20, 0.23, 0.29, 0.85},
-    primaryButton = {0.30, 0.37, 0.83, 1},
-    primaryButtonEdge = {0.48, 0.54, 0.98, 1},
+    primaryButton = {0.20, 0.31, 0.56, 1},
+    primaryButtonEdge = {0.33, 0.47, 0.76, 1},
     brandGold = {0.88, 0.69, 0.32, 1},
-    actionBlue = {0.31, 0.43, 0.95, 0.24},
+    actionBlue = {0.24, 0.38, 0.75, 0.24},
     text = {0.93, 0.94, 0.96},
     mutedText = {0.63, 0.67, 0.73},
     dropdownTint = {0.68, 0.59, 0.42},
     -- Redesign palette: selection, zebra rows and status colours.
-    sel = {0.20, 0.28, 0.62, 0.55},
-    selEdge = {0.55, 0.66, 1, 1},
+    sel = {0.102, 0.141, 0.302, 1},
+    selEdge = {0.478, 0.541, 0.980, 1},
     zebra = {1, 1, 1, 0.035},
     divider = {0.20, 0.23, 0.29, 0.85},
     white = {1, 1, 1, 1},
@@ -86,6 +86,39 @@ local function addPanelOutline(frame, x, y, width, height, color)
     edge('BOTTOMLEFT', x, y - height + 1, width, 1)
     edge('TOPLEFT', x, y, 1, height)
     edge('TOPRIGHT', x + width - 1, y, 1, height)
+end
+
+local function slicePill(parent, layer, sublayer, capWidth, insets)
+    local base = 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\'
+    capWidth = capWidth or 6
+    insets = insets or {}
+    local topOffset = insets.top or 0
+    local bottomOffset = insets.bottom or 0
+    local leftOffset = insets.left or 0
+    local rightOffset = insets.right or 0
+    local function slice(file, l, sl)
+        local parts = {}
+        for i, range in ipairs({{0, 0.25}, {0.25, 0.75}, {0.75, 1}}) do
+            local t = parent:CreateTexture(nil, l, nil, sl)
+            t:SetTexture(base .. file)
+            t:SetTexCoord(range[1], range[2], 0, 1)
+            t:SetPoint('TOP', parent, 'TOP', 0, topOffset)
+            t:SetPoint('BOTTOM', parent, 'BOTTOM', 0, bottomOffset)
+            if i == 1 then
+                t:SetPoint('LEFT', parent, 'LEFT', leftOffset, 0)
+                t:SetWidth(capWidth)
+            elseif i == 3 then
+                t:SetPoint('RIGHT', parent, 'RIGHT', rightOffset, 0)
+                t:SetWidth(capWidth)
+            else
+                t:SetPoint('LEFT', parts[1], 'RIGHT', 0, 0)
+                t:SetPoint('RIGHT', parent, 'RIGHT', rightOffset - capWidth, 0)
+            end
+            parts[i] = t
+        end
+        return parts
+    end
+    return slice('PillFill.tga', layer or 'BACKGROUND', sublayer), slice('PillRing.tga', 'BORDER', sublayer and (sublayer + 1) or nil)
 end
 
 function OldKraken.UIStyle.Window(frame)
@@ -173,7 +206,8 @@ function OldKraken.UIStyle.Window(frame)
     end
 end
 
-function OldKraken.UIStyle.Button(button, variant)
+function OldKraken.UIStyle.Button(button, variant, options)
+    options = options or {}
     if button.NineSlice then button.NineSlice:Hide() end
     for _, part in ipairs({'Left', 'Middle', 'Right'}) do
         if button[part] then button[part]:Hide() end
@@ -216,19 +250,48 @@ function OldKraken.UIStyle.Button(button, variant)
     if pushed then pushed:SetAlpha(0) end
     local colors = OldKraken.UIStyle.Colors
     local primary = variant == 'primary'
-    local fill = button:CreateTexture(nil, 'BACKGROUND')
-    fill:SetAllPoints(button)
-    fill:SetColorTexture(unpack(primary and colors.primaryButton or colors.button))
-    addOutline(button, primary and colors.primaryButtonEdge or colors.buttonEdge)
+    local fillColor = primary and colors.primaryButton or colors.button
+    local edgeColor = primary and colors.primaryButtonEdge or colors.buttonEdge
+    if options.rounded then
+        local fillParts, ringParts = slicePill(button, 'BACKGROUND', nil, options.capWidth or 6)
+        button.fillParts, button.ringParts = fillParts, ringParts
+        button.fill = fillParts[2]
+        button.borderEdges = ringParts
+        for _, t in ipairs(fillParts) do
+            t:SetVertexColor(unpack(fillColor))
+            t.color = fillColor
+        end
+        for _, t in ipairs(ringParts) do
+            t:SetVertexColor(unpack(edgeColor))
+            t.color = edgeColor
+        end
+    else
+        local fill = button:CreateTexture(nil, 'BACKGROUND')
+        fill:SetAllPoints(button)
+        fill:SetColorTexture(unpack(fillColor))
+        button.fill = fill
+        button.borderEdges = addOutline(button, edgeColor)
+    end
     local label = button:GetFontString()
-    if label then label:SetTextColor(colors.text[1], colors.text[2], colors.text[3]) end
+    if label then
+        label:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
+        OldKraken.UIStyle.Font(label, 13)
+    end
     local highlight = button:CreateTexture(nil, 'HIGHLIGHT')
     highlight:SetAllPoints(button)
-    highlight:SetColorTexture(unpack(colors.actionBlue))
+    if options.rounded then
+            local base = 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\'
+        highlight:SetTexture(base .. 'PillFill.tga')
+        highlight:SetVertexColor(colors.actionBlue[1], colors.actionBlue[2], colors.actionBlue[3], 0.15)
+        highlight.color = colors.actionBlue
+    else
+        highlight:SetColorTexture(unpack(colors.actionBlue))
+    end
     button:SetHighlightTexture(highlight)
 end
 
-function OldKraken.UIStyle.Input(editBox)
+function OldKraken.UIStyle.Input(editBox, options)
+    options = options or {}
     local name = editBox:GetName()
     if name then
         for _, part in ipairs({'Left', 'Middle', 'Right'}) do
@@ -248,12 +311,31 @@ function OldKraken.UIStyle.Input(editBox)
         end
     end
     local colors = OldKraken.UIStyle.Colors
-    local background = editBox:CreateTexture(nil, 'BACKGROUND', nil, -8)
-    background.isOldKraken = true
-    background:SetAllPoints(editBox)
-    background:SetColorTexture(unpack(colors.button))
-    addOutline(editBox, colors.buttonEdge)
+    if options.rounded then
+        local fillParts, ringParts = slicePill(editBox, 'BACKGROUND', -8, options.capWidth or 6)
+        editBox.oldKrakenFillParts = fillParts
+        editBox.oldKrakenRingParts = ringParts
+        for _, t in ipairs(fillParts) do
+            t.isOldKraken = true
+            t:SetVertexColor(unpack(colors.button))
+            t.color = colors.button
+        end
+        for _, t in ipairs(ringParts) do
+            t.isOldKrakenEdge = true
+            t:SetVertexColor(unpack(colors.buttonEdge))
+            t.color = colors.buttonEdge
+        end
+    else
+        local background = editBox:CreateTexture(nil, 'BACKGROUND', nil, -8)
+        background.isOldKraken = true
+        background:SetAllPoints(editBox)
+        background:SetColorTexture(unpack(colors.button))
+        addOutline(editBox, colors.buttonEdge)
+    end
     editBox:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
+    if type(editBox.SetFont) == 'function' then
+        OldKraken.UIStyle.Font(editBox, 13)
+    end
 end
 
 local dropdownHooksInstalled = false
@@ -263,6 +345,9 @@ local function layoutDropdownText(dropdownFrame)
     local name = type(dropdownFrame.GetName) == 'function' and dropdownFrame:GetName()
     local label = name and _G[name .. 'Text']
     if not label then return end
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(label, 13) end
+    if label.SetShadowColor then label:SetShadowColor(0, 0, 0, 0.9) end
+    if label.SetShadowOffset then label:SetShadowOffset(1, -1) end
     if type(label.SetWidth) == 'function' then label:SetWidth(0) end
     if type(label.ClearAllPoints) == 'function' then
         label:ClearAllPoints()
@@ -313,6 +398,22 @@ function OldKraken.UIStyle.StyleDropDownList(list)
     for _, tex in ipairs(list.oldKrakenSkinTextures) do
         if tex and tex.Show then tex:Show() end
     end
+    local maxButtons = UIDROPDOWNMENU_MAXBUTTONS or 32
+    for i = 1, maxButtons do
+        local btnName = listName and (listName .. 'Button' .. i)
+        local normalText = btnName and _G[btnName .. 'NormalText']
+        if normalText and OldKraken.UIStyle.Font then
+            OldKraken.UIStyle.Font(normalText, 13)
+            if normalText.SetShadowColor then normalText:SetShadowColor(0, 0, 0, 0.9) end
+            if normalText.SetShadowOffset then normalText:SetShadowOffset(1, -1) end
+        end
+    end
+    if not list.oldKrakenShowHook and type(list.HookScript) == 'function' then
+        list:HookScript('OnShow', function(self)
+            OldKraken.UIStyle.StyleDropDownList(self)
+        end)
+        list.oldKrakenShowHook = true
+    end
     if not list.oldKrakenRestoreHook and type(list.HookScript) == 'function' then
         list:HookScript('OnHide', function(self)
             if self.oldKrakenStrata then
@@ -336,7 +437,8 @@ function OldKraken.UIStyle.StyleDropDownList(list)
     end
 end
 
-function OldKraken.UIStyle.Dropdown(frame)
+function OldKraken.UIStyle.Dropdown(frame, options)
+    options = options or {}
     local colors = OldKraken.UIStyle.Colors
     local name = frame:GetName()
     if not name then return end
@@ -350,30 +452,53 @@ function OldKraken.UIStyle.Dropdown(frame)
         end
     end
     if not frame.oldKrakenFill then
-        local fill = frame:CreateTexture(nil, 'BACKGROUND', nil, -7)
-        fill:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -2)
-        fill:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -16, 0)
-        fill:SetColorTexture(unpack(colors.button))
-        frame.oldKrakenFill = fill
+        if options.rounded then
+            local fill = frame:CreateTexture(nil, 'BACKGROUND', nil, -8)
+            fill:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -2)
+            fill:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -16, 0)
+            fill:SetColorTexture(0, 0, 0, 0)
+            frame.oldKrakenFill = fill
 
-        local edges = {}
-        for i, side in ipairs({'TOP', 'BOTTOM', 'LEFT', 'RIGHT'}) do
-            local edge = frame:CreateTexture(nil, 'BORDER', nil, -6)
-            edge.isOldKrakenEdge = true
-            if side == 'TOP' or side == 'BOTTOM' then
-                edge:SetPoint(side .. 'LEFT', fill, side .. 'LEFT', 0, 0)
-                edge:SetPoint(side .. 'RIGHT', fill, side .. 'RIGHT', 0, 0)
-                edge:SetHeight(1)
-            else
-                edge:SetPoint('TOP' .. side, fill, 'TOP' .. side, 0, 0)
-                edge:SetPoint('BOTTOM' .. side, fill, 'BOTTOM' .. side, 0, 0)
-                edge:SetWidth(1)
+            local fillParts, ringParts = slicePill(frame, 'BACKGROUND', -7, options.capWidth or 6, {left = 16, right = -16, top = -2, bottom = 0})
+            frame.oldKrakenFillParts = fillParts
+            frame.oldKrakenRingParts = ringParts
+            for _, t in ipairs(fillParts) do
+                t:SetVertexColor(unpack(colors.button))
+                t.color = colors.button
             end
-            edge:SetColorTexture(unpack(colors.buttonEdge))
-            edges[i] = edge
+            for _, t in ipairs(ringParts) do
+                t.isOldKrakenEdge = true
+                t:SetVertexColor(unpack(colors.buttonEdge))
+                t.color = colors.buttonEdge
+            end
+            frame.oldKrakenEdges = ringParts
+            frame.oldKrakenBox = frame
+        else
+            local fill = frame:CreateTexture(nil, 'BACKGROUND', nil, -7)
+            fill:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -2)
+            fill:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -16, 0)
+            fill:SetColorTexture(unpack(colors.button))
+            frame.oldKrakenFill = fill
+
+            local edges = {}
+            for i, side in ipairs({'TOP', 'BOTTOM', 'LEFT', 'RIGHT'}) do
+                local edge = frame:CreateTexture(nil, 'BORDER', nil, -6)
+                edge.isOldKrakenEdge = true
+                if side == 'TOP' or side == 'BOTTOM' then
+                    edge:SetPoint(side .. 'LEFT', fill, side .. 'LEFT', 0, 0)
+                    edge:SetPoint(side .. 'RIGHT', fill, side .. 'RIGHT', 0, 0)
+                    edge:SetHeight(1)
+                else
+                    edge:SetPoint('TOP' .. side, fill, 'TOP' .. side, 0, 0)
+                    edge:SetPoint('BOTTOM' .. side, fill, 'BOTTOM' .. side, 0, 0)
+                    edge:SetWidth(1)
+                end
+                edge:SetColorTexture(unpack(colors.buttonEdge))
+                edges[i] = edge
+            end
+            frame.oldKrakenEdges = edges
+            frame.oldKrakenBox = frame
         end
-        frame.oldKrakenEdges = edges
-        frame.oldKrakenBox = frame
     end
     if not dropdownHooksInstalled and type(hooksecurefunc) == 'function' then
         dropdownHooksInstalled = true
@@ -386,6 +511,24 @@ function OldKraken.UIStyle.Dropdown(frame)
         if type(UIDropDownMenu_SetText) == 'function' then
             hooksecurefunc('UIDropDownMenu_SetText', function(dropdownFrame) layoutDropdownText(dropdownFrame) end)
         end
+        if type(UIDropDownMenu_Initialize) == 'function' then
+            hooksecurefunc('UIDropDownMenu_Initialize', function(dropdownFrame) layoutDropdownText(dropdownFrame) end)
+        end
+        if type(UIDropDownMenu_AddButton) == 'function' then
+            hooksecurefunc('UIDropDownMenu_AddButton', function(info, level)
+                level = level or 1
+                local listFrame = _G['DropDownList' .. level]
+                if listFrame then
+                    local count = listFrame.numButtons or 0
+                    local normalText = _G['DropDownList' .. level .. 'Button' .. count .. 'NormalText']
+                    if normalText and OldKraken.UIStyle.Font then
+                        OldKraken.UIStyle.Font(normalText, 13)
+                        if normalText.SetShadowColor then normalText:SetShadowColor(0, 0, 0, 0.9) end
+                        if normalText.SetShadowOffset then normalText:SetShadowOffset(1, -1) end
+                    end
+                end
+            end)
+        end
     end
     local label = _G[name .. 'Text']
     if label then
@@ -393,7 +536,17 @@ function OldKraken.UIStyle.Dropdown(frame)
         if label.SetTextColor then
             label:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
         end
-        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(label, 12) end
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(label, 13) end
+        if label.SetShadowColor then label:SetShadowColor(0, 0, 0, 0.9) end
+        if label.SetShadowOffset then label:SetShadowOffset(1, -1) end
+        if not label.oldKrakenFontHook and type(hooksecurefunc) == 'function' then
+            label.oldKrakenFontHook = true
+            hooksecurefunc(label, 'SetFontObject', function(self)
+                if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(self, 13) end
+                if self.SetShadowColor then self:SetShadowColor(0, 0, 0, 0.9) end
+                if self.SetShadowOffset then self:SetShadowOffset(1, -1) end
+            end)
+        end
         layoutDropdownText(frame)
         if label.Show then label:Show() end
     end
@@ -491,10 +644,21 @@ local function setBorderColor(edges, color, alpha)
     end
 end
 
+function OldKraken.UIStyle.FontPath()
+    return 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\Font.ttf'
+end
+
 function OldKraken.UIStyle.Font(fontString, size, bold)
-    local path = type(fontString.GetFont) == 'function' and fontString:GetFont() or nil
-    if type(path) ~= 'string' or path == '' then path = STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF' end
-    fontString:SetFont(path, size, bold and 'OUTLINE' or '')
+    local path = OldKraken.UIStyle.FontPath()
+    local currentPath, currentSize
+    if type(fontString.GetFont) == 'function' then
+        currentPath, currentSize = fontString:GetFont()
+    end
+    path = path or currentPath or STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF'
+    local effectiveSize = size or currentSize or 13
+    if type(fontString.SetFont) == 'function' then
+        fontString:SetFont(path, effectiveSize, bold and 'OUTLINE' or '')
+    end
     return fontString
 end
 
@@ -533,9 +697,30 @@ function OldKraken.UIStyle.Chip(parent, text, options)
     options = options or {}
     local chip = CreateFrame('Button', nil, parent)
     chip:SetSize(options.width or 120, options.height or 28)
-    chip.fill = solid(chip, 'BACKGROUND', colors.button)
-    chip.fill:SetAllPoints(chip)
-    chip.borderEdges = createBorder(chip, colors.buttonEdge)
+    if options.rounded then
+        local capWidth = options.capWidth or (options.height and math.floor(options.height * 8 / 32 + 0.5)) or 6
+        local fillParts, ringParts = slicePill(chip, 'BACKGROUND', nil, capWidth)
+        chip.fillParts = fillParts
+        chip.ringParts = ringParts
+        chip.fill = fillParts[2]
+        chip.borderEdges = ringParts
+        local origShow = chip.Show
+        local origHide = chip.Hide
+        function chip:Show()
+            if origShow then origShow(self) end
+            for _, t in ipairs(self.fillParts or {}) do if t.Show then t:Show() end end
+            for _, t in ipairs(self.ringParts or {}) do if t.Show then t:Show() end end
+        end
+        function chip:Hide()
+            if origHide then origHide(self) end
+            for _, t in ipairs(self.fillParts or {}) do if t.Hide then t:Hide() end end
+            for _, t in ipairs(self.ringParts or {}) do if t.Hide then t:Hide() end end
+        end
+    else
+        chip.fill = solid(chip, 'BACKGROUND', colors.button)
+        chip.fill:SetAllPoints(chip)
+        chip.borderEdges = createBorder(chip, colors.buttonEdge)
+    end
     local hover = chip:CreateTexture(nil, 'HIGHLIGHT')
     hover:SetAllPoints(chip)
     hover:SetColorTexture(unpack(colors.actionBlue))
@@ -549,7 +734,7 @@ function OldKraken.UIStyle.Chip(parent, text, options)
         left = 24
     end
     chip.label = chip:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    OldKraken.UIStyle.Font(chip.label, 12)
+    OldKraken.UIStyle.Font(chip.label, options.fontSize or 12, options.bold)
     if options.center then
         chip.label:SetPoint('CENTER', chip, 'CENTER', 0, 0)
     else
@@ -564,12 +749,24 @@ function OldKraken.UIStyle.Chip(parent, text, options)
     end
     function chip:SetActive(active)
         self.active = active and true or false
-        local fill = self.active and colors.primaryButton or colors.button
-        local edge = self.active and colors.primaryButtonEdge or colors.buttonEdge
-        self.fill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
-        setBorderColor(self.borderEdges, edge)
-        local text = self.active and colors.white or colors.text
+        local fill = self.active and (options.selStyle and colors.sel or colors.primaryButton) or colors.button
+        local edge = self.active and (options.selStyle and colors.selEdge or colors.primaryButtonEdge) or colors.buttonEdge
+        if self.fillParts then
+            for _, t in ipairs(self.fillParts) do
+                t:SetVertexColor(fill[1], fill[2], fill[3], fill[4] or 1)
+                t.color = fill
+            end
+            for _, t in ipairs(self.ringParts) do
+                t:SetVertexColor(edge[1], edge[2], edge[3], edge[4] or 1)
+                t.color = edge
+            end
+        else
+            self.fill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+            setBorderColor(self.borderEdges, edge)
+        end
+        local text = self.active and (options.selStyle and colors.text or colors.white) or (options.selStyle and colors.mutedText or colors.text)
         self.label:SetTextColor(text[1], text[2], text[3])
+        if options.selStyle then OldKraken.UIStyle.Font(self.label, options.fontSize or 13, self.active) end
     end
     chip:SetLabel(text)
     chip:SetActive(options.active)
@@ -583,18 +780,32 @@ function OldKraken.UIStyle.PillBadge(parent, text, kind, options)
     options = options or {}
     local pill = CreateFrame('Frame', nil, parent)
     pill:SetHeight(options.height or 19)
-    pill.fill = solid(pill, 'BACKGROUND', colors.neutral, 0.16)
-    pill.fill:SetAllPoints(pill)
-    pill.borderEdges = createBorder(pill, colors.neutral)
+    if options.rounded then
+        local capWidth = (options.height or 19) * 8 / 32
+        local fillParts, ringParts = slicePill(pill, 'BACKGROUND', nil, capWidth)
+        pill.fillParts = fillParts
+        pill.ringParts = ringParts
+        pill.fill = fillParts[2]
+        pill.borderEdges = {}
+    else
+        pill.fill = solid(pill, 'BACKGROUND', colors.neutral, 0.16)
+        pill.fill:SetAllPoints(pill)
+        pill.borderEdges = createBorder(pill, colors.neutral)
+    end
     pill.label = pill:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    OldKraken.UIStyle.Font(pill.label, 12)
+    OldKraken.UIStyle.Font(pill.label, options.fontSize or 12, options.bold)
     pill.label:SetPoint('CENTER', pill, 'CENTER', 0, 0)
     pill.label:SetWordWrap(false)
     function pill:SetKind(value)
-        local color = colors[value] or colors.neutral
+        local color = (options.customColors and options.customColors[value]) or colors[value] or colors.neutral
         self.kind = value or 'neutral'
-        self.fill:SetColorTexture(color[1], color[2], color[3], 0.16)
-        setBorderColor(self.borderEdges, color, 1)
+        if self.fillParts then
+            for _, t in ipairs(self.fillParts) do t:SetVertexColor(color[1], color[2], color[3], 0.16) end
+            for _, t in ipairs(self.ringParts) do t:SetVertexColor(color[1], color[2], color[3], 1) end
+        else
+            self.fill:SetColorTexture(color[1], color[2], color[3], 0.16)
+            setBorderColor(self.borderEdges, color, 1)
+        end
         self.label:SetTextColor(color[1], color[2], color[3])
     end
     function pill:SetLabel(value)
@@ -609,6 +820,8 @@ function OldKraken.UIStyle.PillBadge(parent, text, kind, options)
     local origHide = pill.Hide
     function pill:Hide()
         self.fill:Hide()
+        for _, t in ipairs(self.fillParts or {}) do t:Hide() end
+        for _, t in ipairs(self.ringParts or {}) do t:Hide() end
         for _, edge in ipairs(self.borderEdges or {}) do edge:Hide() end
         self.label:Hide()
         if origHide then origHide(self) end
@@ -617,6 +830,8 @@ function OldKraken.UIStyle.PillBadge(parent, text, kind, options)
     function pill:Show()
         if origShow then origShow(self) end
         self.fill:Show()
+        for _, t in ipairs(self.fillParts or {}) do t:Show() end
+        for _, t in ipairs(self.ringParts or {}) do t:Show() end
         for _, edge in ipairs(self.borderEdges or {}) do edge:Show() end
         self.label:Show()
     end
@@ -633,9 +848,25 @@ function OldKraken.UIStyle.SegmentedTabs(parent, items, onSelect, options)
     options = options or {}
     local height, pad, gap = options.height or 40, 5, 4
     local box = CreateFrame('Frame', nil, parent)
-    box.fill = solid(box, 'BACKGROUND', colors.panel)
-    box.fill:SetAllPoints(box)
-    box.borderEdges = createBorder(box, colors.panelEdge)
+    local edgeColor = colors[options.edgeKey or 'panelEdge']
+    if options.rounded then
+        local fillParts, ringParts = slicePill(box, 'BACKGROUND', nil, 6)
+        box.fillParts, box.ringParts = fillParts, ringParts
+        box.fill = fillParts[2]
+        box.borderEdges = ringParts
+        for _, t in ipairs(fillParts) do
+            t:SetVertexColor(unpack(colors.panel))
+            t.color = colors.panel
+        end
+        for _, t in ipairs(ringParts) do
+            t:SetVertexColor(unpack(edgeColor))
+            t.color = edgeColor
+        end
+    else
+        box.fill = solid(box, 'BACKGROUND', colors.panel)
+        box.fill:SetAllPoints(box)
+        box.borderEdges = createBorder(box, edgeColor)
+    end
     box.tabs, box.order = {}, {}
     local x = pad
     for _, item in ipairs(items) do
@@ -644,25 +875,62 @@ function OldKraken.UIStyle.SegmentedTabs(parent, items, onSelect, options)
         tab:SetSize(width, height - pad * 2)
         tab:SetPoint('TOPLEFT', box, 'TOPLEFT', x, -pad)
         tab.key = item.key
-        tab.fill = solid(tab, 'BACKGROUND', colors.panel)
-        tab.fill:SetAllPoints(tab)
+        if options.rounded then
+            local capWidth = options.capWidth or 5
+            local fillParts, ringParts = slicePill(tab, 'BACKGROUND', nil, capWidth)
+            tab.fillParts, tab.ringParts = fillParts, ringParts
+            tab.fill = fillParts[2]
+            tab.borderEdges = ringParts
+            for _, t in ipairs(fillParts) do
+                t:SetVertexColor(unpack(colors.panel))
+                t.color = colors.panel
+            end
+            for _, t in ipairs(ringParts) do
+                t:SetVertexColor(unpack(colors.selEdge))
+                t.color = colors.selEdge
+                t:Hide()
+            end
+        else
+            tab.fill = solid(tab, 'BACKGROUND', colors.panel)
+            tab.fill:SetAllPoints(tab)
+            tab.borderEdges = createBorder(tab, colors.selEdge)
+            for _, edge in ipairs(tab.borderEdges) do edge:Hide() end
+        end
         local hover = tab:CreateTexture(nil, 'HIGHLIGHT')
         hover:SetAllPoints(tab)
-        hover:SetColorTexture(unpack(colors.actionBlue))
+        if options.rounded then
+            local base = 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\'
+            hover:SetTexture(base .. 'PillFill.tga')
+            hover:SetVertexColor(colors.actionBlue[1], colors.actionBlue[2], colors.actionBlue[3], 0.15)
+            hover.color = colors.actionBlue
+        else
+            hover:SetColorTexture(unpack(colors.actionBlue))
+        end
         tab:SetHighlightTexture(hover)
         tab.label = tab:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
         OldKraken.UIStyle.Font(tab.label, 13)
-        tab.label:SetPoint('LEFT', tab, 'LEFT', 14, 0)
+        tab.label:SetPoint('CENTER', tab, 'CENTER', 0, 0)
+        if type(tab.label.SetJustifyH) == 'function' then tab.label:SetJustifyH('CENTER') end
         tab.label:SetText(item.label)
         tab.badge = CreateFrame('Frame', nil, tab)
-        tab.badge:SetSize(19, 15)
-        tab.badge:SetPoint('RIGHT', tab, 'RIGHT', -8, 0)
-        tab.badge.fill = solid(tab.badge, 'BACKGROUND', colors.brandGold)
-        tab.badge.fill:SetAllPoints(tab.badge)
+        tab.badge:SetSize(18, 16)
+        tab.badge:SetPoint('RIGHT', tab, 'RIGHT', -7, 0)
+        local bFillParts, bRingParts = slicePill(tab.badge, 'BACKGROUND', nil, 4)
+        tab.badge.fillParts, tab.badge.ringParts = bFillParts, bRingParts
+        tab.badge.fill = bFillParts[2]
+        tab.badge.borderEdges = bRingParts
+        for _, t in ipairs(bFillParts) do
+            t:SetVertexColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3], 0.95)
+            t.color = colors.brandGold
+        end
+        for _, t in ipairs(bRingParts) do
+            t:SetVertexColor(0.55, 0.42, 0.18, 0.7)
+            t.color = {0.55, 0.42, 0.18, 0.7}
+        end
         tab.badge.text = tab.badge:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-        OldKraken.UIStyle.Font(tab.badge.text, 12, true)
-        tab.badge.text:SetPoint('CENTER', tab.badge, 'CENTER', 0, 0)
-        tab.badge.text:SetTextColor(colors.window[1], colors.window[2], colors.window[3])
+        OldKraken.UIStyle.Font(tab.badge.text, 11, false)
+        tab.badge.text:SetPoint('CENTER', tab, 'CENTER', 0, 0)
+        tab.badge.text:SetTextColor(0.06, 0.07, 0.10, 1)
         tab.badge:Hide()
         tab:SetScript('OnClick', function() if onSelect then onSelect(item.key) end end)
         box.tabs[item.key] = tab
@@ -674,10 +942,30 @@ function OldKraken.UIStyle.SegmentedTabs(parent, items, onSelect, options)
         self.activeKey = key
         for tabKey, tab in pairs(self.tabs) do
             local active = tabKey == key
-            local fill = active and colors.primaryButton or colors.panel
-            tab.fill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+            local fill = active and (options.activeBg or colors.sel) or (options.inactiveBg or colors.panel)
+            local edge = active and (options.activeEdge or colors.selEdge) or colors.buttonEdge
+            if tab.fillParts then
+                for _, t in ipairs(tab.fillParts) do
+                    t:SetVertexColor(fill[1], fill[2], fill[3], fill[4] or 1)
+                    t.color = fill
+                end
+                for _, t in ipairs(tab.ringParts) do
+                    t:SetVertexColor(edge[1], edge[2], edge[3], active and (edge[4] or 0.8) or 0)
+                    t.color = edge
+                    t:SetShown(active)
+                end
+            else
+                tab.fill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+                for _, edgeFrame in ipairs(tab.borderEdges or {}) do
+                    edgeFrame:SetShown(active)
+                    if edgeFrame.SetColorTexture then
+                        edgeFrame:SetColorTexture(edge[1], edge[2], edge[3], edge[4] or 1)
+                    end
+                end
+            end
             local text = active and colors.white or colors.mutedText
             tab.label:SetTextColor(text[1], text[2], text[3])
+            OldKraken.UIStyle.Font(tab.label, 13, active)
             tab.selected = active
         end
     end
@@ -688,6 +976,21 @@ function OldKraken.UIStyle.SegmentedTabs(parent, items, onSelect, options)
         tab.badge.count = value
         tab.badge.text:SetText(tostring(value))
         tab.badge:SetShown(value > 0)
+        if value > 0 then
+            local textW = tab.badge.text.GetStringWidth and tab.badge.text:GetStringWidth() or 8
+            local badgeW = math.max(18, math.floor(textW + 8 + 0.5))
+            tab.badge:SetWidth(badgeW)
+            if type(tab.label.ClearAllPoints) == 'function' then
+                tab.label:ClearAllPoints()
+                local shift = math.floor((badgeW + 2) / 2 + 0.5)
+                tab.label:SetPoint('CENTER', tab, 'CENTER', -shift, 0)
+            end
+        else
+            if type(tab.label.ClearAllPoints) == 'function' then
+                tab.label:ClearAllPoints()
+                tab.label:SetPoint('CENTER', tab, 'CENTER', 0, 0)
+            end
+        end
     end
     box:SetActive(options.active or (items[1] and items[1].key))
     return box

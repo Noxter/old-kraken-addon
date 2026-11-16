@@ -494,9 +494,15 @@ local function parseDate(day, month, year, hour, minute)
     if not okDate or type(roundtrip)~='table' or roundtrip.year~=year or roundtrip.month~=month or roundtrip.day~=day or roundtrip.hour~=hour or roundtrip.min~=minute then return nil end
     return stamp
 end
-local function action(parent, label, x, y, width, callback, variant)
-    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant)
-    b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(label); b:SetScript('OnClick',callback); return b
+local function action(parent, label, x, y, width, callback, variant, opts)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate')
+    opts = opts or {}
+    OldKraken.UIStyle.Button(b, variant, opts)
+    b:SetSize(width, opts.height or 24)
+    b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y)
+    b:SetText(label)
+    b:SetScript('OnClick',callback)
+    return b
 end
 local function field(parent, label, x, y, width, value)
     local caption=parent:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); caption:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); caption:SetText(label)
@@ -504,8 +510,9 @@ local function field(parent, label, x, y, width, value)
     box:SetPoint('TOPLEFT',parent,'TOPLEFT',x+4,y-18); box:SetSize(width,22); box:SetAutoFocus(false); box:SetText(value or '')
     box.label=caption; box:SetScript('OnEscapePressed',function(self) self:ClearFocus() end); return box
 end
-local function selectMenu(parent,name,x,y,width,values,labels,get,set,allowed,menuFont)
-    local f=CreateFrame('Frame',name,parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
+local function selectMenu(parent,name,x,y,width,values,labels,get,set,allowed,menuFont,opts)
+    local f=CreateFrame('Frame',name,parent,'UIDropDownMenuTemplate')
+    OldKraken.UIStyle.Dropdown(f, opts or {rounded = true})
     f:SetPoint('TOPLEFT',parent,'TOPLEFT',x-16,y+3); UIDropDownMenu_SetWidth(f,width-34); UIDropDownMenu_JustifyText(f,'LEFT')
     UIDropDownMenu_Initialize(f,function(_,level)
         for _,v in ipairs(values) do
@@ -610,21 +617,22 @@ local function datePicker(parent, onChanged)
     end
 end
 local function iconAction(button,row,x,texture,hint)
-    button:ClearAllPoints(); button:SetPoint('TOPLEFT',row,'TOPLEFT',x,-3); button:SetSize(24,24); button:SetText('')
-    button.art=button:CreateTexture(nil,'ARTWORK'); button.art:SetSize(19,19); button.art:SetPoint('CENTER',button,'CENTER',0,0); button.art:SetTexture(texture)
+    button:ClearAllPoints(); button:SetPoint('TOPLEFT',row,'TOPLEFT',x,-4); button:SetSize(24,24); button:SetText('')
+    button.art=button:CreateTexture(nil,'ARTWORK'); button.art:SetSize(16,16); button.art:SetPoint('CENTER',button,'CENTER',0,0)
+    button.art:SetTexture(texture)
     button:SetScript('OnEnter',function(self)
         if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(hint); GameTooltip:AddLine(row.member or '',1,1,1); GameTooltip:Show() end
     end)
     button:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
 end
 local function readableFont(text,size)
-    local font=type(text.GetFont)=='function' and text:GetFont() or nil
+    local font = OldKraken.UIStyle and OldKraken.UIStyle.FontPath and OldKraken.UIStyle.FontPath() or (type(text.GetFont)=='function' and text:GetFont() or nil)
     if type(font)~='string' or font=='' then font=STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF' end
     text:SetFont(font,size,'OUTLINE')
     text:SetShadowColor(0,0,0,0.9); text:SetShadowOffset(1,-1)
 end
 local function largeRoleIcon(role,size)
-    return ((catalog.roleIcons[role] or '—'):gsub(':16:16:',':'..size..':'..size..':'))
+    return ((catalog.roleIcons[role] or ''):gsub(':16:16:',':'..size..':'..size..':'))
 end
 local function roleColumnText(e,classes,role)
     local names={}
@@ -633,9 +641,8 @@ local function roleColumnText(e,classes,role)
     end
     table.sort(names)
     local labels={tank='Танки',healer='Лікарі',dps='DPS',flex='Інші'}
-    local lines={largeRoleIcon(role,24)..' |c'..roleColors[role]..labels[role]..' ('..#names..')|r'}
+    local lines={largeRoleIcon(role,20)..' |c'..roleColors[role]..labels[role]..' ('..#names..')|r'}
     for _,name in ipairs(names) do lines[#lines+1]=participantName(name,classes) end
-    if #names==0 then lines[#lines+1]='|cff9ba9bc—|r' end
     return table.concat(lines,'\n'),#names
 end
 refresh=function()
@@ -645,6 +652,7 @@ refresh=function()
     if window.tabBar and window.tabBar.SetActive then
         window.tabBar:SetActive(window.creationMode and 'create' or 'events')
     end
+    if window.detailPanel then window.detailPanel:SetShown(not window.creationMode) end
     local alertsOn = Events:AlertsEnabled()
     window.alertButton:SetText(alertsOn and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     if window.alertDot then
@@ -682,6 +690,7 @@ refresh=function()
             row.title:SetText(e.title)
             local activity=e.activity~='' and (activityLabels[e.activity] or e.activity) or kinds[e.kind]
             row.meta:SetText(activity..' · '..date('%d.%m %H:%M',e.when)..' · '..acceptedCount(e)..'/'..e.size)
+            if OldKraken.UIStyle.ApplySelection then OldKraken.UIStyle.ApplySelection(row, selected==entry.key) end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show(); row.delete:SetShown(e.owner==identity)
         else row:UnlockHighlight(); row.delete:Hide(); row:Hide() end
@@ -706,7 +715,20 @@ refresh=function()
         local description=e.description~='' and ('\n\n|cff9ba9bcОпис:|r\n'..e.description) or ''
         local activity=kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')
         window.details:SetText('|cff9ba9bcПодія:|r '..activity..'\n|cff9ba9bcДата:|r |cffffd35a'..date('%d.%m.%Y %H:%M',e.when)..'|r\n|cff9ba9bcАвтор:|r |cff9bcaff'..e.owner..'|r\n|cff9ba9bcПрийнято:|r |cff69dc8c'..acceptedCount(e)..'/'..e.size..'|r'..(e.relayed and '\n|cffffc36bСтан отримано через гільдію|r' or '')..description..(pending and '\n\n|cffffc36bОчікується доставка автору|r' or ''))
-        window.roleSummary:ClearAllPoints(); window.roleSummary:SetPoint('TOPLEFT',window.details,'BOTTOMLEFT',0,-14)
+
+        if window.detailsDivider then
+            window.detailsDivider:ClearAllPoints()
+            window.detailsDivider:SetPoint('TOPLEFT',window.details,'BOTTOMLEFT',0,-12)
+            window.detailsDivider:SetPoint('TOPRIGHT',window.detailsContent,'TOPRIGHT',0,-12)
+            window.detailsDivider:Show()
+        end
+
+        window.roleSummary:ClearAllPoints()
+        if window.detailsDivider then
+            window.roleSummary:SetPoint('TOPLEFT',window.detailsDivider,'BOTTOMLEFT',0,-12)
+        else
+            window.roleSummary:SetPoint('TOPLEFT',window.details,'BOTTOMLEFT',0,-14)
+        end
         window.roleSummary:SetText('Склад за ролями'); window.roleSummary:Show()
         local columnHeight=0
         for i,role in ipairs({'tank','healer','dps'}) do
@@ -721,13 +743,26 @@ refresh=function()
             columnHeight=math.max(columnHeight,column:GetStringHeight())
         end
         local flexText,flexCount=roleColumnText(e,classes,'flex')
-        window.roleFlex:ClearAllPoints(); window.roleFlex:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-columnHeight-18)
+        window.roleFlex:ClearAllPoints(); window.roleFlex:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-columnHeight-16)
         window.roleFlex:SetText(flexText); window.roleFlex:SetShown(flexCount>0)
         window.flexButton:SetShown(flexCount>0); window.flexButton:SetHeight(math.max(30,window.roleFlex:GetStringHeight()))
-        local summaryHeight=columnHeight+18+(flexCount>0 and window.roleFlex:GetStringHeight()+8 or 0)
-        window.participantHeader:ClearAllPoints(); window.participantHeader:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-summaryHeight-14)
+        local summaryHeight=columnHeight+16+(flexCount>0 and window.roleFlex:GetStringHeight()+8 or 0)
+
+        if window.participantsDivider then
+            window.participantsDivider:ClearAllPoints()
+            window.participantsDivider:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-summaryHeight-10)
+            window.participantsDivider:SetPoint('TOPRIGHT',window.detailsContent,'TOPRIGHT',0,-summaryHeight-10)
+            window.participantsDivider:Show()
+        end
+
+        window.participantHeader:ClearAllPoints()
+        if window.participantsDivider then
+            window.participantHeader:SetPoint('TOPLEFT',window.participantsDivider,'BOTTOMLEFT',0,-12)
+        else
+            window.participantHeader:SetPoint('TOPLEFT',window.roleSummary,'BOTTOMLEFT',0,-summaryHeight-14)
+        end
         window.participantHeader:SetText('Заявки та учасники'..(window.roleFilter and (' · '..roles[window.roleFilter]) or ' · усі')); window.participantHeader:Show()
-        local height=window.detailsTitle:GetStringHeight()+8+window.details:GetStringHeight()+14+window.roleSummary:GetStringHeight()+summaryHeight+14+window.participantHeader:GetStringHeight()+8
+        local height=window.detailsTitle:GetStringHeight()+8+window.details:GetStringHeight()+(window.detailsDivider and 24 or 14)+window.roleSummary:GetStringHeight()+summaryHeight+(window.participantsDivider and 24 or 14)+window.participantHeader:GetStringHeight()+8
         do
             for i,name in ipairs(names) do
                 local row=window.signupRows[i]
@@ -738,10 +773,10 @@ refresh=function()
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-118,30); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
                     row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
-                    row.accept=action(row,'Прийняти',0,-40,94,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,'primary')
-                    row.reserve=action(row,'Резерв',100,-40,94,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end)
-                    row.reject=action(row,'Відхилити',200,-40,104,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end)
-                    row.invite=action(row,'Інвайт у рейд',0,-68,194,function(self) Events:InviteMember(selected,self:GetParent().member) end,'primary')
+                    row.accept=action(row,'Прийняти',0,-40,24,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,nil,{rounded=true,capWidth=4,height=24})
+                    row.reserve=action(row,'Резерв',100,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end,nil,{rounded=true,capWidth=4,height=24})
+                    row.reject=action(row,'Відхилити',200,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end,nil,{rounded=true,capWidth=4,height=24})
+                    row.invite=action(row,'Інвайт у рейд',0,-68,24,function(self) Events:InviteMember(selected,self:GetParent().member) end,nil,{rounded=true,capWidth=4,height=24})
                     local left=window.detailsWidth-112
                     iconAction(row.accept,row,left,'Interface\\RaidFrame\\ReadyCheck-Ready','Прийняти учасника')
                     iconAction(row.reserve,row,left+28,'Interface\\RaidFrame\\ReadyCheck-Waiting','Перевести в резерв')
@@ -768,12 +803,21 @@ refresh=function()
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.inviteAll:SetShown(own and e.kind=='raid')
         window.cancel:SetShown(e.owner==identity)
+        if window.cancel:IsShown() then
+            window.join:SetWidth(122)
+            window.leave:SetWidth(122)
+        else
+            window.join:SetWidth(254)
+            window.leave:SetWidth(254)
+        end
         if not canPerformRole(identity,currentRole) then currentRole='flex'; UIDropDownMenu_SetText(window.roleMenu,roles[currentRole]) end
         local canJoin=not e.relayed and not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
         window.join:SetShown(canJoin)
         window.roleMenu:SetShown(canJoin)
         window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
     else
+        if window.detailsDivider then window.detailsDivider:Hide() end
+        if window.participantsDivider then window.participantsDivider:Hide() end
         window.roleSummary:Hide(); window.roleFlex:Hide(); window.flexButton:Hide(); for _,button in ipairs(window.roleButtons) do button:Hide() end; for _,column in ipairs(window.roleColumns) do column:Hide() end
         window.participantHeader:Hide(); window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
         window.details:SetText('Оберіть подію зі списку.'); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
@@ -804,33 +848,40 @@ local function createWindow(parent)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Події гільдії') end
 
     -- Right-side header controls (shared left title 'Івенти' belongs to UIHub)
-    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-    note:SetPoint('TOPLEFT',f,'TOPLEFT',612,-8); note:SetText('Час — місцевий')
-    local muted=OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
-    if muted then note:SetTextColor(muted[1],muted[2],muted[3]) end
-    f.timeNote=note
-
-    f.alertButton=action(f,'Сповіщення: увімк.',728,0,172,function() Events:SetAlertsEnabled(not Events:AlertsEnabled()); refresh() end)
+    f.alertButton=action(f,'Сповіщення: увімк.',732,0,168,function() Events:SetAlertsEnabled(not Events:AlertsEnabled()); refresh() end)
     f.alertButton:SetHeight(31)
     local alertLabel=f.alertButton:GetFontString()
     if alertLabel then
         alertLabel:ClearAllPoints()
-        alertLabel:SetPoint('LEFT',f.alertButton,'LEFT',26,0)
+        alertLabel:SetPoint('LEFT',f.alertButton,'LEFT',24,0)
+        alertLabel:SetPoint('RIGHT',f.alertButton,'RIGHT',-8,0)
+        alertLabel:SetWordWrap(false)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(alertLabel, 12) end
+        local mutedText=OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+        if mutedText then alertLabel:SetTextColor(mutedText[1],mutedText[2],mutedText[3]) end
     end
     f.alertDot=f.alertButton:CreateTexture(nil,'OVERLAY')
-    f.alertDot:SetSize(8,8); f.alertDot:SetPoint('LEFT',f.alertButton,'LEFT',12,0)
-    local green=OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.success or {0.41,0.86,0.55,1}
+    f.alertDot:SetSize(8,8); f.alertDot:SetPoint('LEFT',f.alertButton,'LEFT',10,0)
+    local green={0.349,0.902,0.502,1}
     f.alertDot:SetColorTexture(green[1],green[2],green[3],1)
+
+    local note=f:CreateFontString(nil,'OVERLAY','GameFontHighlight')
+    note:SetText('Час — місцевий')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(note, 13) end
+    local muted=OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+    if muted then note:SetTextColor(muted[1],muted[2],muted[3]) end
+    note:SetPoint('RIGHT',f.alertButton,'LEFT',-14,0)
+    f.timeNote=note
 
     f.creationMode=false
     if OldKraken.UIStyle.SegmentedTabs then
         f.tabBar=OldKraken.UIStyle.SegmentedTabs(f,{
-            {key='events',label='Події',width=76},
-            {key='create',label='Створити івент',width=144},
+            {key='events',label='Події',width=84},
+            {key='create',label='Створити івент',width=148},
         },function(key)
             f.creationMode=(key=='create')
             refresh()
-        end,{active='events',height=40})
+        end,{active='events',height=40,edgeKey='buttonEdge',rounded=true})
         f.tabBar:SetPoint('TOPLEFT',f,'TOPLEFT',0,-47)
         f.eventsTab=f.tabBar.tabs.events
         f.createTab=f.tabBar.tabs.create
@@ -853,11 +904,11 @@ local function createWindow(parent)
         OldKraken.UIStyle.Button(remove)
         remove:SetSize(26,26); remove:SetPoint('BOTTOMRIGHT',rows[i],'BOTTOMRIGHT',-8,7)
         remove:SetHitRectInsets(-2,-2,-2,-2)
-        local function trashPiece(x,y,width,height)
-            local texture=remove:CreateTexture(nil,'ARTWORK'); texture:SetColorTexture(0.9,0.32,0.3,1)
-            texture:SetSize(width,height); texture:SetPoint('TOPLEFT',remove,'TOPLEFT',x,-y)
-        end
-        trashPiece(6,6,12,2); trashPiece(9,4,6,2); trashPiece(7,9,2,9); trashPiece(15,9,2,9); trashPiece(7,17,10,2)
+        remove.glyph=remove:CreateTexture(nil,'ARTWORK')
+        remove.glyph:SetTexture('Interface\\AddOns\\' .. OldKraken.name .. '\\Media\\IconTrash.tga')
+        remove.glyph:SetSize(16,16)
+        remove.glyph:SetPoint('CENTER',remove,'CENTER',0,0)
+        remove.glyph:SetVertexColor(0.9,0.32,0.3,1)
         remove:SetScript('OnClick',function()
             local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; local e=entry and events[entry.key]
             if not active or not e or e.owner~=identity or e.cancelled then return end
@@ -878,14 +929,37 @@ local function createWindow(parent)
         remove:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         remove:Hide()
     end
-    f.previousPage=action(f,'‹',138+(embedded and 5 or 0),embedded and -568 or -380,45,function() page=page-1; refresh() end)
+    f.previousPage=action(f,'‹',138+(embedded and 5 or 0),embedded and -568 or -380,45,function() page=page-1; refresh() end,nil,{rounded=true,height=24})
     f.pageLabel=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
     f.pageLabel:SetPoint('TOPLEFT',f,'TOPLEFT',191+(embedded and 5 or 0),embedded and -573 or -385); f.pageLabel:SetWidth(64); f.pageLabel:SetJustifyH('CENTER')
-    f.nextPage=action(f,'›',263+(embedded and 5 or 0),embedded and -568 or -380,45,function() page=page+1; refresh() end)
-    local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,-103); scroll:SetSize(detailsWidth,embedded and 450 or 320)
+    f.nextPage=action(f,'›',263+(embedded and 5 or 0),embedded and -568 or -380,45,function() page=page+1; refresh() end,nil,{rounded=true,height=24})
+
+    if OldKraken.UIStyle.PanelFrame then
+        f.detailPanel = OldKraken.UIStyle.PanelFrame(f, 'buttonEdge')
+    else
+        f.detailPanel = CreateFrame('Frame', nil, f)
+        OldKraken.UIStyle.Panel(f.detailPanel, 0, 0, detailsWidth + 24, embedded and 504 or 428)
+    end
+    f.detailPanel:SetPoint('TOPLEFT', f, 'TOPLEFT', 450 + shift - 12, -103)
+    f.detailPanel:SetSize(detailsWidth + 24, embedded and 504 or 428)
+
+    local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,embedded and -117 or -103); scroll:SetSize(detailsWidth,embedded and 432 or 320)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(detailsWidth,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
-    f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true); readableFont(f.detailsTitle,18)
-    f.roleSummary=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleSummary:SetWidth(detailsWidth); f.roleSummary:SetJustifyH('LEFT'); readableFont(f.roleSummary,15)
+    f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true); f.detailsTitle:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.detailsTitle,18)
+
+    local function makeDivider(parent)
+        if OldKraken.UIStyle.Divider then return OldKraken.UIStyle.Divider(parent) end
+        local line = parent:CreateTexture(nil, 'ARTWORK')
+        line:SetHeight(1)
+        local colors = OldKraken.UIStyle.Colors
+        local divColor = colors and colors.divider or {0.18, 0.24, 0.36, 1}
+        line:SetColorTexture(divColor[1], divColor[2], divColor[3], divColor[4] or 1)
+        return line
+    end
+    f.detailsDivider = makeDivider(f.detailsContent)
+    f.participantsDivider = makeDivider(f.detailsContent)
+
+    f.roleSummary=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleSummary:SetWidth(detailsWidth); f.roleSummary:SetJustifyH('LEFT'); f.roleSummary:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.roleSummary,15)
     f.roleColumns={}; f.roleButtons={}
     local function roleButton(column,role)
         local button=CreateFrame('Button',nil,f.detailsContent)
@@ -909,13 +983,13 @@ local function createWindow(parent)
     end
     f.roleFlex=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleFlex:SetWidth(detailsWidth); f.roleFlex:SetJustifyH('LEFT'); readableFont(f.roleFlex,14)
     f.flexButton=roleButton(f.roleFlex,'flex'); f.flexButton:SetWidth(detailsWidth)
-    f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT'); readableFont(f.participantHeader,15)
-    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP'); f.details:SetWordWrap(true); f.details:SetSpacing(3); readableFont(f.details,15)
-    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,embedded and -568 or -395,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end)
-    f.join=action(f,'Записатися',605+shift,embedded and -568 or -395,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
-    f.leave=action(f,'Виписатися',605+shift,embedded and -568 or -395,100,function() if selected then Events:Signup(selected,'leave') end end)
-    f.cancel=action(f,'Скасувати',710+shift,embedded and -568 or -395,105,function() if selected then Events:Cancel(selected) end end)
-    f.inviteAll=action(f,'Запросити всіх у рейд',450+shift,-47,170,function() if selected then Events:InviteAll(selected) end end,'primary')
+    f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT'); f.participantHeader:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.participantHeader,15)
+    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP'); f.details:SetWordWrap(true); f.details:SetSpacing(4); readableFont(f.details,15)
+    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,embedded and -562 or -395,140,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end,nil,{rounded=true})
+    f.join=action(f,'Записатися',450+shift+146,embedded and -562 or -395,122,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary',{rounded=true,height=34})
+    f.leave=action(f,'Виписатися',450+shift+146,embedded and -562 or -395,122,function() if selected then Events:Signup(selected,'leave') end end,nil,{rounded=true,height=34})
+    f.cancel=action(f,'Скасувати',450+shift+274,embedded and -562 or -395,126,function() if selected then Events:Cancel(selected) end end,nil,{rounded=true,height=34})
+    f.inviteAll=action(f,'Запросити всіх у рейд',450+shift+detailsWidth-180,-47,180,function() if selected then Events:InviteAll(selected) end end,'primary',{rounded=true,height=32})
     f.inviteAll:Hide()
 
     -- =========================================================================
@@ -1017,10 +1091,8 @@ local function createWindow(parent)
         f.size:SetText(tostring(nextVal))
         f:UpdateSummary()
     end
-    f.sizeMinus = action(f, '-', 770, -380, 34, function() stepSize(-1) end)
-    f.sizeMinus:SetHeight(34)
-    f.sizePlus = action(f, '+', 866, -380, 34, function() stepSize(1) end)
-    f.sizePlus:SetHeight(34)
+    f.sizeMinus = action(f, '-', 770, -380, 34, function() stepSize(-1) end, nil, {rounded = true, height = 34})
+    f.sizePlus = action(f, '+', 866, -380, 34, function() stepSize(1) end, nil, {rounded = true, height = 34})
 
     -- Row 2: Опис (full width 900)
     local descCaption = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
@@ -1060,7 +1132,7 @@ local function createWindow(parent)
     end
 
     if OldKraken.UIStyle.Chip then
-        f.noLocationButton = OldKraken.UIStyle.Chip(f, 'Без конкретної локації', {width = 182, height = 34, center = true, active = true})
+        f.noLocationButton = OldKraken.UIStyle.Chip(f, 'Без конкретної локації', {width = 182, height = 34, center = true, active = true, selStyle = true})
         f.noLocationButton:SetPoint('TOPLEFT', f, 'TOPLEFT', 718, -187)
         f.noLocationButton:SetScript('OnClick', function() chooseActivity('') end)
     else
@@ -1111,7 +1183,7 @@ local function createWindow(parent)
                 card.title:SetText(entry.label)
                 card.levels:SetText('рівень ' .. (entry.min == entry.max and tostring(entry.min) or (entry.min .. '–' .. entry.max)) .. (fits and '  |cff69dc8cпід ваш рівень|r' or ''))
                 if OldKraken.UIStyle.ApplySelection then OldKraken.UIStyle.ApplySelection(card, entry.value == activity) end
-                if entry.value == activity then card:LockHighlight() else card:UnlockHighlight() end
+                card:UnlockHighlight()
                 card:Show()
             end
         end
@@ -1148,7 +1220,7 @@ local function createWindow(parent)
         local kindKey = item.key
         local chip
         if OldKraken.UIStyle.Chip then
-            chip = OldKraken.UIStyle.Chip(f, item.label, {width = item.width, height = 34, center = true, active = (kindKey == currentKind)})
+            chip = OldKraken.UIStyle.Chip(f, item.label, {width = item.width, height = 34, center = true, active = (kindKey == currentKind), selStyle = true})
             chip:SetPoint('TOPLEFT', f, 'TOPLEFT', chipX, -138)
         else
             chip = action(f, item.label, chipX, -138, item.width, function() end)
@@ -1193,8 +1265,7 @@ local function createWindow(parent)
     f.cancelCreate = action(f.summaryBar, 'Скасувати', 593, -13, 110, function()
         f.creationMode = false
         refresh()
-    end)
-    f.cancelCreate:SetHeight(38)
+    end, nil, {rounded = true, height = 38})
 
     f.submit = action(f.summaryBar, 'Створити івент', 713, -13, 170, function()
         local day = getDate()
@@ -1207,8 +1278,7 @@ local function createWindow(parent)
         else
             print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.')
         end
-    end, 'primary')
-    f.submit:SetHeight(38)
+    end, 'primary', {rounded = true, height = 38})
 
     syncAutoTitle()
     showActivity()
@@ -1223,7 +1293,7 @@ local function createWindow(parent)
         f.description, f.description.label,
         f.summaryBar, f.cancelCreate, f.submit,
     }
-    f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleMenu}
+    f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleMenu,f.detailPanel}
     f.SetCreationMode=function(_,value) f.creationMode=value==true; refresh() end
     f:HookScript('OnShow',refresh)
     f:Hide(); return f

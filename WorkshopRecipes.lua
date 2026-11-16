@@ -824,7 +824,7 @@ local function switchTab(nextTab)
     render()
 end
 local function readableFont(text,size,spacing)
-    local font=text:GetFont()
+    local font = OldKraken.UIStyle and OldKraken.UIStyle.FontPath and OldKraken.UIStyle.FontPath() or text:GetFont()
     if font then text:SetFont(font,size,'OUTLINE') end
     text:SetShadowColor(0,0,0,1); text:SetShadowOffset(1,-1)
     if spacing then text:SetSpacing(spacing) end

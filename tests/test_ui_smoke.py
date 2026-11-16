@@ -12,15 +12,15 @@ OldKraken.UIStyle = {
         panel = {0.055, 0.07, 0.095, 0.96},
         brandGold = {0.88, 0.69, 0.32, 1},
         panelEdge = {0.33, 0.26, 0.14, 0.68},
-        primaryButton = {0.30, 0.37, 0.83, 1},
-        primaryButtonEdge = {0.48, 0.54, 0.98, 1},
+        primaryButton = {0.20, 0.31, 0.56, 1},
+        primaryButtonEdge = {0.33, 0.47, 0.76, 1},
         button = {0.08, 0.095, 0.125, 1},
         buttonEdge = {0.20, 0.23, 0.29, 0.85},
-        actionBlue = {0.31, 0.43, 0.95, 0.24},
+        actionBlue = {0.24, 0.38, 0.75, 0.24},
         text = {0.93, 0.94, 0.96},
         mutedText = {0.63, 0.67, 0.73},
-        sel = {0.20, 0.28, 0.62, 0.55},
-        selEdge = {0.55, 0.66, 1, 1},
+        sel = {0.102, 0.141, 0.302, 1},
+        selEdge = {0.478, 0.541, 0.980, 1},
         zebra = {1, 1, 1, 0.035},
         divider = {0.20, 0.23, 0.29, 0.85},
         white = {1, 1, 1, 1},
@@ -126,6 +126,8 @@ function methods:Show() self.shown = true end
 function methods:Hide() self.shown = false end
 function methods:SetShown(value) self.shown = value end
 function methods:IsShown() return self.shown end
+function methods:LockHighlight() self.highlightLocked = true end
+function methods:UnlockHighlight() self.highlightLocked = false end
 function methods:GetStringHeight() return 0 end
 function methods:SetScript(name, fn) self.scripts[name] = fn end
 function methods:CreateFontString() return CreateFrame() end
@@ -202,6 +204,13 @@ assert(not ui.tabs[2].button.activeMark:IsShown())
 assert(ui.rows[1].art.width == 64 and ui.rows[1].art.height == 64)
 assert(ui.rows[1].art.texCoord[2] - ui.rows[1].art.texCoord[1]
     == ui.rows[1].art.texCoord[4] - ui.rows[1].art.texCoord[3])
+assert(ui.alertButton.width == 156 and ui.alertButton.height == 31)
+assert(ui.searchFilter.width == 170)
+assert(ui.minLevelFilter.width == 44 and ui.maxLevelFilter.width == 44)
+assert(ui.resetFilterButton.width == 63 and ui.resetFilterButton.height == 28)
+ui.rows[1].scripts.OnClick()
+assert(ui.rows[1].isSelected and not ui.rows[1].highlightLocked)
+assert(ui.detailsHeading.text == ui.visible[1].group.title)
 selectTab('mine'); filtersShown(false)
 assert(ui.tabs[4].button.activeMark:IsShown() and not ui.tabs[1].button.activeMark:IsShown())
 selectTab('applications'); filtersShown(false)

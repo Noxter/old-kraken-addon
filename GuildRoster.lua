@@ -218,7 +218,7 @@ local function CreateColumnHeader(parent, label, key, x, width)
     text:SetPoint("LEFT", button, "LEFT", 0, 0)
     text:SetWidth(width - 4)
     text:SetJustifyH("LEFT")
-    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(text, 11, true) end
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(text, 12, false) end
     text:SetTextColor(muted[1], muted[2], muted[3])
     text:SetText(label)
     button.label = text
@@ -240,7 +240,7 @@ end
 
 local function CreateStatChip(parent, x, width)
     if OldKraken.UIStyle.Chip then
-        local chip = OldKraken.UIStyle.Chip(parent, "", {width = width, height = 30, center = true})
+        local chip = OldKraken.UIStyle.Chip(parent, "", {width = width, height = 30, center = true, rounded = true})
         chip:SetPoint("TOPLEFT", parent, "TOPLEFT", x, 0)
         chip:EnableMouse(false)
         return chip
@@ -286,20 +286,20 @@ local function CreateRosterWindow(parent)
         frame.TitleText:SetText("Old Kraken — Guild Roster")
     end
 
-    frame.shownChip = CreateStatChip(frame, 0, 138)
+    frame.shownChip = CreateStatChip(frame, 0, 94)
     frame.shownChip:ClearAllPoints()
     frame.shownChip:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -2)
 
-    frame.onlineChip = CreateStatChip(frame, 0, 122)
+    frame.onlineChip = CreateStatChip(frame, 0, 90)
     frame.onlineChip:ClearAllPoints()
     frame.onlineChip:SetPoint("TOPRIGHT", frame.shownChip, "TOPLEFT", -8, 0)
 
-    frame.totalChip = CreateStatChip(frame, 0, 144)
+    frame.totalChip = CreateStatChip(frame, 0, 111)
     frame.totalChip:ClearAllPoints()
     frame.totalChip:SetPoint("TOPRIGHT", frame.onlineChip, "TOPLEFT", -8, 0)
 
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
-    OldKraken.UIStyle.Input(searchBox)
+    OldKraken.UIStyle.Input(searchBox, {rounded = true})
     searchBox:SetSize(248, 34)
     searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 13, -59)
     searchBox:SetAutoFocus(false)
@@ -321,7 +321,7 @@ local function CreateRosterWindow(parent)
     frame.searchBox = searchBox
 
     local statusDropdown = CreateFrame("Frame", "OldKrakenRosterStatusDropdown", frame, "UIDropDownMenuTemplate")
-    OldKraken.UIStyle.Dropdown(statusDropdown)
+    OldKraken.UIStyle.Dropdown(statusDropdown, {rounded = true})
     statusDropdown:SetPoint("TOPLEFT", frame, "TOPLEFT", 271 - 16, -57)
     UIDropDownMenu_SetWidth(statusDropdown, 142)
     UIDropDownMenu_JustifyText(statusDropdown, "LEFT")
@@ -338,7 +338,7 @@ local function CreateRosterWindow(parent)
     frame.statusDropdown = statusDropdown
 
     local classDropdown = CreateFrame("Frame", "OldKrakenClassDropdown", frame, "UIDropDownMenuTemplate")
-    OldKraken.UIStyle.Dropdown(classDropdown)
+    OldKraken.UIStyle.Dropdown(classDropdown, {rounded = true})
     classDropdown:SetPoint("TOPLEFT", frame, "TOPLEFT", 459 - 16, -57)
     UIDropDownMenu_SetWidth(classDropdown, 132)
     UIDropDownMenu_JustifyText(classDropdown, "LEFT")
@@ -369,7 +369,7 @@ local function CreateRosterWindow(parent)
     frame.classDropdown = classDropdown
 
     local filter = CreateFrame('Frame', 'OldKrakenRosterAddonFilter', frame, 'UIDropDownMenuTemplate')
-    OldKraken.UIStyle.Dropdown(filter)
+    OldKraken.UIStyle.Dropdown(filter, {rounded = true})
     filter:SetPoint('TOPLEFT', frame, 'TOPLEFT', 637 - 16, -57)
     UIDropDownMenu_SetWidth(filter, 152)
     UIDropDownMenu_JustifyText(filter, 'LEFT')
@@ -385,7 +385,7 @@ local function CreateRosterWindow(parent)
     UIDropDownMenu_SetText(filter, ADDON_LABELS.all); frame.addonFilter = filter
 
     local resetButton = CreateFrame("Button", "OldKrakenRosterResetButton", frame, "UIPanelButtonTemplate")
-    OldKraken.UIStyle.Button(resetButton)
+    OldKraken.UIStyle.Button(resetButton, nil, {rounded = true})
     resetButton:SetSize(74, 34)
     resetButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 813, -59)
     resetButton:SetText("Скинути")
@@ -484,7 +484,7 @@ local function CreateRow(index, parent)
     local columns = {
         { x = 40, width = 190 },
         { x = 240, width = 70 },
-        { x = 320, width = 44, bold = true },
+        { x = 320, width = 44 },
         { x = 374, width = 80 },
         { x = 464, width = 160 },
         { x = 634, width = 110 },
@@ -509,8 +509,11 @@ local function CreateRow(index, parent)
     row.addonDot = row:CreateTexture(nil, 'OVERLAY')
     row.addonDot:SetSize(8, 8); row.addonDot:SetPoint('LEFT', row, 'LEFT', 754, 0)
     if OldKraken.UIStyle.PillBadge then
-        row.versionBadge = OldKraken.UIStyle.PillBadge(row, '', 'neutral', {width = 96, height = 19})
-        row.versionBadge:SetPoint('LEFT', row, 'LEFT', 766, 0)
+        row.versionBadge = OldKraken.UIStyle.PillBadge(row, '', 'neutral', {
+            width = 90, height = 19, fontSize = 11, rounded = true,
+            customColors = {success = {0.349, 0.902, 0.502, 1}}
+        })
+        row.versionBadge:SetPoint('LEFT', row, 'LEFT', 754, 0)
         row.versionBadge:Hide()
     end
     row.cellHovers = {}
@@ -675,25 +678,29 @@ function Roster:RenderVisible()
             cells[7]:SetTextColor(0.3, 0.8, 1); versionStatus = 'Новіша за вашу версію.'; badgeKind = 'info'
         elseif comparison == 0 then
             cells[7]:SetTextColor(0.25, 1, 0.25); versionStatus = 'Така сама версія, як у вас.'; badgeKind = 'success'
-        else
+        elseif version then
             cells[7]:SetTextColor(0.7, 0.7, 0.7)
-            if version then versionStatus = 'Не вдалося порівняти номер версії.' end
+            versionStatus = 'Не вдалося порівняти номер версії.'
         end
         cells[7]:SetText(version or '?')
         if row.versionBadge then
             if version then
+                row.addonDot:Hide()
                 row.versionBadge:SetKind(badgeKind)
                 row.versionBadge:Show()
                 cells[7]:ClearAllPoints()
                 cells[7]:SetPoint('CENTER', row.versionBadge, 'CENTER', 0, 0)
-                cells[7]:SetWidth(90)
+                cells[7]:SetWidth(84)
                 cells[7]:SetJustifyH('CENTER')
+                if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(cells[7], 11, false) end
             else
+                row.addonDot:Show()
                 row.versionBadge:Hide()
                 cells[7]:ClearAllPoints()
                 cells[7]:SetPoint('LEFT', row, 'LEFT', 768, 0)
-                cells[7]:SetWidth(90)
+                cells[7]:SetWidth(84)
                 cells[7]:SetJustifyH('LEFT')
+                if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(cells[7], 13, false) end
             end
         end
         row.cellHovers[7].fullText = (version or 'Невідомо') .. '\n' .. versionStatus

@@ -37,9 +37,10 @@ local raids = {
     {value='onyxia', label='Лігво Оніксії (Ony)', min=60, max=60},
 }
 OldKraken.ActivityCatalog = {dungeon=dungeons, raid=raids, roleIcons={
-    tank='|TInterface\\LFGFrame\\UI-LFG-ICON-ROLES:16:16:0:0:256:256:0:67:67:134|t',
-    healer='|TInterface\\LFGFrame\\UI-LFG-ICON-ROLES:16:16:0:0:256:256:67:134:0:67|t',
-    dps='|TInterface\\LFGFrame\\UI-LFG-ICON-ROLES:16:16:0:0:256:256:67:134:67:134|t',
+    tank='|TInterface\\AddOns\\OldKraken\\Media\\RoleIcons.tga:16:16:0:0:64:16:0:16:0:16|t',
+    healer='|TInterface\\AddOns\\OldKraken\\Media\\RoleIcons.tga:16:16:0:0:64:16:16:32:0:16|t',
+    dps='|TInterface\\AddOns\\OldKraken\\Media\\RoleIcons.tga:16:16:0:0:64:16:32:48:0:16|t',
+    flex='|TInterface\\AddOns\\OldKraken\\Media\\RoleIcons.tga:16:16:0:0:64:16:48:64:0:16|t',
 }}
 
 -- Loading-screen artwork already used by Group Finder; unknown activities use the same fallback.

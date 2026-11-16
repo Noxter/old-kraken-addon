@@ -23,6 +23,8 @@ function methods:SetFrameStrata(value) self.strata = value end
 function methods:SetToplevel(value) self.toplevel = value end
 function methods:SetTextColor(...) self.textColor = {...} end
 function methods:SetVertexColor(...) self.vertexColor = {...} end
+function methods:SetTexture(value) self.texture = value end
+function methods:SetTexCoord(...) self.texCoord = {...} end
 function methods:GetNormalTexture() return self.normalTexture end
 function methods:GetPushedTexture() return nil end
 function methods:GetFontString() return self.fontString end
@@ -115,17 +117,50 @@ local chip = style.Chip(CreateFrame(), 'Сповіщення: увімк.', {dot
 assert(chip.label.text == 'Сповіщення: увімк.' and chip.dot)
 chip:SetActive(true)
 assert(chip.active and chip.fill.color[1] == colors.primaryButton[1])
+local selChip = style.Chip(CreateFrame(), 'Рейд', {selStyle = true, active = true})
+assert(selChip.fill.color[1] == colors.sel[1] and selChip.borderEdges[1].color[1] == colors.selEdge[1])
+selChip:SetActive(false)
+assert(selChip.fill.color[1] == colors.button[1] and selChip.borderEdges[1].color[1] == colors.buttonEdge[1])
 
-local pill = style.PillBadge(CreateFrame(), 'Відкрито', 'success')
+local pill = style.PillBadge(CreateFrame(), 'Відкрито', 'success', {
+    width = 68, height = 19, fontSize = 11, bold = true, customColors = {success = {0.349, 0.902, 0.502, 1}},
+})
 assert(pill.label.text == 'Відкрито' and pill.kind == 'success')
-assert(pill.label.textColor[2] == colors.success[2])
+assert(pill.width == 68 and pill.label.font[2] == 11 and pill.label.textColor[1] == 0.349)
+
+local round = style.PillBadge(CreateFrame(), 'Закрито', 'neutral', {width = 68, height = 19, rounded = true})
+assert(#round.fillParts == 3 and #round.ringParts == 3 and round.fill == round.fillParts[2])
+round:Hide(); round:Show()
+
+local roundChip = style.Chip(CreateFrame(), 'Учасників 557', {width = 111, height = 30, rounded = true})
+assert(#roundChip.fillParts == 3 and #roundChip.ringParts == 3 and roundChip.fill == roundChip.fillParts[2])
+roundChip:Hide(); roundChip:Show()
+
+local roundBtn = CreateFrame()
+roundBtn.fontString = CreateFrame()
+style.Button(roundBtn, nil, {rounded = true})
+assert(#roundBtn.fillParts == 3 and #roundBtn.ringParts == 3 and roundBtn.fill == roundBtn.fillParts[2])
+
+local roundInp = CreateFrame()
+style.Input(roundInp, {rounded = true})
+assert(#roundInp.oldKrakenFillParts == 3 and #roundInp.oldKrakenRingParts == 3)
+
+local roundDd = CreateFrame('Frame', 'OldKrakenStyleRoundDropdown')
+_G.OldKrakenStyleRoundDropdownText = CreateFrame()
+_G.OldKrakenStyleRoundDropdownLeft = CreateFrame()
+_G.OldKrakenStyleRoundDropdownButton = CreateFrame()
+style.Dropdown(roundDd, {rounded = true})
+assert(#roundDd.oldKrakenFillParts == 3 and #roundDd.oldKrakenRingParts == 3)
 
 local selectedTab
 local tabs = style.SegmentedTabs(CreateFrame(), {
     {key = 'all', label = 'Усі групи', width = 87},
     {key = 'applications', label = 'Мої заявки', width = 125},
-}, function(key) selectedTab = key end, {active = 'all'})
+}, function(key) selectedTab = key end, {active = 'all', edgeKey = 'buttonEdge'})
 assert(tabs.activeKey == 'all' and tabs.tabs.all.selected and not tabs.tabs.applications.selected)
+assert(tabs.borderEdges[1].color[1] == colors.buttonEdge[1])
+assert(tabs.tabs.all.borderEdges[1]:IsShown() and not tabs.tabs.applications.borderEdges[1]:IsShown())
+assert(tabs.tabs.all.label.font[3] == 'OUTLINE' and tabs.tabs.applications.label.font[3] == '')
 tabs:SetBadge('applications', 2)
 assert(tabs.tabs.applications.badge:IsShown() and tabs.tabs.applications.badge.text.text == '2')
 tabs.tabs.applications.scripts.OnClick()
@@ -134,9 +169,10 @@ assert(selectedTab == 'applications')
 local step = style.StepIndicator(CreateFrame(), 1, 'Тип події')
 assert(step.number.text == '1' and step.title.text == 'Тип події')
 
+assert(colors.sel[1] == 0.102 and colors.selEdge[1] == 0.478)
 local card = CreateFrame()
 style.ApplySelection(card, true)
-assert(card.isSelected and card.selFill.color[1] == colors.sel[1])
+assert(card.isSelected and card.selFill.color[1] == 0.102 and card.selEdges[1].color[1] == 0.478)
 style.ApplySelection(card, false)
 assert(not card.isSelected and card.selFill.color[1] == colors.panel[1])
 ''')
