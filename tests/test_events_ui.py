@@ -103,8 +103,8 @@ end
 OldKraken.UIHub:ShowPage('events')
 local firstFrame = OldKrakenEventsFrame
 assert(firstFrame:IsShown(), 'events page is hidden')
-assert(firstFrame.width == 900 and firstFrame.height == 590, 'events page does not match the Hub page grid')
-assert(firstFrame.detailsContent.width == 370, 'event details column did not expand to the Hub grid')
+assert(firstFrame.width == 920 and firstFrame.height == 600, 'events page does not match the Hub page grid')
+assert(firstFrame.detailsContent.width == 400, 'event details column did not expand to the Hub grid')
 assert(firstFrame.alertButton.text == 'Сповіщення: увімк.', 'alert setting was not rendered')
 assert(firstFrame.pageLabel.text == '1 / 1', 'page label was not rendered')
 assert(firstFrame.empty:IsShown(), 'empty state was not rendered')
@@ -115,11 +115,11 @@ assert(firstFrame.pageLabel.point[4] == 196 and firstFrame.pageLabel.width == 64
 for i=1,9 do
     assert(OldKraken.GuildEvents:Create('Подія '..i,'',GetServerTime()+3600,'guild',10))
 end
-assert(firstFrame.pageLabel.text == '1 / 3', 'multi-page count was not rendered')
+assert(firstFrame.pageLabel.text == '1 / 2', 'multi-page count was not rendered')
 assert(firstFrame.previousPage:IsShown() and firstFrame.nextPage:IsShown(), 'multi-page arrows should be visible')
 assert(firstFrame.previousPage.point[4] == 143 and firstFrame.nextPage.point[4] == 268, 'multi-page controls are not centered')
 firstFrame.nextPage.scripts.OnClick()
-assert(firstFrame.pageLabel.text == '2 / 3', 'next page button did not advance')
+assert(firstFrame.pageLabel.text == '2 / 2', 'next page button did not advance')
 local before=#firstFrame.visible
 local delete=firstFrame.eventRows[1].delete
 assert(delete:IsShown(), 'owner delete button is hidden')
