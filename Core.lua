@@ -21,6 +21,22 @@ OldKraken.UIStyle.Colors = {
     text = {0.93, 0.94, 0.96},
     mutedText = {0.63, 0.67, 0.73},
     dropdownTint = {0.68, 0.59, 0.42},
+    -- Redesign palette: selection, zebra rows and status colours.
+    sel = {0.20, 0.28, 0.62, 0.55},
+    selEdge = {0.55, 0.66, 1, 1},
+    zebra = {1, 1, 1, 0.035},
+    divider = {0.20, 0.23, 0.29, 0.85},
+    white = {1, 1, 1, 1},
+    success = {0.41, 0.86, 0.55, 1},
+    warning = {1, 0.76, 0.42, 1},
+    danger = {1, 0.48, 0.43, 1},
+    info = {0.40, 0.70, 1, 1},
+    neutral = {0.63, 0.67, 0.73, 1},
+    roleTank = {0.40, 0.70, 1, 1},
+    roleHealer = {0.41, 0.86, 0.55, 1},
+    roleDps = {1, 0.48, 0.43, 1},
+    roleFlex = {1, 0.82, 0.42, 1},
+    roleEmpty = {0.16, 0.18, 0.22, 1},
 }
 
 function OldKraken.UIStyle.EmblemPath()
@@ -79,12 +95,12 @@ function OldKraken.UIStyle.Window(frame)
     local header = frame:CreateTexture(nil, 'BACKGROUND', nil, -7)
     header:SetPoint('TOPLEFT', frame, 'TOPLEFT', 0, 0)
     header:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, 0)
-    header:SetHeight(28)
+    header:SetHeight(30)
     header:SetColorTexture(unpack(colors.header))
     local accent = frame:CreateTexture(nil, 'ARTWORK')
     accent:SetColorTexture(unpack(colors.brandGold))
-    accent:SetPoint('TOPLEFT', frame, 'TOPLEFT', 0, -27)
-    accent:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, -27)
+    accent:SetPoint('TOPLEFT', frame, 'TOPLEFT', 0, -30)
+    accent:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, -30)
     accent:SetHeight(1)
     addOutline(frame, colors.panelEdge)
     if frame.TitleText then frame.TitleText:SetTextColor(unpack(colors.text)) end
@@ -164,6 +180,266 @@ function OldKraken.UIStyle.Panel(frame, x, y, width, height)
     panel:SetSize(width, height)
     panel:SetColorTexture(unpack(colors.panel))
     addPanelOutline(frame, x, y, width, height, colors.panelEdge)
+end
+
+-- ---------------------------------------------------------------------------
+-- Redesign components (shared by Groups, Events and Roster pages).
+-- All colours come from UIStyle.Colors; edges are plain 1 px rectangles.
+-- ---------------------------------------------------------------------------
+local UIStyle = OldKraken.UIStyle
+
+local function solid(frame, layer, color, alpha)
+    local texture = frame:CreateTexture(nil, layer or 'BACKGROUND')
+    texture:SetColorTexture(color[1], color[2], color[3], alpha or color[4] or 1)
+    return texture
+end
+
+-- Four 1 px edges whose colour can be changed later through SetBorderColor.
+local function createBorder(frame, color)
+    local edges = {}
+    for i, side in ipairs({'TOP', 'BOTTOM', 'LEFT', 'RIGHT'}) do
+        local edge = solid(frame, 'BORDER', color)
+        if side == 'TOP' or side == 'BOTTOM' then
+            edge:SetPoint(side .. 'LEFT', frame, side .. 'LEFT', 0, 0)
+            edge:SetPoint(side .. 'RIGHT', frame, side .. 'RIGHT', 0, 0)
+            edge:SetHeight(1)
+        else
+            edge:SetPoint('TOP' .. side, frame, 'TOP' .. side, 0, 0)
+            edge:SetPoint('BOTTOM' .. side, frame, 'BOTTOM' .. side, 0, 0)
+            edge:SetWidth(1)
+        end
+        edges[i] = edge
+    end
+    return edges
+end
+
+local function setBorderColor(edges, color, alpha)
+    for _, edge in ipairs(edges) do
+        edge:SetColorTexture(color[1], color[2], color[3], alpha or color[4] or 1)
+    end
+end
+
+function OldKraken.UIStyle.Font(fontString, size, bold)
+    local path = type(fontString.GetFont) == 'function' and fontString:GetFont() or nil
+    if type(path) ~= 'string' or path == '' then path = STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF' end
+    fontString:SetFont(path, size, bold and 'OUTLINE' or '')
+    return fontString
+end
+
+function OldKraken.UIStyle.Label(parent, text, size, colorKey)
+    local colors = OldKraken.UIStyle.Colors
+    local label = parent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    OldKraken.UIStyle.Font(label, size or 12)
+    local color = colors[colorKey or 'mutedText']
+    label:SetTextColor(color[1], color[2], color[3])
+    label:SetJustifyH('LEFT')
+    if text then label:SetText(text) end
+    return label
+end
+
+function OldKraken.UIStyle.Divider(parent)
+    local colors = OldKraken.UIStyle.Colors
+    local line = solid(parent, 'ARTWORK', colors.divider)
+    line:SetHeight(1)
+    return line
+end
+
+-- Bordered panel frame (returned) with the standard panel fill.
+function OldKraken.UIStyle.PanelFrame(parent, edgeKey)
+    local colors = OldKraken.UIStyle.Colors
+    local frame = CreateFrame('Frame', nil, parent)
+    frame.fill = solid(frame, 'BACKGROUND', colors.panel)
+    frame.fill:SetAllPoints(frame)
+    frame.borderEdges = createBorder(frame, colors[edgeKey or 'panelEdge'])
+    return frame
+end
+
+-- Compact interactive chip: optional status dot, label, active state.
+-- options: width, height, dot (colour key), active
+function OldKraken.UIStyle.Chip(parent, text, options)
+    local colors = OldKraken.UIStyle.Colors
+    options = options or {}
+    local chip = CreateFrame('Button', nil, parent)
+    chip:SetSize(options.width or 120, options.height or 28)
+    chip.fill = solid(chip, 'BACKGROUND', colors.button)
+    chip.fill:SetAllPoints(chip)
+    chip.borderEdges = createBorder(chip, colors.buttonEdge)
+    local hover = chip:CreateTexture(nil, 'HIGHLIGHT')
+    hover:SetAllPoints(chip)
+    hover:SetColorTexture(unpack(colors.actionBlue))
+    chip:SetHighlightTexture(hover)
+    local left = 10
+    if options.dot then
+        chip.dot = solid(chip, 'OVERLAY', colors[options.dot])
+        chip.dot:SetSize(8, 8)
+        chip.dot:SetPoint('LEFT', chip, 'LEFT', 10, 0)
+        left = 26
+    end
+    chip.label = chip:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    OldKraken.UIStyle.Font(chip.label, 12)
+    chip.label:SetPoint('LEFT', chip, 'LEFT', left, 0)
+    chip.label:SetPoint('RIGHT', chip, 'RIGHT', -10, 0)
+    chip.label:SetJustifyH(options.center and 'CENTER' or 'LEFT')
+    chip.label:SetWordWrap(false)
+    function chip:SetLabel(value) self.label:SetText(value or '') end
+    function chip:SetDotColor(key)
+        if self.dot then self.dot:SetColorTexture(unpack(colors[key] or colors.neutral)) end
+    end
+    function chip:SetActive(active)
+        self.active = active and true or false
+        local fill = self.active and colors.primaryButton or colors.button
+        local edge = self.active and colors.primaryButtonEdge or colors.buttonEdge
+        self.fill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+        setBorderColor(self.borderEdges, edge)
+        local text = self.active and colors.white or colors.text
+        self.label:SetTextColor(text[1], text[2], text[3])
+    end
+    chip:SetLabel(text)
+    chip:SetActive(options.active)
+    return chip
+end
+
+-- Status pill: translucent fill and 1 px edge in the status colour.
+-- kind: success | warning | danger | info | neutral
+function OldKraken.UIStyle.PillBadge(parent, text, kind, options)
+    local colors = OldKraken.UIStyle.Colors
+    options = options or {}
+    local pill = CreateFrame('Frame', nil, parent)
+    pill:SetHeight(options.height or 19)
+    pill.fill = solid(pill, 'BACKGROUND', colors.neutral, 0.16)
+    pill.fill:SetAllPoints(pill)
+    pill.borderEdges = createBorder(pill, colors.neutral)
+    pill.label = pill:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    OldKraken.UIStyle.Font(pill.label, 12)
+    pill.label:SetPoint('CENTER', pill, 'CENTER', 0, 0)
+    pill.label:SetWordWrap(false)
+    function pill:SetKind(value)
+        local color = colors[value] or colors.neutral
+        self.kind = value or 'neutral'
+        self.fill:SetColorTexture(color[1], color[2], color[3], 0.16)
+        setBorderColor(self.borderEdges, color, 1)
+        self.label:SetTextColor(color[1], color[2], color[3])
+    end
+    function pill:SetLabel(value)
+        self.label:SetText(value or '')
+        local width = options.width
+        if not width then
+            local measured = type(self.label.GetStringWidth) == 'function' and tonumber(self.label:GetStringWidth()) or nil
+            width = (measured or 48) + 18
+        end
+        self:SetWidth(width)
+    end
+    pill:SetKind(kind)
+    pill:SetLabel(text)
+    return pill
+end
+
+-- Segmented tab block shared by every page.
+-- items = {{key=, label=}, ...}; onSelect(key) is called on click.
+-- Returns the container; container.tabs[key] are the buttons.
+function OldKraken.UIStyle.SegmentedTabs(parent, items, onSelect, options)
+    local colors = OldKraken.UIStyle.Colors
+    options = options or {}
+    local height, pad, gap = options.height or 40, 5, 4
+    local box = CreateFrame('Frame', nil, parent)
+    box.fill = solid(box, 'BACKGROUND', colors.panel)
+    box.fill:SetAllPoints(box)
+    box.borderEdges = createBorder(box, colors.panelEdge)
+    box.tabs, box.order = {}, {}
+    local x = pad
+    for _, item in ipairs(items) do
+        local width = item.width or options.tabWidth or 120
+        local tab = CreateFrame('Button', nil, box)
+        tab:SetSize(width, height - pad * 2)
+        tab:SetPoint('TOPLEFT', box, 'TOPLEFT', x, -pad)
+        tab.key = item.key
+        tab.fill = solid(tab, 'BACKGROUND', colors.panel)
+        tab.fill:SetAllPoints(tab)
+        local hover = tab:CreateTexture(nil, 'HIGHLIGHT')
+        hover:SetAllPoints(tab)
+        hover:SetColorTexture(unpack(colors.actionBlue))
+        tab:SetHighlightTexture(hover)
+        tab.label = tab:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+        OldKraken.UIStyle.Font(tab.label, 13)
+        tab.label:SetPoint('LEFT', tab, 'LEFT', 14, 0)
+        tab.label:SetText(item.label)
+        tab.badge = CreateFrame('Frame', nil, tab)
+        tab.badge:SetSize(19, 15)
+        tab.badge:SetPoint('RIGHT', tab, 'RIGHT', -8, 0)
+        tab.badge.fill = solid(tab.badge, 'BACKGROUND', colors.brandGold)
+        tab.badge.fill:SetAllPoints(tab.badge)
+        tab.badge.text = tab.badge:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        OldKraken.UIStyle.Font(tab.badge.text, 12, true)
+        tab.badge.text:SetPoint('CENTER', tab.badge, 'CENTER', 0, 0)
+        tab.badge.text:SetTextColor(colors.window[1], colors.window[2], colors.window[3])
+        tab.badge:Hide()
+        tab:SetScript('OnClick', function() if onSelect then onSelect(item.key) end end)
+        box.tabs[item.key] = tab
+        box.order[#box.order + 1] = item.key
+        x = x + width + gap
+    end
+    box:SetSize(options.width or (x - gap + pad), height)
+    function box:SetActive(key)
+        self.activeKey = key
+        for tabKey, tab in pairs(self.tabs) do
+            local active = tabKey == key
+            local fill = active and colors.primaryButton or colors.panel
+            tab.fill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+            local text = active and colors.white or colors.mutedText
+            tab.label:SetTextColor(text[1], text[2], text[3])
+            tab.selected = active
+        end
+    end
+    function box:SetBadge(key, count)
+        local tab = self.tabs[key]
+        if not tab then return end
+        local value = tonumber(count) or 0
+        tab.badge.count = value
+        tab.badge.text:SetText(tostring(value))
+        tab.badge:SetShown(value > 0)
+    end
+    box:SetActive(options.active or (items[1] and items[1].key))
+    return box
+end
+
+-- Numbered step header: gold-edged square with a digit and a 15 px title.
+function OldKraken.UIStyle.StepIndicator(parent, number, title)
+    local colors = OldKraken.UIStyle.Colors
+    local step = CreateFrame('Frame', nil, parent)
+    step:SetHeight(26)
+    step.badge = CreateFrame('Frame', nil, step)
+    step.badge:SetSize(24, 24)
+    step.badge:SetPoint('LEFT', step, 'LEFT', 0, 0)
+    step.badge.fill = solid(step.badge, 'BACKGROUND', colors.brandGold, 0.14)
+    step.badge.fill:SetAllPoints(step.badge)
+    step.badge.borderEdges = createBorder(step.badge, colors.brandGold)
+    step.number = step.badge:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    OldKraken.UIStyle.Font(step.number, 12, true)
+    step.number:SetPoint('CENTER', step.badge, 'CENTER', 0, 0)
+    step.number:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3])
+    step.number:SetText(tostring(number))
+    step.title = step:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    OldKraken.UIStyle.Font(step.title, 15, true)
+    step.title:SetPoint('LEFT', step.badge, 'RIGHT', 10, 0)
+    step.title:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
+    step.title:SetText(title or '')
+    function step:SetTitle(value) self.title:SetText(value or '') end
+    return step
+end
+
+-- Selected / normal state for cards and rows (blue fill + light blue edge).
+function OldKraken.UIStyle.ApplySelection(card, selected)
+    local colors = OldKraken.UIStyle.Colors
+    if not card.selFill then
+        card.selFill = solid(card, 'BACKGROUND', colors.sel)
+        card.selFill:SetAllPoints(card)
+        card.selEdges = createBorder(card, colors.buttonEdge)
+    end
+    local fill = selected and colors.sel or colors.panel
+    local edge = selected and colors.selEdge or colors.buttonEdge
+    card.selFill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+    setBorderColor(card.selEdges, edge)
+    card.isSelected = selected and true or false
 end
 
 function OldKraken:InvitePlayer(name)

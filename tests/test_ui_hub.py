@@ -89,9 +89,11 @@ assert(hub.buttons.roster.activeBar.color[1] == OldKraken.UIStyle.Colors.brandGo
 assert(hub.buttons.roster.label.textColor[1] == OldKraken.UIStyle.Colors.brandGold[1])
 assert(hub.buttons.groups.label.textColor[1] == OldKraken.UIStyle.Colors.text[1])
 assert(hub.brandMark.texture.texture == OldKraken.UIStyle.EmblemPath())
-assert(hub.brandMark.width == 52 and hub.brandMark.height == 52)
+assert(hub.brandMark.width == 40 and hub.brandMark.height == 40)
+assert(hub.frame.width == 1140 and hub.frame.height == 680)
+assert(hub.content.width == 948 and hub.content.height == 648)
 assert(hub.contentTitle.text == 'Ростер' and hub.contentTitle.textColor[1] == OldKraken.UIStyle.Colors.brandGold[1])
-assert(hub.contentRule.width == 884 and hub.contentRule.color[1] == OldKraken.UIStyle.Colors.panelEdge[1])
+assert(hub.contentRule.width == 900 and hub.contentRule.color[1] == OldKraken.UIStyle.Colors.panelEdge[1])
 assert(hub.buttons.roster.point[5] ~= hub.buttons.groups.point[5])
 assert(hub.buttons.groups.point[5] ~= hub.buttons.events.point[5])
 
@@ -120,7 +122,7 @@ lua.execute((root / 'Workshop.lua').read_text(encoding='utf-8'))
 lua.execute('''
 local workshop = OldKraken.UIHub.pages.workshop
 assert(workshop and workshop.title == 'Майстерня' and workshop.shortcut == '04')
-assert(OldKraken.UIHub.buttons.workshop and OldKraken.UIHub.buttons.workshop.point[5] == -286)
+assert(OldKraken.UIHub.buttons.workshop and OldKraken.UIHub.buttons.workshop.point[5] == -250)
 
 function UnitName() return 'Tester', 'Realm' end
 function GetGuildInfo() return 'Guild' end
