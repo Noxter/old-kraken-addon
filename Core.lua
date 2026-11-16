@@ -45,28 +45,34 @@ end
 
 local function addOutline(frame, color)
     local top = frame:CreateTexture(nil, 'BORDER')
+    top.isOldKrakenEdge = true
     top:SetPoint('TOPLEFT', frame, 'TOPLEFT', 0, 0)
     top:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, 0)
     top:SetHeight(1)
     top:SetColorTexture(unpack(color))
 
     local bottom = frame:CreateTexture(nil, 'BORDER')
+    bottom.isOldKrakenEdge = true
     bottom:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 0, 0)
     bottom:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', 0, 0)
     bottom:SetHeight(1)
     bottom:SetColorTexture(unpack(color))
 
     local left = frame:CreateTexture(nil, 'BORDER')
+    left.isOldKrakenEdge = true
     left:SetPoint('TOPLEFT', frame, 'TOPLEFT', 0, 0)
     left:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 0, 0)
     left:SetWidth(1)
     left:SetColorTexture(unpack(color))
 
     local right = frame:CreateTexture(nil, 'BORDER')
+    right.isOldKrakenEdge = true
     right:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, 0)
     right:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', 0, 0)
     right:SetWidth(1)
     right:SetColorTexture(unpack(color))
+
+    return {top, bottom, left, right}
 end
 
 local function addPanelOutline(frame, x, y, width, height, color)
@@ -137,12 +143,27 @@ function OldKraken.UIStyle.Button(button, variant)
 end
 
 function OldKraken.UIStyle.Input(editBox)
+    local name = editBox:GetName()
+    if name then
+        for _, part in ipairs({'Left', 'Middle', 'Right'}) do
+            local texture = _G[name .. part]
+            if texture and texture.Hide then texture:Hide() end
+        end
+    end
     for _, part in ipairs({'Left', 'Middle', 'Right'}) do
         local region = editBox[part]
         if type(region) == 'table' and type(region.Hide) == 'function' then region:Hide() end
     end
+    if editBox.GetRegions then
+        for _, region in ipairs({editBox:GetRegions()}) do
+            if region:IsObjectType('Texture') and not region.isOldKraken and not region.isOldKrakenEdge then
+                region:Hide()
+            end
+        end
+    end
     local colors = OldKraken.UIStyle.Colors
     local background = editBox:CreateTexture(nil, 'BACKGROUND', nil, -8)
+    background.isOldKraken = true
     background:SetAllPoints(editBox)
     background:SetColorTexture(unpack(colors.button))
     addOutline(editBox, colors.buttonEdge)
@@ -155,9 +176,10 @@ function OldKraken.UIStyle.Dropdown(frame)
     if not name then return end
     for _, part in ipairs({'Left', 'Middle', 'Right'}) do
         local texture = _G[name .. part]
-        if texture and texture.SetVertexColor then
-            texture:SetVertexColor(unpack(colors.dropdownTint))
+        if texture then
+            if texture.SetVertexColor then texture:SetVertexColor(unpack(colors.dropdownTint)) end
             if texture.SetAlpha then texture:SetAlpha(0) end
+            if texture.Hide then texture:Hide() end
         end
     end
     if not frame.oldKrakenBox then
@@ -313,8 +335,12 @@ function OldKraken.UIStyle.Chip(parent, text, options)
     end
     chip.label = chip:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     OldKraken.UIStyle.Font(chip.label, 12)
-    chip.label:SetPoint('LEFT', chip, 'LEFT', left, 0)
-    chip.label:SetPoint('RIGHT', chip, 'RIGHT', right, 0)
+    if options.center then
+        chip.label:SetPoint('CENTER', chip, 'CENTER', 0, 0)
+    else
+        chip.label:SetPoint('LEFT', chip, 'LEFT', left, 0)
+        chip.label:SetPoint('RIGHT', chip, 'RIGHT', right, 0)
+    end
     chip.label:SetJustifyH(options.center and 'CENTER' or 'LEFT')
     chip.label:SetWordWrap(false)
     function chip:SetLabel(value) self.label:SetText(value or '') end
@@ -364,6 +390,20 @@ function OldKraken.UIStyle.PillBadge(parent, text, kind, options)
             width = (measured or 48) + 18
         end
         self:SetWidth(width)
+    end
+    local origHide = pill.Hide
+    function pill:Hide()
+        self.fill:Hide()
+        for _, edge in ipairs(self.borderEdges or {}) do edge:Hide() end
+        self.label:Hide()
+        if origHide then origHide(self) end
+    end
+    local origShow = pill.Show
+    function pill:Show()
+        if origShow then origShow(self) end
+        self.fill:Show()
+        for _, edge in ipairs(self.borderEdges or {}) do edge:Show() end
+        self.label:Show()
     end
     pill:SetKind(kind)
     pill:SetLabel(text)

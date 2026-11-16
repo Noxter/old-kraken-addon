@@ -286,9 +286,17 @@ local function CreateRosterWindow(parent)
         frame.TitleText:SetText("Old Kraken — Guild Roster")
     end
 
-    frame.totalChip = CreateStatChip(frame, 502, 142)
-    frame.onlineChip = CreateStatChip(frame, 652, 118)
-    frame.shownChip = CreateStatChip(frame, 778, 122)
+    frame.shownChip = CreateStatChip(frame, 0, 138)
+    frame.shownChip:ClearAllPoints()
+    frame.shownChip:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, 0)
+
+    frame.onlineChip = CreateStatChip(frame, 0, 122)
+    frame.onlineChip:ClearAllPoints()
+    frame.onlineChip:SetPoint("TOPRIGHT", frame.shownChip, "TOPLEFT", -10, 0)
+
+    frame.totalChip = CreateStatChip(frame, 0, 144)
+    frame.totalChip:ClearAllPoints()
+    frame.totalChip:SetPoint("TOPRIGHT", frame.onlineChip, "TOPLEFT", -10, 0)
 
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
     OldKraken.UIStyle.Input(searchBox)
@@ -297,7 +305,7 @@ local function CreateRosterWindow(parent)
     searchBox:SetAutoFocus(false)
     searchBox:SetTextInsets(10, 10, 0, 0)
     searchBox:SetText(settings.search or "")
-    local searchHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local searchHint = searchBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     searchHint:SetPoint("LEFT", searchBox, "LEFT", 12, 0)
     searchHint:SetText("Пошук гравця за ім’ям")
     local muted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
@@ -309,6 +317,7 @@ local function CreateRosterWindow(parent)
         if frame.searchHint then frame.searchHint:SetShown(settings.search == "") end
         Roster:Render()
     end)
+    searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     frame.searchBox = searchBox
 
     local statusDropdown = CreateFrame("Frame", "OldKrakenRosterStatusDropdown", frame, "UIDropDownMenuTemplate")
@@ -500,9 +509,9 @@ local function CreateRow(index, parent)
     row.addonDot = row:CreateTexture(nil, 'OVERLAY')
     row.addonDot:SetSize(8, 8); row.addonDot:SetPoint('LEFT', row, 'LEFT', 754, 0)
     if OldKraken.UIStyle.PillBadge then
-        row.versionBadge = OldKraken.UIStyle.PillBadge(row, '?', 'neutral', {width = 96, height = 19})
+        row.versionBadge = OldKraken.UIStyle.PillBadge(row, '', 'neutral', {width = 96, height = 19})
         row.versionBadge:SetPoint('LEFT', row, 'LEFT', 766, 0)
-        row.versionBadge.label:Hide()
+        row.versionBadge:Hide()
     end
     row.cellHovers = {}
     for _, cellIndex in ipairs({1, 2, 4, 5, 7}) do
@@ -658,7 +667,6 @@ function Roster:RenderVisible()
         local version = comm and comm.GetRosterVersion and comm:GetRosterVersion(member.name)
         local comparison = version and comm.CompareVersions and comm:CompareVersions(version, localVersion)
         row.addonDot:SetTexture(HasAddon(member.name) and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
-        cells[7]:SetText(version or '?')
         local badgeKind = 'neutral'
         local versionStatus = 'Версію не передано; оновіть аддон учасника та натисніть «Оновити».'
         if comparison == -1 then
@@ -671,6 +679,7 @@ function Roster:RenderVisible()
             cells[7]:SetTextColor(0.7, 0.7, 0.7)
             if version then versionStatus = 'Не вдалося порівняти номер версії.' end
         end
+        cells[7]:SetText(version or '?')
         if row.versionBadge then
             if version then
                 row.versionBadge:SetKind(badgeKind)
@@ -716,6 +725,13 @@ function Roster:RenderVisible()
         end
 
         row:Show()
+        if row.versionBadge then
+            if version then
+                row.versionBadge:Show()
+            else
+                row.versionBadge:Hide()
+            end
+        end
         local professions=OldKraken.Workshop and OldKraken.Workshop:GetMemberProfessions(member.name) or {}
         for i,icon in ipairs(row.professions) do
             local profession=professions[i]

@@ -673,9 +673,13 @@ refresh=function()
     window.detailPanel:SetShown(tab ~= 'create')
     window.detailsScroll:SetShown(tab ~= 'create' and not showingRequests)
     local detailsScrollBar = _G.OldKrakenGroupDetailsScrollScrollBar
-    local g = tab ~= 'create' and selected and Finder.groups[selected]
+    local g
+    if tab ~= 'create' and selected and type(Finder.groups) == 'table' then
+        g = Finder.groups[selected]
+        if type(g) ~= 'table' then g = nil end
+    end
     if type(detailsScrollBar) == 'table' and detailsScrollBar.SetShown then
-        detailsScrollBar:SetShown(g ~= nil and #(g.members or {}) > 3)
+        detailsScrollBar:SetShown(g ~= nil and type(g.members) == 'table' and #g.members > 3)
     end
     if g then
         local applicationStatus = Finder.pending[selected]
@@ -864,8 +868,9 @@ refresh=function()
         if own and not own.closed and not own.hidden then for _ in pairs(applicants) do requestCount = requestCount + 1 end end
     end
     window.requestsButton:SetText(showingRequests and '← До деталей' or ('Заявки: ' .. requestCount))
-    window.requestsButton:SetShown(tab ~= 'create' and (haveOwned or showingRequests))
+    window.requestsButton:SetShown(tab ~= 'create' and tab ~= 'applications' and (haveOwned or showingRequests))
     for _, control in ipairs(window.filterControls) do control:SetShown(tab == 'all') end
+    if window.freeFilter then window.freeFilter:Hide() end
     window.creationFooter:SetShown(tab=='create')
     window.LayoutCreation()
     local showCards=tab=='create' and (category=='dungeon' or category=='raid')
@@ -1131,12 +1136,18 @@ local function createWindow(parent)
     f.searchFilter:SetAutoFocus(false); f.searchFilter:SetTextInsets(8, 8, 0, 0); f.searchFilter:SetText('')
     f.searchFilter.label = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.searchFilter.label:Hide()
-    f.searchHint = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.searchHint = f.searchFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.searchHint:SetPoint('LEFT', f.searchFilter, 'LEFT', 10, 0)
     f.searchHint:SetText('Пошук групи')
     if muted then f.searchHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.searchFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
-    f.searchFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
+    f.searchFilter:SetScript('OnTextChanged', function(self)
+        if f.searchHint then
+            local text = (self and self.GetText and self:GetText()) or (f.searchFilter.GetText and f.searchFilter:GetText()) or ''
+            f.searchHint:SetShown(text == '')
+        end
+        offset=0; refresh()
+    end)
 
     f.dungeonFilter = dropdown(f, 195, -115, 176, activityOptions,
         function() return filterDungeon end, function(value) filterDungeon=value; offset=0; refresh() end)
@@ -1162,11 +1173,17 @@ local function createWindow(parent)
     f.minLevelFilter:SetSize(44, 34); f.minLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 704, -116)
     f.minLevelFilter:SetAutoFocus(false); f.minLevelFilter:SetTextInsets(6, 6, 0, 0); f.minLevelFilter:SetText('')
     f.minLevelFilter.label = f.levelRangeLabel
-    f.minLevelHint = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.minLevelHint = f.minLevelFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.minLevelHint:SetPoint('CENTER', f.minLevelFilter, 'CENTER', 0, 0); f.minLevelHint:SetText('від')
     if muted then f.minLevelHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.minLevelFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
-    f.minLevelFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
+    f.minLevelFilter:SetScript('OnTextChanged', function(self)
+        if f.minLevelHint then
+            local text = (self and self.GetText and self:GetText()) or (f.minLevelFilter.GetText and f.minLevelFilter:GetText()) or ''
+            f.minLevelHint:SetShown(text == '')
+        end
+        offset=0; refresh()
+    end)
 
     f.levelDash = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.levelDash:SetPoint('TOPLEFT', f, 'TOPLEFT', 753, -126); f.levelDash:SetText('–')
@@ -1176,11 +1193,17 @@ local function createWindow(parent)
     OldKraken.UIStyle.Input(f.maxLevelFilter)
     f.maxLevelFilter:SetSize(44, 34); f.maxLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 764, -116)
     f.maxLevelFilter:SetAutoFocus(false); f.maxLevelFilter:SetTextInsets(6, 6, 0, 0); f.maxLevelFilter:SetText('')
-    f.maxLevelHint = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.maxLevelHint = f.maxLevelFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.maxLevelHint:SetPoint('CENTER', f.maxLevelFilter, 'CENTER', 0, 0); f.maxLevelHint:SetText('до')
     if muted then f.maxLevelHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.maxLevelFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
-    f.maxLevelFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
+    f.maxLevelFilter:SetScript('OnTextChanged', function(self)
+        if f.maxLevelHint then
+            local text = (self and self.GetText and self:GetText()) or (f.maxLevelFilter.GetText and f.maxLevelFilter:GetText()) or ''
+            f.maxLevelHint:SetShown(text == '')
+        end
+        offset=0; refresh()
+    end)
     -- Backward-compatible alias for single-input callers
     f.levelFilter = f.minLevelFilter
 
@@ -1247,22 +1270,22 @@ local function createWindow(parent)
     end
     -- An inline, clipped three-column grid. No popup or additional click is needed.
     local picker=CreateFrame('Frame',nil,f)
-    picker:SetSize(840,450); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-92)
+    picker:SetSize(840,442); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-100)
     picker:EnableMouse(true); picker:EnableMouseWheel(true)
     local background=picker:CreateTexture(nil,'BACKGROUND')
     background:SetAllPoints(picker); background:SetColorTexture(0.035,0.04,0.05,1)
     picker.heading=picker:CreateFontString(nil,'OVERLAY','GameFontNormal')
-    picker.heading:SetPoint('TOPLEFT',picker,'TOPLEFT',10,-9)
+    picker.heading:SetPoint('TOPLEFT',picker,'TOPLEFT',10,-8)
     local hint=picker:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-    hint:SetPoint('TOPLEFT',picker,'TOPLEFT',160,-11)
+    hint:SetPoint('TOPLEFT',picker,'TOPLEFT',160,-10)
     hint:SetText('Підсвічено під ваш рівень · прокрутка коліщатком')
-    picker.clear=button(picker,'Без конкретного підземелля',605,-5,225,function() selectActivity('') end)
+    picker.clear=button(picker,'Без конкретного підземелля',605,-4,225,function() selectActivity('') end)
     local clip=CreateFrame('Frame',nil,picker)
-    clip:SetPoint('TOPLEFT',picker,'TOPLEFT',6,-36); clip:SetSize(808,407)
+    clip:SetPoint('TOPLEFT',picker,'TOPLEFT',6,-36); clip:SetSize(808,396)
     if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
     local content=CreateFrame('Frame',nil,clip)
     content:SetPoint('TOPLEFT',clip,'TOPLEFT',0,0); content:SetSize(808,1)
-    picker.clip=clip; picker.content=content; picker.cards={}; picker.offset=0; picker.viewportHeight=407; picker.fullHeight=1
+    picker.clip=clip; picker.content=content; picker.cards={}; picker.offset=0; picker.viewportHeight=396; picker.fullHeight=1
     function picker:ScrollTo(value)
         local maximum=math.max(0,(self.fullHeight or 0)-(self.viewportHeight or 407))
         self.offset=math.max(0,math.min(maximum,value or 0))
