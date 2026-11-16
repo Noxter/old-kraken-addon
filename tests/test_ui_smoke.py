@@ -196,7 +196,7 @@ end
 filtersShown(true)
 assert(ui.listScroll:IsShown() and ui.listSummary:IsShown())
 assert(ui.listSummary.text:find('Показано 6 груп', 1, true))
-assert(#ui.rows == 5 and ui.rows[5]:IsShown())
+assert(#ui.rows == 6 and ui.rows[5]:IsShown())
 assert(ui.tabs[1].button.activeMark:IsShown())
 assert(not ui.tabs[2].button.activeMark:IsShown())
 assert(ui.rows[1].art.width == 64 and ui.rows[1].art.height == 64)

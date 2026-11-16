@@ -496,6 +496,17 @@ end
 
 refresh=function()
     if not window or not window:IsShown() then return end
+    local compactMine = tab == 'mine'
+    local contentTop = compactMine and -103 or -179
+    window.listScroll:ClearAllPoints()
+    window.listScroll:SetPoint('TOPLEFT', window, 'TOPLEFT', 0, contentTop)
+    window.listScroll:SetHeight(compactMine and 476 or 400)
+    window.detailPanel:ClearAllPoints()
+    window.detailPanel:SetPoint('TOPLEFT', window, 'TOPLEFT', 570, contentTop)
+    window.detailPanel:SetHeight(compactMine and 504 or 428)
+    window.detailsScroll:ClearAllPoints()
+    window.detailsScroll:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, contentTop - 17)
+    window.detailsScroll:SetHeight(compactMine and 362 or 286)
     if not Finder:CanPerformRole(Finder.identity,role) then role=Finder:PreferredRole(); UIDropDownMenu_SetText(window.roleButton,'Ваша роль: ' .. roleLabel(role)) end
     local alertsOn = Finder:GroupAlertsEnabled()
     window.alertButton:SetText(alertsOn and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
@@ -1064,7 +1075,7 @@ local function createWindow(parent)
     f.emptyAction:ClearAllPoints()
     f.emptyAction:SetPoint('TOP', f.emptyList, 'BOTTOM', 0, -16)
 
-    for i = 1, 5 do ensureGroupCard(f, i) end
+    for i = 1, 6 do ensureGroupCard(f, i) end
 
     -- Right column: details panel (330 x 428 at 570, -179)
     if OldKraken.UIStyle.PanelFrame then

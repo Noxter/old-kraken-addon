@@ -35,7 +35,7 @@ local allocations=#createdFrames
 for i=1,500 do OldKraken.listeners.GROUP_FINDER_CHANGED() end
 assert(#deferred==1,'500 group updates must coalesce')
 drain()
-assert(#ui.visible==500 and #ui.rows==5)
+assert(#ui.visible==500 and #ui.rows==6)
 assert(#createdFrames==allocations,'updates must reuse cards')
 local card=ui.rows[1]
 local selected=ui.visible[1].group
