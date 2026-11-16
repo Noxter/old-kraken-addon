@@ -118,6 +118,45 @@ function OldKraken.UIStyle.Window(frame)
     accent:SetHeight(1)
     addOutline(frame, colors.panelEdge)
     if frame.TitleText then frame.TitleText:SetTextColor(unpack(colors.text)) end
+
+    local close = frame.CloseButton or (type(frame.GetName) == 'function' and frame:GetName() and _G[frame:GetName() .. 'CloseButton'])
+    if close and type(close) == 'table' and type(close.SetSize) == 'function' then
+        close:SetSize(22, 22)
+        close:ClearAllPoints()
+        close:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -6, -4)
+        for _, method in ipairs({'GetNormalTexture', 'GetPushedTexture', 'GetDisabledTexture', 'GetHighlightTexture'}) do
+            local tex = type(close[method]) == 'function' and close[method](close)
+            if tex and type(tex) == 'table' then
+                if type(tex.SetTexture) == 'function' then tex:SetTexture(nil) end
+                if type(tex.Hide) == 'function' then tex:Hide() end
+                if type(tex.SetAlpha) == 'function' then tex:SetAlpha(0) end
+            end
+        end
+        if not close.oldKrakenStyled then
+            local fill = close:CreateTexture(nil, 'BACKGROUND')
+            fill:SetAllPoints(close)
+            fill:SetColorTexture(unpack(colors.button))
+            close.fill = fill
+            addOutline(close, colors.buttonEdge)
+
+            local cross = close:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+            OldKraken.UIStyle.Font(cross, 13, 'BOLD')
+            cross:SetPoint('CENTER', close, 'CENTER', 0, 0)
+            cross:SetText('✕')
+            cross:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3])
+            close.cross = cross
+
+            close:SetScript('OnEnter', function()
+                fill:SetColorTexture(colors.danger[1], colors.danger[2], colors.danger[3], 0.45)
+                cross:SetTextColor(1, 1, 1)
+            end)
+            close:SetScript('OnLeave', function()
+                fill:SetColorTexture(unpack(colors.button))
+                cross:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3])
+            end)
+            close.oldKrakenStyled = true
+        end
+    end
 end
 
 function OldKraken.UIStyle.Button(button, variant)
@@ -182,32 +221,54 @@ function OldKraken.UIStyle.Dropdown(frame)
             if texture.Hide then texture:Hide() end
         end
     end
-    if not frame.oldKrakenBox then
-        local box = CreateFrame('Frame', nil, frame)
-        box:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -2)
-        box:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -16, 4)
-        local fill = box:CreateTexture(nil, 'BACKGROUND')
-        fill:SetAllPoints(box)
+    if not frame.oldKrakenFill then
+        local fill = frame:CreateTexture(nil, 'BACKGROUND', nil, -7)
+        fill:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -2)
+        fill:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -16, 4)
         fill:SetColorTexture(unpack(colors.button))
-        addOutline(box, colors.buttonEdge)
-        frame.oldKrakenBox = box
+        frame.oldKrakenFill = fill
+
+        local edges = {}
+        for i, side in ipairs({'TOP', 'BOTTOM', 'LEFT', 'RIGHT'}) do
+            local edge = frame:CreateTexture(nil, 'BORDER', nil, -6)
+            edge.isOldKrakenEdge = true
+            if side == 'TOP' or side == 'BOTTOM' then
+                edge:SetPoint(side .. 'LEFT', fill, side .. 'LEFT', 0, 0)
+                edge:SetPoint(side .. 'RIGHT', fill, side .. 'RIGHT', 0, 0)
+                edge:SetHeight(1)
+            else
+                edge:SetPoint('TOP' .. side, fill, 'TOP' .. side, 0, 0)
+                edge:SetPoint('BOTTOM' .. side, fill, 'BOTTOM' .. side, 0, 0)
+                edge:SetWidth(1)
+            end
+            edge:SetColorTexture(unpack(colors.buttonEdge))
+            edges[i] = edge
+        end
+        frame.oldKrakenEdges = edges
+        frame.oldKrakenBox = frame
     end
     local label = _G[name .. 'Text']
-    if label and label.SetTextColor then
-        label:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
-        if label.ClearAllPoints and frame.oldKrakenBox then
-            label:ClearAllPoints()
-            label:SetPoint('LEFT', frame.oldKrakenBox, 'LEFT', 10, 0)
-            label:SetPoint('RIGHT', frame.oldKrakenBox, 'RIGHT', -22, 0)
+    if label then
+        if label.SetDrawLayer then label:SetDrawLayer('OVERLAY', 7) end
+        if label.SetTextColor then
+            label:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
         end
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(label, 12) end
+        if label.ClearAllPoints then
+            label:ClearAllPoints()
+            label:SetPoint('LEFT', frame, 'LEFT', 26, 1)
+            label:SetPoint('RIGHT', frame, 'RIGHT', -38, 1)
+        end
+        if label.SetJustifyH then label:SetJustifyH('LEFT') end
+        if label.Show then label:Show() end
     end
     local toggle = _G[name .. 'Button']
     if toggle then
         local arrow = type(toggle.GetNormalTexture) == 'function' and toggle:GetNormalTexture()
         if arrow and arrow.SetVertexColor then arrow:SetVertexColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
-        if toggle.ClearAllPoints and frame.oldKrakenBox then
+        if toggle.ClearAllPoints then
             toggle:ClearAllPoints()
-            toggle:SetPoint('RIGHT', frame.oldKrakenBox, 'RIGHT', -4, 0)
+            toggle:SetPoint('RIGHT', frame, 'RIGHT', -20, 1)
             toggle:SetSize(20, 20)
         end
     end
