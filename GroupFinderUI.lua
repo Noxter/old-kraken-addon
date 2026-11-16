@@ -496,7 +496,7 @@ end
 
 refresh=function()
     if not window or not window:IsShown() then return end
-    local compactMine = tab == 'mine'
+    local compactMine = tab == 'mine' or tab == 'applications'
     local contentTop = compactMine and -103 or -179
     window.listScroll:ClearAllPoints()
     window.listScroll:SetPoint('TOPLEFT', window, 'TOPLEFT', 0, contentTop)
