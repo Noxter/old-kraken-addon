@@ -23,7 +23,8 @@ function scroll:GetHeight() return 440 end
 function scroll:GetVerticalScroll() return self.offset end
 function scroll:SetVerticalScroll(value) self.offset=value; self.scripts.OnVerticalScroll(self,value) end
 roster:Load()
-assert(professions==21)
+-- viewport=440, ROW_HEIGHT=40 -> math.ceil(440 / 40) + 1 = 12 visible pooled rows.
+assert(professions==12)
 local initial=#createdFrames
 assert(initial<650,'must not allocate rows for all 500 members')
 local function visible()
@@ -33,12 +34,12 @@ local function visible()
     end
     return result
 end
-assert(#visible()==21 and visible()[1].member.name=='Member 001')
-for offset=0,10560,220 do
+assert(#visible()==12 and visible()[1].member.name=='Member 001')
+for offset=0,19600,400 do
     scroll:SetVerticalScroll(offset)
-    assert(#visible()<=21 and #createdFrames==initial)
+    assert(#visible()<=12 and #createdFrames==initial)
 end
-assert(visible()[20].member.name=='Member 500')
+assert(visible()[11].member.name=='Member 500')
 local first=visible()[1]
 first.scripts.OnClick(first,'RightButton')
 assert(menuItems[1].text==first.member.name)

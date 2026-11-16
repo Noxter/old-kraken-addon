@@ -36,6 +36,19 @@ function methods:CreateTexture()
     self.textures[#self.textures + 1] = texture
     return texture
 end
+function methods:CreateFontString()
+    local text = setmetatable({scripts = {}}, {__index = methods})
+    return text
+end
+function methods:SetFont(...) self.font = {...} end
+function methods:SetJustifyH(value) self.justifyH = value end
+function methods:SetWordWrap(value) self.wordWrap = value end
+function methods:SetText(value) self.text = value end
+function methods:GetStringWidth() return 40 end
+function methods:Show() self.shown = true end
+function methods:Hide() self.shown = false end
+function methods:SetShown(value) self.shown = value == true end
+function methods:IsShown() return self.shown == true end
 local meta = {__index=function(_, key) return methods[key] end}
 function CreateFrame(_, name)
     local frame = setmetatable({scripts = {}, name = name}, meta)
@@ -97,4 +110,33 @@ local panel = CreateFrame()
 style.Panel(panel, 12, -42, 180, 600)
 assert(panel.textures[1].color[1] == colors.panel[1])
 assert(#panel.textures == 5)
+
+local chip = style.Chip(CreateFrame(), 'Сповіщення: увімк.', {dot = 'success', width = 156, height = 31})
+assert(chip.label.text == 'Сповіщення: увімк.' and chip.dot)
+chip:SetActive(true)
+assert(chip.active and chip.fill.color[1] == colors.primaryButton[1])
+
+local pill = style.PillBadge(CreateFrame(), 'Відкрито', 'success')
+assert(pill.label.text == 'Відкрито' and pill.kind == 'success')
+assert(pill.label.textColor[2] == colors.success[2])
+
+local selectedTab
+local tabs = style.SegmentedTabs(CreateFrame(), {
+    {key = 'all', label = 'Усі групи', width = 87},
+    {key = 'applications', label = 'Мої заявки', width = 125},
+}, function(key) selectedTab = key end, {active = 'all'})
+assert(tabs.activeKey == 'all' and tabs.tabs.all.selected and not tabs.tabs.applications.selected)
+tabs:SetBadge('applications', 2)
+assert(tabs.tabs.applications.badge:IsShown() and tabs.tabs.applications.badge.text.text == '2')
+tabs.tabs.applications.scripts.OnClick()
+assert(selectedTab == 'applications')
+
+local step = style.StepIndicator(CreateFrame(), 1, 'Тип події')
+assert(step.number.text == '1' and step.title.text == 'Тип події')
+
+local card = CreateFrame()
+style.ApplySelection(card, true)
+assert(card.isSelected and card.selFill.color[1] == colors.sel[1])
+style.ApplySelection(card, false)
+assert(not card.isSelected and card.selFill.color[1] == colors.panel[1])
 ''')

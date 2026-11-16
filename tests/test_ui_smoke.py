@@ -8,10 +8,32 @@ OldKraken = {name = 'OldKraken', listeners = {}}; UIParent = {GetWidth=function(
 function UnitLevel() return 20 end
 OldKraken.UIStyle = {
     Colors = {
+        window = {0.025, 0.035, 0.055, 0.98},
+        panel = {0.055, 0.07, 0.095, 0.96},
         brandGold = {0.88, 0.69, 0.32, 1},
         panelEdge = {0.33, 0.26, 0.14, 0.68},
+        primaryButton = {0.30, 0.37, 0.83, 1},
+        primaryButtonEdge = {0.48, 0.54, 0.98, 1},
+        button = {0.08, 0.095, 0.125, 1},
+        buttonEdge = {0.20, 0.23, 0.29, 0.85},
+        actionBlue = {0.31, 0.43, 0.95, 0.24},
         text = {0.93, 0.94, 0.96},
         mutedText = {0.63, 0.67, 0.73},
+        sel = {0.20, 0.28, 0.62, 0.55},
+        selEdge = {0.55, 0.66, 1, 1},
+        zebra = {1, 1, 1, 0.035},
+        divider = {0.20, 0.23, 0.29, 0.85},
+        white = {1, 1, 1, 1},
+        success = {0.41, 0.86, 0.55, 1},
+        warning = {1, 0.76, 0.42, 1},
+        danger = {1, 0.48, 0.43, 1},
+        info = {0.40, 0.70, 1, 1},
+        neutral = {0.63, 0.67, 0.73, 1},
+        roleTank = {0.40, 0.70, 1, 1},
+        roleHealer = {0.41, 0.86, 0.55, 1},
+        roleDps = {1, 0.48, 0.43, 1},
+        roleFlex = {1, 0.82, 0.42, 1},
+        roleEmpty = {0.16, 0.18, 0.22, 1},
     },
     EmblemPath = function() return 'OldKrakenEmblem.tga' end,
     Window = function() end,
@@ -19,6 +41,54 @@ OldKraken.UIStyle = {
     Input = function() end,
     Dropdown = function() end,
     Panel = function() end,
+    Font = function(fs) return fs end,
+    Label = function(parent, text) local fs = parent:CreateFontString(); fs:SetText(text or ''); return fs end,
+    Divider = function(parent) return parent:CreateTexture() end,
+    PanelFrame = function(parent) return CreateFrame('Frame', nil, parent) end,
+    Chip = function(parent, text)
+        local c = CreateFrame('Button', nil, parent)
+        c.label = c:CreateFontString(); c.dot = c:CreateTexture()
+        function c:SetLabel(v) self.label:SetText(v or '') end
+        function c:SetDotColor() end
+        function c:SetActive(a) self.active = a and true or false end
+        c:SetLabel(text); return c
+    end,
+    PillBadge = function(parent, text, kind)
+        local p = CreateFrame('Frame', nil, parent)
+        p.fill = p:CreateTexture(); p.label = p:CreateFontString()
+        function p:SetKind(k) self.kind = k end
+        function p:SetLabel(v) self.label:SetText(v or '') end
+        p:SetKind(kind); p:SetLabel(text); return p
+    end,
+    SegmentedTabs = function(parent, items, onSelect, options)
+        local box = CreateFrame('Frame', nil, parent)
+        box.tabs = {}
+        for _, item in ipairs(items) do
+            local tab = CreateFrame('Button', nil, box)
+            tab.label = tab:CreateFontString(); tab.label:SetText(item.label)
+            tab.badge = CreateFrame('Frame', nil, tab); tab.badge.text = tab.badge:CreateFontString()
+            tab:SetScript('OnClick', function() if onSelect then onSelect(item.key) end end)
+            box.tabs[item.key] = tab
+        end
+        function box:SetActive(key)
+            self.activeKey = key
+            for k, t in pairs(self.tabs) do t.selected = (k == key) end
+        end
+        function box:SetBadge(key, count)
+            local t = self.tabs[key]
+            if t then t.badge.count = count; t.badge:SetShown((tonumber(count) or 0) > 0) end
+        end
+        box:SetActive(options and options.active or (items[1] and items[1].key))
+        return box
+    end,
+    StepIndicator = function(parent, number, title)
+        local s = CreateFrame('Frame', nil, parent)
+        s.number = s:CreateFontString(); s.number:SetText(tostring(number))
+        s.title = s:CreateFontString(); s.title:SetText(title or '')
+        function s:SetTitle(v) self.title:SetText(v or '') end
+        return s
+    end,
+    ApplySelection = function(card, selected) card.isSelected = selected and true or false end,
 }
 function StaticPopup_Show() end
 function UIDropDownMenu_SetWidth() end
@@ -124,21 +194,21 @@ local function filtersShown(expected)
 end
 
 filtersShown(true)
-assert(ui.previousPageButton:IsShown() and ui.nextPageButton:IsShown() and ui.listPage:IsShown())
+assert(ui.listScroll:IsShown() and ui.listSummary:IsShown())
+assert(ui.listSummary.text:find('Показано 6 груп', 1, true))
+assert(#ui.rows == 5 and ui.rows[5]:IsShown())
 assert(ui.tabs[1].button.activeMark:IsShown())
 assert(not ui.tabs[2].button.activeMark:IsShown())
-assert(ui.previousPageButton.width == 80 and ui.previousPageButton.height == 36)
-assert(ui.nextPageButton.width == 80 and ui.nextPageButton.height == 36)
-assert(ui.rows[1].art.width == 70 and ui.rows[1].art.height == 70)
+assert(ui.rows[1].art.width == 64 and ui.rows[1].art.height == 64)
 assert(ui.rows[1].art.texCoord[2] - ui.rows[1].art.texCoord[1]
     == ui.rows[1].art.texCoord[4] - ui.rows[1].art.texCoord[3])
 selectTab('mine'); filtersShown(false)
 assert(ui.tabs[4].button.activeMark:IsShown() and not ui.tabs[1].button.activeMark:IsShown())
 selectTab('applications'); filtersShown(false)
 selectTab('create'); filtersShown(false)
-assert(not ui.previousPageButton:IsShown() and not ui.nextPageButton:IsShown() and not ui.listPage:IsShown())
+assert(not ui.listScroll:IsShown() and not ui.listSummary:IsShown())
 selectTab('all'); filtersShown(true)
-assert(ui.previousPageButton:IsShown() and ui.nextPageButton:IsShown())
+assert(ui.listScroll:IsShown() and ui.listSummary:IsShown())
 
 selectDropdown(ui.roleFilter, 'healer')
 assert(hasTitle('Tank needs healer'))
@@ -153,13 +223,24 @@ selectDropdown(ui.dungeonFilter, 'rfc')
 assert(#ui.visible == 4)
 selectDropdown(ui.freeFilter, true)
 assert(#ui.visible == 3 and not hasTitle('Full dungeon'))
-ui.levelFilter:SetText('25')
-ui.levelFilter.scripts.OnTextChanged()
+ui.minLevelFilter:SetText('20')
+ui.minLevelFilter.scripts.OnTextChanged()
+ui.maxLevelFilter:SetText('30')
+ui.maxLevelFilter.scripts.OnTextChanged()
+assert(#ui.visible == 2 and not hasTitle('Higher level dungeon'))
+-- Inverted range (from > to) is handled gracefully by swapping bounds.
+ui.minLevelFilter:SetText('30')
+ui.minLevelFilter.scripts.OnTextChanged()
+ui.maxLevelFilter:SetText('20')
+ui.maxLevelFilter.scripts.OnTextChanged()
 assert(#ui.visible == 2)
 ui.searchFilter:SetText('Tank needs healer')
 ui.searchFilter.scripts.OnTextChanged()
 assert(#ui.visible == 1 and hasTitle('Tank needs healer'))
-assert(not ui.previousPageButton:IsShown() and not ui.nextPageButton:IsShown() and not ui.listPage:IsShown())
+assert(ui.listSummary.text:find('Показано 1 груп', 1, true))
+-- Reset button clears all filters and restores all 6 open groups.
+ui.resetFilterButton.scripts.OnClick()
+assert(#ui.visible == 6 and ui.searchFilter:GetText() == '' and ui.minLevelFilter:GetText() == '' and ui.maxLevelFilter:GetText() == '')
 
 selectTab('create')
 local function selectActivityCard(value)

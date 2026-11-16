@@ -242,7 +242,7 @@ local function showRequests()
     if not requestsWindow then
         local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', window)
         f:Hide()
-        f:SetSize(300, 175); f:SetPoint('TOPLEFT', window, 'TOPLEFT', 550, -70)
+        f:SetSize(296, 300); f:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -196)
         f:EnableMouse(true)
         f.count = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
         f.count:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, 0)
@@ -299,19 +299,232 @@ local function showRequests()
     requestsWindow:Show(); refreshRequests(); if refresh then refresh() end
 end
 
+local CARD_HEIGHT, CARD_STEP, VISIBLE_CARDS = 84, 92, 5
+
+local function roleSlotColor(roleKey, occupied)
+    local colors = OldKraken.UIStyle.Colors or {}
+    if not occupied then return colors.roleEmpty or {0.16, 0.18, 0.22, 1} end
+    if roleKey == 'tank' then return colors.roleTank or {0.40, 0.70, 1, 1}
+    elseif roleKey == 'healer' then return colors.roleHealer or {0.41, 0.86, 0.55, 1}
+    elseif roleKey == 'dps' then return colors.roleDps or {1, 0.48, 0.43, 1}
+    else return colors.roleFlex or {1, 0.82, 0.42, 1} end
+end
+
+local function ensureGroupCard(f, index)
+    if f.rows[index] then return f.rows[index] end
+    local card
+    card = button(f.listContent, '', 0, -(index - 1) * CARD_STEP, 534, function(self)
+        local entry = (self and self.entry) or (card and card.entry) or (f.visible and f.visible[index])
+        if entry then
+            if requestsWindow then requestsWindow:Hide() end
+            if selected ~= entry.key then requestOffset = 0; f.detailsScroll:SetVerticalScroll(0) end
+            selected = entry.key
+            refresh()
+        end
+    end, CARD_HEIGHT)
+    card:SetHeight(CARD_HEIGHT)
+    card.art = card:CreateTexture(nil, 'ARTWORK')
+    card.art:SetPoint('TOPLEFT', card, 'TOPLEFT', 11, -10); card.art:SetSize(64, 64)
+    card.title = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    card.title:SetPoint('TOPLEFT', card, 'TOPLEFT', 87, -14); card.title:SetPoint('RIGHT', card, 'RIGHT', -138, 0)
+    card.title:SetJustifyH('LEFT'); card.title:SetWordWrap(false)
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(card.title, 14, true) end
+    local gold = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.brandGold
+    if gold then card.title:SetTextColor(gold[1], gold[2], gold[3]) end
+    card.meta = card:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+    card.meta:SetPoint('TOPLEFT', card, 'TOPLEFT', 87, -35); card.meta:SetPoint('RIGHT', card, 'RIGHT', -138, 0)
+    card.meta:SetJustifyH('LEFT'); card.meta:SetWordWrap(false)
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(card.meta, 13) end
+    card.members = card:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    card.members:SetPoint('TOPLEFT', card, 'TOPLEFT', 87, -55); card.members:SetPoint('RIGHT', card, 'RIGHT', -138, 0)
+    card.members:SetJustifyH('LEFT'); card.members:SetWordWrap(false)
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(card.members, 12) end
+    local muted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+    if muted then card.members:SetTextColor(muted[1], muted[2], muted[3]) end
+    card:SetScript('OnEnter', function(self)
+        if GameTooltip and self.tooltipTitle then
+            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+            GameTooltip:SetText(self.tooltipTitle)
+            if self.tooltipBody and self.tooltipBody ~= '' then GameTooltip:AddLine(self.tooltipBody, 1, 1, 1, true) end
+            GameTooltip:Show()
+        end
+    end)
+    card:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+
+    if OldKraken.UIStyle.PillBadge then
+        card.statusPill = OldKraken.UIStyle.PillBadge(card, 'Відкрито', 'success', {width = 72, height = 19})
+        card.statusPill:SetPoint('BOTTOMRIGHT', card, 'BOTTOMRIGHT', -11, 14)
+        card.statusBackground = card.statusPill.fill
+        card.status = card.statusPill.label
+        card.status:SetWidth(68)
+        card.status:SetJustifyH('CENTER')
+    else
+        card.statusBackground = card:CreateTexture(nil, 'ARTWORK')
+        card.statusBackground:SetPoint('BOTTOMRIGHT', card, 'BOTTOMRIGHT', -11, 14)
+        card.statusBackground:SetSize(72, 19); card.statusBackground:SetColorTexture(0.035, 0.04, 0.05, 0.92)
+        card.status = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+        card.status:SetPoint('CENTER', card.statusBackground, 'CENTER'); card.status:SetWidth(68)
+        card.status:SetJustifyH('CENTER'); card.status:SetWordWrap(false)
+    end
+    card.slots = {}
+    local slotBorderColor = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.buttonEdge or {0.20, 0.23, 0.29, 0.85}
+    for slotIndex = 1, 5 do
+        local slot = CreateFrame('Button', nil, card)
+        slot:SetSize(20, 20); slot:SetPoint('TOPRIGHT', card, 'TOPRIGHT', -11 - (5 - slotIndex) * 24, -18)
+        slot.fill = slot:CreateTexture(nil, 'BACKGROUND')
+        slot.fill:SetAllPoints(slot)
+        slot.fill:SetColorTexture(unpack(roleSlotColor(nil, false)))
+        for _, side in ipairs({'TOP', 'BOTTOM', 'LEFT', 'RIGHT'}) do
+            local edge = slot:CreateTexture(nil, 'BORDER')
+            edge:SetColorTexture(slotBorderColor[1], slotBorderColor[2], slotBorderColor[3], slotBorderColor[4] or 1)
+            if side == 'TOP' or side == 'BOTTOM' then
+                edge:SetPoint(side .. 'LEFT', slot, side .. 'LEFT', 0, 0)
+                edge:SetPoint(side .. 'RIGHT', slot, side .. 'RIGHT', 0, 0)
+                edge:SetHeight(1)
+            else
+                edge:SetPoint('TOP' .. side, slot, 'TOP' .. side, 0, 0)
+                edge:SetPoint('BOTTOM' .. side, slot, 'BOTTOM' .. side, 0, 0)
+                edge:SetWidth(1)
+            end
+        end
+        slot.ring = slot:CreateTexture(nil, 'ARTWORK')
+        slot.ring:SetPoint('CENTER'); slot.ring:SetSize(14, 14)
+        slot.ring:SetColorTexture(0, 0, 0, 0)
+        slot.ring:Hide()
+        slot.icon = slot:CreateTexture(nil, 'OVERLAY')
+        slot.icon:SetPoint('CENTER'); slot.icon:SetSize(14, 14)
+        slot.text = slot:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall'); slot.text:SetPoint('CENTER'); slot.text:SetTextColor(1, 1, 1)
+        slot:SetScript('OnEnter', function(self)
+            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+            if self.member then
+                GameTooltip:SetText(playerLabel(self.member))
+                GameTooltip:AddLine('Роль: ' .. roleLabel(self.memberRole), 1, 1, 1)
+                local group = self.groupKey and Finder.groups[self.groupKey]
+                if group and self.member ~= group.owner then
+                    GameTooltip:AddLine(not group.partyObserved and 'Стан невідомий' or (group.partyObserved[self.member] and 'У паті' or 'Резерв'), 1, 1, 1)
+                end
+            else
+                GameTooltip:SetText('Вільне місце' .. (self.requiredRole and (': ' .. roleLabel(self.requiredRole)) or ''))
+                local group = self.groupKey and Finder.groups[self.groupKey]
+                if group and group.owner == Finder.identity then
+                    GameTooltip:AddLine('Це ваше оголошення', 1, 1, 1, true)
+                elseif Finder.pending[self.groupKey] == 'pending' then
+                    GameTooltip:AddLine('Заявка вже очікує відповіді', 1, 1, 1, true)
+                else
+                    GameTooltip:AddLine(self.requiredRole and 'Натисніть, щоб подати заявку на цю роль' or 'Натисніть, щоб вибрати роль і подати заявку', 1, 1, 1, true)
+                end
+            end
+            GameTooltip:Show()
+        end)
+        slot:SetScript('OnLeave', function() GameTooltip:Hide() end)
+        slot:SetScript('OnClick', function(self)
+            local group = self.groupKey and Finder.groups[self.groupKey]
+            if not group or self.member or group.closed or group.owner == Finder.identity
+                or #group.members >= group.maxSize or Finder.pending[self.groupKey] == 'pending' then return end
+            for _, name in ipairs(group.members) do if name == Finder.identity then return end end
+            if self.requiredRole then
+                if Finder:Apply(group.owner, group.id, self.requiredRole) then Finder:Changed(); refresh()
+                else print('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.') end
+                return
+            end
+            f.slotMenu.groupKey = self.groupKey
+            ToggleDropDownMenu(1, nil, f.slotMenu, self, 0, 0)
+            local list = _G.DropDownList1
+            if list and list:IsShown() then
+                if not list.oldKrakenRestoreHook then
+                    list:HookScript('OnHide', function(frame)
+                        if frame.oldKrakenStrata then frame:SetFrameStrata(frame.oldKrakenStrata); frame.oldKrakenStrata = nil end
+                    end)
+                    list.oldKrakenRestoreHook = true
+                end
+                if not list.oldKrakenStrata then list.oldKrakenStrata = list:GetFrameStrata() end
+                list:SetFrameStrata('FULLSCREEN_DIALOG')
+            end
+        end)
+        card.slots[slotIndex] = slot
+    end
+    f.rows[index] = card
+    local remove = CreateFrame('Button', nil, f.listContent)
+    remove:SetSize(24, 23)
+    remove:SetPoint('TOPLEFT', card, 'TOPRIGHT', 2, -2)
+    local function piece(x, y, width, height)
+        local texture = remove:CreateTexture(nil, 'ARTWORK')
+        texture:SetColorTexture(0.9, 0.32, 0.3, 1)
+        texture:SetSize(width, height)
+        texture:SetPoint('TOPLEFT', remove, 'TOPLEFT', x, -y)
+    end
+    piece(6, 6, 12, 2); piece(9, 4, 6, 2)
+    piece(7, 9, 2, 9); piece(15, 9, 2, 9); piece(7, 17, 10, 2)
+    remove:SetScript('OnClick', function()
+        local entry = card.entry or (f.visible and f.visible[index])
+        local group = entry and Finder.groups[entry.key]
+        if group and tab == 'applications' and Finder.pending[entry.key] then
+            if Finder:DismissApplication(group.owner, group.id) then
+                if selected == entry.key then selected = nil end
+                Finder:Changed(); refresh()
+            else print('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.') end
+            return
+        end
+        if not group or group.owner ~= Finder.identity then return end
+        if Finder:Delete(group.id) then
+            if selected == entry.key then selected = nil end
+            Finder:Changed()
+            refresh()
+        else
+            print('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.')
+        end
+    end)
+    remove:SetScript('OnEnter', function(self)
+        if GameTooltip then
+            local entry = card.entry or (f.visible and f.visible[index])
+            local status = entry and tab == 'applications' and Finder.pending[entry.key]
+            local label = status == 'pending' and 'Відкликати заявку'
+                or (status and 'Прибрати заявку зі списку' or 'Видалити групу')
+            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(label); GameTooltip:Show()
+        end
+    end)
+    remove:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    remove:Hide()
+    f.deleteButtons[index] = remove
+    return card
+end
+
 refresh=function()
     if not window or not window:IsShown() then return end
-    if not Finder:CanPerformRole(Finder.identity,role) then role=Finder:PreferredRole(); UIDropDownMenu_SetText(window.roleButton,roleLabel(role)) end
-    window.alertButton:SetText(Finder:GroupAlertsEnabled() and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
+    if not Finder:CanPerformRole(Finder.identity,role) then role=Finder:PreferredRole(); UIDropDownMenu_SetText(window.roleButton,'Ваша роль: ' .. roleLabel(role)) end
+    local alertsOn = Finder:GroupAlertsEnabled()
+    window.alertButton:SetText(alertsOn and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
+    if window.alertDot then
+        local c = OldKraken.UIStyle.Colors and (alertsOn and OldKraken.UIStyle.Colors.success or OldKraken.UIStyle.Colors.neutral) or {0.41, 0.86, 0.55, 1}
+        window.alertDot:SetColorTexture(c[1], c[2], c[3], 1)
+    end
+    local minText = window.minLevelFilter and window.minLevelFilter:GetText() or ''
+    local maxText = window.maxLevelFilter and window.maxLevelFilter:GetText() or ''
+    local minLevel = tonumber(minText)
+    local maxLevel = tonumber(maxText)
+    if minLevel and maxLevel and minLevel > maxLevel then minLevel, maxLevel = maxLevel, minLevel end
+    if window.minLevelHint then window.minLevelHint:SetShown(minText == '') end
+    if window.maxLevelHint then window.maxLevelHint:SetShown(maxText == '') end
+    local searchText = window.searchFilter:GetText() or ''
+    if window.searchHint then window.searchHint:SetShown(searchText == '') end
+    local query = string.lower(searchText)
     local lines = {}
+    local totalOpenGroups = 0
     for key, group in pairs(Finder.groups or {}) do
-        local level = tonumber(window.levelFilter:GetText())
-        local query = string.lower(window.searchFilter:GetText() or '')
+        if not group.closed then totalOpenGroups = totalOpenGroups + 1 end
+        local levelMatches = true
+        if minLevel and maxLevel then
+            levelMatches = group.maxLevel >= minLevel and group.minLevel <= maxLevel
+        elseif minLevel then
+            levelMatches = group.maxLevel >= minLevel
+        elseif maxLevel then
+            levelMatches = group.minLevel <= maxLevel
+        end
         local matches = (filterCategory == 'all' or group.category == filterCategory)
             and (filterDungeon == '' or group.dungeon == filterDungeon)
             and (filterRole == '' or (#group.members < group.maxSize and Finder:RoleAvailable(group, filterRole)))
             and (not filterFree or #group.members < group.maxSize)
-            and (not level or (level >= group.minLevel and level <= group.maxLevel))
+            and levelMatches
             and (query == '' or string.find(string.lower(group.title .. ' ' .. group.owner .. ' ' .. group.description .. ' ' .. (dungeonLabels[group.dungeon] or '')), query, 1, true))
         if (tab == 'all' and not group.closed and matches) or (tab == 'mine' and group.owner == Finder.identity and not group.hidden)
             or (tab == 'applications' and Finder.pending[key]) then
@@ -319,27 +532,57 @@ refresh=function()
         end
     end
     table.sort(lines, function(a,b) return a.group.title < b.group.title end)
-    if offset >= #lines then offset = math.max(0, math.floor((#lines - 1) / CARDS_PER_PAGE) * CARDS_PER_PAGE) end
     window.visible = lines
+    local pendingApplications = 0
+    for key in pairs(Finder.pending or {}) do
+        if Finder.groups and Finder.groups[key] then pendingApplications = pendingApplications + 1 end
+    end
+    if window.tabBar and window.tabBar.SetBadge then
+        window.tabBar:SetBadge('applications', pendingApplications)
+        window.tabBar:SetActive(tab)
+    end
     local empty = #lines == 0 and tab ~= 'create'
-    window.emptyList:SetText(tab == 'applications' and 'Ви ще не подали жодної заявки.' or (tab == 'mine' and 'У вас ще немає оголошень.' or 'Груп не знайдено. Змініть фільтри або створіть оголошення.'))
+    local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= ''
+        or searchText ~= '' or minText ~= '' or maxText ~= ''
+    if tab == 'applications' then
+        window.emptyList:SetText('Ви ще не подали жодної заявки.')
+    elseif tab == 'mine' then
+        window.emptyList:SetText('У вас ще немає оголошень.')
+    elseif hasFilters and totalOpenGroups > 0 then
+        window.emptyList:SetText('За обраними фільтрами груп не знайдено.\nСкиньте фільтри або створіть власне оголошення.')
+    else
+        window.emptyList:SetText('Доступних груп поки немає.\nСтворіть перше оголошення для гільдії.')
+    end
     window.emptyList:SetShown(empty)
-    local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= '' or (window.searchFilter:GetText() or '') ~= '' or (window.levelFilter:GetText() or '') ~= ''
-    window.emptyAction:SetText(tab == 'applications' and 'Знайти групу' or (tab == 'all' and hasFilters and 'Очистити фільтри' or 'Створити оголошення'))
+    window.emptyAction:SetText(tab == 'applications' and 'Знайти групу' or (tab == 'all' and hasFilters and 'Скинути фільтри' or 'Створити оголошення'))
     window.emptyAction:SetShown(empty)
     for _, item in ipairs(window.tabs) do
         item.button.activeMark:SetShown(item.key == tab)
         if item.key == tab then item.button:LockHighlight() else item.button:UnlockHighlight() end
     end
-    local pageCount = math.ceil(#lines / CARDS_PER_PAGE)
-    local showPagination = tab ~= 'create' and pageCount > 1
-    window.listPage:SetText(showPagination and ((math.floor(offset / CARDS_PER_PAGE) + 1) .. ' / ' .. pageCount) or '')
-    window.listPage:SetShown(showPagination)
-    window.previousPageButton:SetShown(showPagination)
-    window.nextPageButton:SetShown(showPagination)
-    for i, b in ipairs(window.rows) do
-        local entry = lines[i + offset]
+    window.listScroll:SetShown(tab ~= 'create')
+    local listScrollBar = _G.OldKrakenGroupListScrollScrollBar
+    if type(listScrollBar) == 'table' and listScrollBar.SetShown then listScrollBar:SetShown(tab ~= 'create' and #lines > 4) end
+    window.listSummary:SetShown(tab ~= 'create' and (#lines > 0 or tab == 'all'))
+    window.listSummary:SetText(string.format('Показано %d груп · список оновлюється автоматично', #lines))
+    local listViewport = tonumber((window.listScroll:GetHeight())) or 400
+    if listViewport <= 0 then listViewport = 400 end
+    local fullListHeight = math.max(1, #lines * CARD_STEP - 8)
+    window.listContent:SetHeight(fullListHeight)
+    local rawListScroll = tonumber((window.listScroll:GetVerticalScroll())) or 0
+    local clampedListScroll = math.max(0, math.min(rawListScroll, math.max(0, fullListHeight - listViewport)))
+    if clampedListScroll ~= rawListScroll then window.listScroll:SetVerticalScroll(clampedListScroll) end
+    local firstCardIndex = math.floor(clampedListScroll / CARD_STEP) + 1
+    local cardWidth = #lines > 4 and 530 or 554
+    for i = 1, #window.rows do
+        local dataIndex = firstCardIndex + i - 1
+        local entry = lines[dataIndex]
+        local b = window.rows[i]
+        b.entry = entry
         if entry then
+            b:SetWidth(cardWidth)
+            b:ClearAllPoints()
+            b:SetPoint('TOPLEFT', window.listContent, 'TOPLEFT', 0, -((dataIndex - 1) * CARD_STEP))
             local g = entry.group
             local status = Finder.pending[entry.key]
             local kind = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category] or g.category
@@ -352,57 +595,88 @@ refresh=function()
                     if g.partyObserved[name] then present[#present + 1] = name else reserved = reserved + 1 end
                 end
             end
-            b.meta:SetText(string.format('%s  ·  %d–%d  ·  місць %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (' · резерв ' .. reserved) or ''))
+            b.meta:SetText(string.format('%s  ·  рівні %d–%d  ·  місць %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (' · резерв ' .. reserved) or ''))
             local badge = tab == 'applications' and applicationBadges[status]
             if badge then
+                if b.statusPill and b.statusPill.SetKind then
+                    local pillKind = status == 'reject' and 'danger' or (status == 'closed' and 'neutral' or 'warning')
+                    b.statusPill:SetKind(pillKind)
+                end
                 b.status:SetText(badge.text); b.status:SetTextColor(unpack(badge.color)); b.status:Show(); b.statusBackground:Show()
-            else b.status:Hide(); b.statusBackground:Hide() end
-            local preview = {}
-            if g.partyObserved and #present > 0 then
-                preview[1] = playerLabel(g.owner)
-                for memberIndex = 1, math.min(#present, 2) do preview[#preview + 1] = playerLabel(present[memberIndex]) end
-                b.members:SetText('У паті: ' .. table.concat(preview, ', ') .. (#present > 2 and ('  +' .. (#present - 2)) or ''))
+                if b.statusPill then b.statusPill:Show() end
             else
-                b.members:SetText(g.partyObserved and 'Автор поки без паті' or 'Склад паті не підтверджено')
+                local openKind = g.closed and 'neutral' or (#g.members >= g.maxSize and 'warning' or 'success')
+                local openLabel = g.closed and 'Закрито' or (#g.members >= g.maxSize and 'Заповнено' or 'Відкрито')
+                if b.statusPill and b.statusPill.SetKind then
+                    b.statusPill:SetKind(openKind)
+                    b.statusPill:SetLabel(openLabel)
+                    b.statusPill:Show()
+                else
+                    b.status:SetText(openLabel); b.status:Show(); b.statusBackground:Show()
+                end
             end
+            local partyLine
+            if g.partyObserved and #present > 0 then
+                local preview = {playerLabel(g.owner)}
+                for memberIndex = 1, math.min(#present, 2) do preview[#preview + 1] = playerLabel(present[memberIndex]) end
+                partyLine = 'У паті: ' .. table.concat(preview, ', ') .. (#present > 2 and ('  +' .. (#present - 2)) or '')
+            else
+                partyLine = g.partyObserved and 'Автор поки без паті' or 'Склад паті не підтверджено'
+            end
+            b.members:SetText(g.description ~= '' and g.description or partyLine)
+            b.tooltipTitle = g.title
+            b.tooltipBody = g.description ~= '' and (g.description .. '\n' .. partyLine) or partyLine
             local fixedSlots = g.category == 'dungeon' and g.maxSize == 5 and Finder:DungeonSlots(g) or nil
             for slotIndex, slot in ipairs(b.slots) do
                 if slotIndex <= math.min(5, g.maxSize) then
-                    -- In larger groups the last circle remains an entry point
-                    -- for any free place; the detailed roster retains all names.
                     local fixed = fixedSlots and fixedSlots[slotIndex]
                     local member = fixed and fixed.member or (not fixed and g.members[slotIndex])
                     if not fixed and slotIndex == 5 and g.maxSize > 5 and #g.members < g.maxSize then member = nil end
                     local memberRole = fixed and fixed.memberRole or (member and (member == g.owner and g.role or (g.memberRoles and g.memberRoles[member]) or '')) or ''
                     slot.groupKey, slot.member, slot.memberRole, slot.requiredRole = entry.key, member, memberRole, fixed and fixed.role or nil
+                    if slot.fill then slot.fill:SetColorTexture(unpack(roleSlotColor(memberRole, member ~= nil))) end
                     if member then
                         local isReserved = member ~= g.owner and g.partyObserved and not g.partyObserved[member]
                         if roleCoords[memberRole] then
-                            slot.ring:Hide(); setRoleIcon(slot.icon, memberRole); slot.icon:SetAlpha(isReserved and 0.45 or 1); slot.icon:Show(); slot.text:Hide()
+                            slot.ring:Hide(); setRoleIcon(slot.icon, memberRole); slot.icon:SetDesaturated(false); slot.icon:SetAlpha(isReserved and 0.45 or 1); slot.icon:Show(); slot.text:Hide()
                         elseif memberRole == 'flex' then
                             slot.ring:Hide(); slot.icon:Hide(); slot.text:SetText('F'); slot.text:Show()
                         else
-                            slot.ring:Show(); slot.icon:Hide(); slot.text:SetText('?'); slot.text:Show()
+                            slot.ring:Hide(); slot.icon:Hide(); slot.text:SetText('?'); slot.text:Show()
                         end
                     else
-                        slot.ring:Show(); slot.icon:Hide(); slot.text:Hide()
+                        slot.ring:Hide(); slot.text:Hide()
+                        local req = fixed and fixed.role
+                        if req and roleCoords[req] then
+                            setRoleIcon(slot.icon, req); slot.icon:SetDesaturated(true); slot.icon:SetAlpha(0.32); slot.icon:Show()
+                        else
+                            slot.icon:Hide()
+                        end
                     end
                     slot:Show()
                 else slot:Hide() end
             end
+            if OldKraken.UIStyle.ApplySelection then
+                OldKraken.UIStyle.ApplySelection(b, selected == entry.key)
+            end
             if selected == entry.key then b:LockHighlight() else b:UnlockHighlight() end
             b:Show()
             if (tab == 'applications' and status) or (g.owner == Finder.identity and not g.hidden) then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
-        else
+        elseif b then
             b:UnlockHighlight()
             b:Hide()
-            window.deleteButtons[i]:Hide()
+            if window.deleteButtons[i] then window.deleteButtons[i]:Hide() end
         end
     end
     if tab == 'create' and requestsWindow then requestsWindow:Hide() end
     local showingRequests = requestsWindow and requestsWindow:IsShown() and tab ~= 'create'
+    window.detailPanel:SetShown(tab ~= 'create')
     window.detailsScroll:SetShown(tab ~= 'create' and not showingRequests)
+    local detailsScrollBar = _G.OldKrakenGroupDetailsScrollScrollBar
     local g = tab ~= 'create' and selected and Finder.groups[selected]
+    if type(detailsScrollBar) == 'table' and detailsScrollBar.SetShown then
+        detailsScrollBar:SetShown(g ~= nil and #(g.members or {}) > 3)
+    end
     if g then
         local applicationStatus = Finder.pending[selected]
         local activity = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category]
@@ -410,12 +684,36 @@ refresh=function()
         local status = g.closed and '|cffb5b5b5Закрито|r' or '|cff69dc8cВідкрито|r'
         local application = applicationStatus and ('\n|cff9ba9bcЗаявка:|r |c' .. (pendingColors[applicationStatus] or 'ffb5b5b5') .. (pendingLabels[applicationStatus] or applicationStatus) .. '|r') or ''
         local description = g.description ~= '' and ('\n\n|cff9ba9bcОпис:|r ' .. g.description) or ''
-        window.details:SetText(string.format('|cffffd35a%s|r%s\n\n|cff9ba9bcАвтор:|r |cff9bcaff%s|r\n|cff9ba9bcРівень:|r |cff9bcaff%d–%d|r\n|cff9ba9bcРоль:|r %s\n|cff9ba9bcСтатус:|r %s%s%s\n\n|cffffd35aСклад:|r',
+        window.details:SetText(string.format('|cffffd35a%s|r%s\n\n|cff9ba9bcАвтор:|r   |cff9bcaff%s|r\n|cff9ba9bcРівні:|r   |cff9bcaff%d–%d|r\n|cff9ba9bcРоль:|r    %s\n|cff9ba9bcСтатус:|r  %s%s%s\n\n|cffffd35aСклад групи:|r',
             g.title, activityLine, playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role), status, application, description))
-    else window.details:SetText('Виберіть оголошення у списку.') end
+        window.details:SetAlpha(0)
+        window.detailsHeading:SetText(g.title)
+        window.detailsHeading:Show()
+        local kvValues = {
+            playerLabel(g.owner),
+            string.format('%d–%d', g.minLevel, g.maxLevel),
+            roleLabel(g.role),
+            status .. (applicationStatus and (' · |c' .. (pendingColors[applicationStatus] or 'ffb5b5b5') .. (pendingLabels[applicationStatus] or applicationStatus) .. '|r') or ''),
+            g.description ~= '' and g.description or '—',
+        }
+        for idx, kv in ipairs(window.detailsKV or {}) do
+            kv.key:Show()
+            kv.val:SetText(kvValues[idx] or '—')
+            kv.val:Show()
+        end
+        if window.detailsDivider then window.detailsDivider:Show() end
+        if window.detailsRosterHeader then window.detailsRosterHeader:Show() end
+    else
+        window.details:SetText('Виберіть оголошення у списку.')
+        window.details:SetAlpha(1)
+        if window.detailsHeading then window.detailsHeading:Hide() end
+        for _, kv in ipairs(window.detailsKV or {}) do kv.key:Hide(); kv.val:Hide() end
+        if window.detailsDivider then window.detailsDivider:Hide() end
+        if window.detailsRosterHeader then window.detailsRosterHeader:Hide() end
+    end
     local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
     local members = g and g.members or {}
-    local top = window.details:GetStringHeight() + 5
+    local top = g and 212 or (window.details:GetStringHeight() + 8)
     local viewport=tonumber((window.detailsScroll:GetHeight())) or 210
     if viewport<=0 then viewport=210 end
     local oldScroll=tonumber((window.detailsScroll:GetVerticalScroll())) or 0
@@ -441,7 +739,7 @@ refresh=function()
                 row.hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
                 row.invite = CreateFrame('Button', nil, window.detailsContent, 'UIPanelButtonTemplate')
                 OldKraken.UIStyle.Button(row.invite, 'primary')
-                row.invite:SetSize(100, 22); row.invite:SetText('Запросити')
+                row.invite:SetSize(96, 22); row.invite:SetText('Запросити')
                 row.invite:SetScript('OnClick', function(self)
                     local current = selected and Finder.groups[selected]
                     local name = self.memberName
@@ -452,7 +750,7 @@ refresh=function()
                 end)
                 row.remove = CreateFrame('Button', nil, window.detailsContent, 'UIPanelButtonTemplate')
                 OldKraken.UIStyle.Button(row.remove)
-                row.remove:SetSize(30, 22); row.remove:SetText('×')
+                row.remove:SetSize(28, 22); row.remove:SetText('×')
                 row.remove:SetScript('OnEnter', function(self)
                     if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити з оголошення або виключити з паті'); GameTooltip:Show() end
                 end)
@@ -514,31 +812,47 @@ refresh=function()
             row.name:SetText((catalog.roleIcons[memberRole] or '') .. ' ' .. playerLabel(name)); row.name:Show()
             row.state:ClearAllPoints(); row.state:SetPoint('TOPLEFT', row.name, 'BOTTOMLEFT', 0, 0); row.state:SetText(coloredRole .. ' |cff9ba9bc·|r ' .. coloredState); row.state:Show()
             row.hover:ClearAllPoints(); row.hover:SetPoint('TOPLEFT', row.name, 'TOPLEFT'); row.hover.memberLabel = name .. '\nРоль: ' .. coloredRole .. '\nСтатус: ' .. coloredState; row.hover:Show()
-            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 160, -top - (dataIndex - 1) * 40)
+            row.invite:ClearAllPoints(); row.invite:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 156, -top - (dataIndex - 1) * 40)
             row.invite.memberName = name
             if canManage and dataIndex > 1 and g.partyObserved and not g.partyObserved[name] then row.invite:Show() else row.invite:Hide() end
-            row.remove:ClearAllPoints(); row.remove:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 265, -top - (dataIndex - 1) * 40)
+            row.remove:ClearAllPoints(); row.remove:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 256, -top - (dataIndex - 1) * 40)
             row.remove.memberName = name
             if canManage and dataIndex > 1 then row.remove:Show() else row.remove:Hide() end
         elseif row then
             row.name:Hide(); row.state:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
         end
     end
-    window.detailsContent:SetHeight(math.max(210, top + #members * 40 + 4))
+    window.detailsContent:SetHeight(math.max(250, top + #members * 40 + 4))
     local isOther = tab ~= 'create' and g and g.owner ~= Finder.identity and not g.closed
     local pending = selected and Finder.pending[selected]
     local alreadyMember = false
     if g then for _, name in ipairs(g.members) do if name == Finder.identity then alreadyMember = true; break end end end
     local canApply = isOther and not showingRequests and not alreadyMember and pending ~= 'pending'
+    local showAppAction = not showingRequests and tab == 'applications' and g and g.owner ~= Finder.identity and pending ~= nil
+    window.applyButton:ClearAllPoints()
+    if canApply and showAppAction then
+        window.applyButton:SetSize(144, 40)
+        window.applyButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -550)
+    else
+        window.applyButton:SetSize(296, 40)
+        window.applyButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -550)
+    end
     window.applyButton:SetShown(canApply)
+    window.applicationActionButton:ClearAllPoints()
+    if canApply and showAppAction then
+        window.applicationActionButton:SetSize(144, 40)
+        window.applicationActionButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 739, -550)
+    else
+        window.applicationActionButton:SetSize(296, 40)
+        window.applicationActionButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -550)
+    end
     window.applicationActionButton:SetText(pending == 'pending' and 'Відкликати' or 'Прибрати заявку')
-    window.applicationActionButton:SetShown(not showingRequests and tab == 'applications' and g and g.owner ~= Finder.identity and pending ~= nil)
+    window.applicationActionButton:SetShown(showAppAction)
     window.cancelButton:SetShown(canManage and not showingRequests)
     window.bumpButton:SetShown(canManage and not showingRequests)
     UpdateReannounceButton(window.bumpButton)
-    local roleLabelY = -313
-    window.roleLabel:ClearAllPoints(); window.roleLabel:SetPoint('TOPLEFT', window, 'TOPLEFT', 550, roleLabelY)
-    window.roleButton:ClearAllPoints(); window.roleButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 534, roleLabelY - 14)
+    window.roleLabel:ClearAllPoints(); window.roleLabel:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -490)
+    window.roleButton:ClearAllPoints(); window.roleButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 571, -504)
     window.roleButton:SetShown(canApply and true or false)
     window.roleLabel:SetShown(canApply and true or false)
     local requestCount, haveOwned = 0, false
@@ -577,7 +891,6 @@ refresh=function()
     local selectedActivity=dungeon~='' and dungeonLabels[dungeon] or nil
     window.dungeonSelection:SetText(selectedActivity or ((category=='dungeon' or category=='raid') and 'Оберіть картку вище' or categoryLabels[category]))
     catalog.SetArtwork(window.creationArt,dungeon)
-
 end
 
 local function createWindow(parent)
@@ -589,7 +902,7 @@ local function createWindow(parent)
     end
     if not parent then table.insert(UISpecialFrames, 'OldKrakenGroupFinderFrame') end
     f.embedded = parent ~= nil
-    f:SetSize(900, 590); f:SetPoint('CENTER', parent or UIParent, 'CENTER'); f:SetMovable(not parent); f:EnableMouse(true)
+    f:SetSize(900, 607); f:SetPoint('CENTER', parent or UIParent, 'CENTER'); f:SetMovable(not parent); f:EnableMouse(true)
     if not parent then
         f:RegisterForDrag('LeftButton'); f:SetScript('OnDragStart', f.StartMoving)
     end
@@ -601,27 +914,63 @@ local function createWindow(parent)
     f:SetClampedToScreen(true); f:Hide()
     if not parent then OldKraken.UIStyle.Window(f) end
     f:HookScript('OnHide', function() if requestsWindow then requestsWindow:Hide() end end)
-    OldKraken.UIStyle.Panel(f, 12, -60, 526, 255)
-    OldKraken.UIStyle.Panel(f, 542, -60, 335, 255)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
-    f.tabs = {}
-    for i, item in ipairs({{'Усі групи','all'}, {'Створити','create'}, {'Мої заявки','applications'}, {'Мої оголошення','mine'}}) do
-        local b = button(f, item[1], 18 + (i-1)*160, -32, 150, function()
-            if requestsWindow then requestsWindow:Hide() end
-            if type(CloseDropDownMenus)=='function' then CloseDropDownMenus() end
-            tab=item[2]; selected=nil; offset=0; requestOffset=0; refresh()
-        end)
-        b.activeMark = b:CreateTexture(nil, 'OVERLAY')
-        b.activeMark:SetPoint('BOTTOMLEFT', b, 'BOTTOMLEFT', 8, 2)
-        b.activeMark:SetSize(134, 2)
-        b.activeMark:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
-        b.activeMark:Hide()
-        f.tabs[#f.tabs + 1] = {key=item[2], button=b}
+
+    -- Segmented tabs block (at y = -47)
+    local tabItems = {
+        {key='all', label='Усі групи', width=102},
+        {key='create', label='Створити', width=102},
+        {key='applications', label='Мої заявки', width=136},
+        {key='mine', label='Мої оголошення', width=152},
+    }
+    local function switchTab(nextTab)
+        if requestsWindow then requestsWindow:Hide() end
+        if type(CloseDropDownMenus)=='function' then CloseDropDownMenus() end
+        tab = nextTab; selected = nil; offset = 0; requestOffset = 0; refresh()
     end
-    f.alertButton = button(f, 'Сповіщення', 700, -32, 175, function()
+    f.tabs = {}
+    if OldKraken.UIStyle.SegmentedTabs then
+        f.tabBar = OldKraken.UIStyle.SegmentedTabs(f, tabItems, switchTab, {active = tab, height = 40})
+        f.tabBar:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -47)
+        for _, item in ipairs(tabItems) do
+            local b = f.tabBar.tabs[item.key]
+            b.activeMark = b:CreateTexture(nil, 'OVERLAY')
+            b.activeMark:SetPoint('BOTTOMLEFT', b, 'BOTTOMLEFT', 8, 2)
+            b.activeMark:SetSize(item.width - 16, 2)
+            b.activeMark:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
+            b.activeMark:SetAlpha(0)
+            b.activeMark:Hide()
+            f.tabs[#f.tabs + 1] = {key = item.key, button = b}
+        end
+    else
+        for i, item in ipairs(tabItems) do
+            local b = button(f, item.label, (i - 1) * 116, -47, item.width, function() switchTab(item.key) end, 30)
+            b.activeMark = b:CreateTexture(nil, 'OVERLAY')
+            b.activeMark:SetPoint('BOTTOMLEFT', b, 'BOTTOMLEFT', 8, 2)
+            b.activeMark:SetSize(item.width - 16, 2)
+            b.activeMark:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
+            b.activeMark:SetAlpha(0)
+            b.activeMark:Hide()
+            f.tabs[#f.tabs + 1] = {key = item.key, button = b}
+        end
+    end
+
+    -- Header notification chip (right side of the shared header row)
+    f.alertButton = button(f, 'Сповіщення: увімк.', 728, 0, 172, function()
         if Finder:SetGroupAlertsEnabled(not Finder:GroupAlertsEnabled()) then refresh()
         else print('Old Kraken: не вдалося зберегти налаштування сповіщень.') end
-    end)
+    end, 31)
+    local alertLabel = f.alertButton:GetFontString()
+    if alertLabel then
+        alertLabel:ClearAllPoints()
+        alertLabel:SetPoint('LEFT', f.alertButton, 'LEFT', 26, 0)
+    end
+    f.alertDot = f.alertButton:CreateTexture(nil, 'OVERLAY')
+    f.alertDot:SetSize(8, 8)
+    f.alertDot:SetPoint('LEFT', f.alertButton, 'LEFT', 12, 0)
+    local green = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.success or {0.41, 0.86, 0.55, 1}
+    f.alertDot:SetColorTexture(green[1], green[2], green[3], 1)
+
     f.rows, f.deleteButtons = {}, {}
     f.slotMenu = CreateFrame('Frame', 'OldKrakenSlotRoleMenu', f, 'UIDropDownMenuTemplate')
     UIDropDownMenu_Initialize(f.slotMenu, function(_, level)
@@ -643,159 +992,77 @@ local function createWindow(parent)
             UIDropDownMenu_AddButton(info, level)
         end
     end, 'MENU')
-    f.emptyList = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-    f.emptyList:SetPoint('TOPLEFT', f, 'TOPLEFT', 25, -75); f.emptyList:SetWidth(480); f.emptyList:SetJustifyH('LEFT'); f.emptyList:SetText('Груп не знайдено. Змініть фільтри або створіть оголошення.')
-    f.emptyAction = button(f, 'Створити оголошення', 25, -115, 190, function()
-        local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= '' or (f.searchFilter:GetText() or '') ~= '' or (f.levelFilter:GetText() or '') ~= ''
-        if tab == 'all' and hasFilters then
-            filterCategory, filterRole, filterFree, filterDungeon = 'all', '', false, ''
-            f.searchFilter:SetText(''); f.levelFilter:SetText('')
-            UIDropDownMenu_SetText(f.categoryFilter, 'Усі категорії'); UIDropDownMenu_SetText(f.roleFilter, 'Усі ролі')
-            UIDropDownMenu_SetText(f.freeFilter, 'Усі групи'); UIDropDownMenu_SetText(f.dungeonFilter, dungeonLabels[''] or 'Усі / не вибрано')
-        elseif tab == 'applications' then tab='all'
-        else tab='create' end
-        selected=nil; offset=0; refresh()
+
+    -- Scrollable group list (left column: 554 x 400) + footer caption
+    f.listScroll = CreateFrame('ScrollFrame', 'OldKrakenGroupListScroll', f, 'UIPanelScrollFrameTemplate')
+    f.listScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -179)
+    f.listScroll:SetSize(534, 400)
+    f.listScroll:EnableMouseWheel(true)
+    f.listContent = CreateFrame('Frame', nil, f.listScroll)
+    f.listContent:SetSize(534, 1)
+    f.listScroll:SetScrollChild(f.listContent)
+    f.listScroll:SetScript('OnMouseWheel', function(self, delta)
+        local current = tonumber((self:GetVerticalScroll())) or 0
+        local maxScroll = math.max(0, (tonumber((f.listContent:GetHeight())) or 0) - (tonumber((self:GetHeight())) or 400))
+        self:SetVerticalScroll(math.max(0, math.min(maxScroll, current - delta * CARD_STEP)))
+        refresh()
     end)
-    for i=1,CARDS_PER_PAGE do
-        local index = i
-        local card = button(f, '', 18, -65-(i-1)*82, 490, function()
-            local entry = f.visible and f.visible[index + offset]
-            if entry then if requestsWindow then requestsWindow:Hide() end; if selected ~= entry.key then requestOffset=0; f.detailsScroll:SetVerticalScroll(0) end; selected=entry.key; refresh() end
-        end)
-        card:SetHeight(78)
-        card.art = card:CreateTexture(nil, 'ARTWORK')
-        card.art:SetPoint('TOPLEFT', card, 'TOPLEFT', 1, -4); card.art:SetSize(70, 70)
-        card.title = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
-        card.title:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -8); card.title:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
-        card.title:SetJustifyH('LEFT'); card.title:SetWordWrap(false)
-        card.meta = card:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-        card.meta:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -31); card.meta:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
-        card.meta:SetJustifyH('LEFT'); card.meta:SetWordWrap(false)
-        card.members = card:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-        card.members:SetPoint('TOPLEFT', card, 'TOPLEFT', 78, -54); card.members:SetPoint('RIGHT', card, 'RIGHT', -155, 0)
-        card.members:SetJustifyH('LEFT'); card.members:SetWordWrap(false)
-        card.statusBackground = card:CreateTexture(nil, 'ARTWORK')
-        card.statusBackground:SetPoint('BOTTOMRIGHT', card, 'BOTTOMRIGHT', -8, 7)
-        card.statusBackground:SetSize(138, 23); card.statusBackground:SetColorTexture(0.035, 0.04, 0.05, 0.92)
-        card.status = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
-        card.status:SetPoint('CENTER', card.statusBackground, 'CENTER'); card.status:SetWidth(132)
-        card.status:SetJustifyH('CENTER'); card.status:SetWordWrap(false)
-        card.slots = {}
-        for slotIndex = 1, 5 do
-            local slot = CreateFrame('Button', nil, card)
-            slot:SetSize(25, 25); slot:SetPoint('TOPRIGHT', card, 'TOPRIGHT', -8 - (5-slotIndex)*28, -7)
-            slot.ring = slot:CreateTexture(nil, 'ARTWORK')
-            slot.ring:SetPoint('CENTER'); slot.ring:SetSize(15, 15)
-            local ok = type(slot.ring.SetAtlas) == 'function' and pcall(slot.ring.SetAtlas, slot.ring, 'groupfinder-icon-emptyslot', false)
-            if not ok then
-                slot.ring:SetTexture('Interface\\CHARACTERFRAME\\TempPortraitAlphaMask')
-                slot.ring:SetVertexColor(0.18, 0.18, 0.18, 0.9)
-            end
-            slot.icon = slot:CreateTexture(nil, 'OVERLAY')
-            slot.icon:SetPoint('CENTER'); slot.icon:SetSize(22, 22)
-            slot.text = slot:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall'); slot.text:SetPoint('CENTER'); slot.text:SetTextColor(1, 1, 1)
-            slot:SetScript('OnEnter', function(self)
-                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
-                if self.member then
-                    GameTooltip:SetText(playerLabel(self.member))
-                    GameTooltip:AddLine('Роль: ' .. roleLabel(self.memberRole), 1, 1, 1)
-                    local group = self.groupKey and Finder.groups[self.groupKey]
-                    if group and self.member ~= group.owner then
-                        GameTooltip:AddLine(not group.partyObserved and 'Стан невідомий' or (group.partyObserved[self.member] and 'У паті' or 'Резерв'), 1, 1, 1)
-                    end
-                else
-                    GameTooltip:SetText('Вільне місце' .. (self.requiredRole and (': ' .. roleLabel(self.requiredRole)) or ''))
-                    local group = self.groupKey and Finder.groups[self.groupKey]
-                    if group and group.owner == Finder.identity then
-                        GameTooltip:AddLine('Це ваше оголошення', 1, 1, 1, true)
-                    elseif Finder.pending[self.groupKey] == 'pending' then
-                        GameTooltip:AddLine('Заявка вже очікує відповіді', 1, 1, 1, true)
-                    else
-                        GameTooltip:AddLine(self.requiredRole and 'Натисніть, щоб подати заявку на цю роль' or 'Натисніть, щоб вибрати роль і подати заявку', 1, 1, 1, true)
-                    end
-                end
-                GameTooltip:Show()
-            end)
-            slot:SetScript('OnLeave', function() GameTooltip:Hide() end)
-            slot:SetScript('OnClick', function(self)
-                local group = self.groupKey and Finder.groups[self.groupKey]
-                if not group or self.member or group.closed or group.owner == Finder.identity
-                    or #group.members >= group.maxSize or Finder.pending[self.groupKey] == 'pending' then return end
-                for _, name in ipairs(group.members) do if name == Finder.identity then return end end
-                if self.requiredRole then
-                    if Finder:Apply(group.owner, group.id, self.requiredRole) then Finder:Changed(); refresh()
-                    else print('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.') end
-                    return
-                end
-                f.slotMenu.groupKey = self.groupKey
-                ToggleDropDownMenu(1, nil, f.slotMenu, self, 0, 0)
-                local list = _G.DropDownList1
-                if list and list:IsShown() then
-                    if not list.oldKrakenRestoreHook then
-                        list:HookScript('OnHide', function(frame)
-                            if frame.oldKrakenStrata then frame:SetFrameStrata(frame.oldKrakenStrata); frame.oldKrakenStrata = nil end
-                        end)
-                        list.oldKrakenRestoreHook = true
-                    end
-                    if not list.oldKrakenStrata then list.oldKrakenStrata = list:GetFrameStrata() end
-                    list:SetFrameStrata('FULLSCREEN_DIALOG')
-                end
-            end)
-            card.slots[slotIndex] = slot
-        end
-        f.rows[i] = card
-        local remove = CreateFrame('Button', nil, f)
-        remove:SetSize(24, 23)
-        remove:SetPoint('TOPLEFT', f, 'TOPLEFT', 514, -65-(i-1)*82)
-        -- Draw a small trash can using native textures, including on Forever clients
-        -- that do not provide the newer delete-icon atlas.
-        local function piece(x, y, width, height)
-            local texture = remove:CreateTexture(nil, 'ARTWORK')
-            texture:SetColorTexture(0.9, 0.32, 0.3, 1)
-            texture:SetSize(width, height)
-            texture:SetPoint('TOPLEFT', remove, 'TOPLEFT', x, -y)
-        end
-        piece(6, 6, 12, 2); piece(9, 4, 6, 2)
-        piece(7, 9, 2, 9); piece(15, 9, 2, 9); piece(7, 17, 10, 2)
-        remove:SetScript('OnClick', function()
-            local entry = f.visible and f.visible[index + offset]
-            local group = entry and Finder.groups[entry.key]
-            if group and tab == 'applications' and Finder.pending[entry.key] then
-                if Finder:DismissApplication(group.owner, group.id) then
-                    if selected == entry.key then selected = nil end
-                    Finder:Changed(); refresh()
-                else print('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.') end
-                return
-            end
-            if not group or group.owner ~= Finder.identity then return end
-            if Finder:Delete(group.id) then
-                if selected == entry.key then selected = nil end
-                Finder:Changed()
-                refresh()
-            else
-                print('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.')
-            end
-        end)
-        remove:SetScript('OnEnter', function(self)
-            if GameTooltip then
-                local entry = f.visible and f.visible[index + offset]
-                local status = entry and tab == 'applications' and Finder.pending[entry.key]
-                local label = status == 'pending' and 'Відкликати заявку'
-                    or (status and 'Прибрати заявку зі списку' or 'Видалити групу')
-                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(label); GameTooltip:Show()
-            end
-        end)
-        remove:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
-        remove:Hide()
-        f.deleteButtons[i] = remove
+    local previousListScroll = f.listScroll:GetScript('OnVerticalScroll')
+    f.listScroll:SetScript('OnVerticalScroll', function(self, value)
+        if previousListScroll then previousListScroll(self, value) end
+        refresh()
+    end)
+
+    f.listSummary = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.listSummary:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -588)
+    f.listSummary:SetJustifyH('LEFT')
+    local muted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+    if muted then f.listSummary:SetTextColor(muted[1], muted[2], muted[3]) end
+
+    local function resetAllFilters()
+        filterCategory, filterRole, filterFree, filterDungeon = 'all', '', false, ''
+        f.searchFilter:SetText('')
+        f.minLevelFilter:SetText('')
+        f.maxLevelFilter:SetText('')
+        UIDropDownMenu_SetText(f.categoryFilter, 'Категорія: усі')
+        UIDropDownMenu_SetText(f.roleFilter, 'Роль: усі')
+        UIDropDownMenu_SetText(f.freeFilter, 'Усі групи')
+        UIDropDownMenu_SetText(f.dungeonFilter, dungeonLabels[''] or 'Підземелля: усі')
+        offset = 0
+        refresh()
     end
-    f.previousPageButton = button(f, '‹', 18, -313, 80, function() offset=math.max(0, offset-CARDS_PER_PAGE); refresh() end, 36)
-    f.nextPageButton = button(f, '›', 116, -313, 80, function() if f.visible and offset+CARDS_PER_PAGE < #f.visible then offset=offset+CARDS_PER_PAGE end; refresh() end, 36)
-    f.listPage = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.listPage:SetPoint('TOPLEFT', f, 'TOPLEFT', 96, -323)
-    f.listPage:SetWidth(44); f.listPage:SetJustifyH('CENTER')
-    f.detailsScroll = CreateFrame('ScrollFrame', nil, f, 'UIPanelScrollFrameTemplate')
-    f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -70); f.detailsScroll:SetSize(300, 175)
+
+    f.emptyList = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+    f.emptyList:SetPoint('TOP', f.listScroll, 'TOP', 0, -135)
+    f.emptyList:SetWidth(460); f.emptyList:SetJustifyH('CENTER')
+    f.emptyList:SetText('Доступних груп поки немає.\nСтворіть перше оголошення для гільдії.')
+    f.emptyAction = button(f, 'Створити оголошення', 182, -365, 190, function()
+        local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= ''
+            or (f.searchFilter:GetText() or '') ~= '' or (f.minLevelFilter:GetText() or '') ~= '' or (f.maxLevelFilter:GetText() or '') ~= ''
+        if tab == 'all' and hasFilters then
+            resetAllFilters()
+            return
+        elseif tab == 'applications' then tab = 'all'
+        else tab = 'create' end
+        selected = nil; offset = 0; refresh()
+    end, 38, 'primary')
+    f.emptyAction:ClearAllPoints()
+    f.emptyAction:SetPoint('TOP', f.emptyList, 'BOTTOM', 0, -16)
+
+    for i = 1, 5 do ensureGroupCard(f, i) end
+
+    -- Right column: details panel (330 x 428 at 570, -179)
+    if OldKraken.UIStyle.PanelFrame then
+        f.detailPanel = OldKraken.UIStyle.PanelFrame(f)
+    else
+        f.detailPanel = CreateFrame('Frame', nil, f)
+        OldKraken.UIStyle.Panel(f.detailPanel, 0, 0, 330, 428)
+    end
+    f.detailPanel:SetSize(330, 428)
+    f.detailPanel:SetPoint('TOPLEFT', f, 'TOPLEFT', 570, -179)
+
+    f.detailsScroll = CreateFrame('ScrollFrame', 'OldKrakenGroupDetailsScroll', f, 'UIPanelScrollFrameTemplate')
+    f.detailsScroll:SetPoint('TOPLEFT', f, 'TOPLEFT', 587, -196); f.detailsScroll:SetSize(276, 286)
     local previousDetailsScroll=f.detailsScroll:GetScript('OnVerticalScroll')
     local detailsScrollPending=false
     f.detailsScroll:SetScript('OnVerticalScroll',function(self,value)
@@ -805,30 +1072,127 @@ local function createWindow(parent)
         if C_Timer and C_Timer.After then detailsScrollPending=true; C_Timer.After(0,update) else update() end
     end)
     f.detailsContent = CreateFrame('Frame', nil, f.detailsScroll)
-    f.detailsContent:SetSize(300, 86); f.detailsScroll:SetScrollChild(f.detailsContent)
+    f.detailsContent:SetSize(276, 86); f.detailsScroll:SetScrollChild(f.detailsContent)
     f.details = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-    f.details:SetPoint('TOPLEFT'); f.details:SetWidth(300); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.details:SetPoint('TOPLEFT'); f.details:SetWidth(276); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.detailsHeading = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
+    f.detailsHeading:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, 0)
+    f.detailsHeading:SetWidth(276); f.detailsHeading:SetJustifyH('LEFT'); f.detailsHeading:SetWordWrap(false)
+    local goldColor = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.brandGold
+    if goldColor then f.detailsHeading:SetTextColor(goldColor[1], goldColor[2], goldColor[3]) end
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.detailsHeading, 15, true) end
+    f.detailsHeading:Hide()
+    f.detailsKV = {}
+    for idx, labelText in ipairs({'Автор', 'Рівні', 'Роль', 'Статус', 'Опис'}) do
+        local rowY = -30 - (idx - 1) * 26
+        local k = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        k:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, rowY)
+        k:SetWidth(70); k:SetJustifyH('LEFT')
+        if muted then k:SetTextColor(muted[1], muted[2], muted[3]) end
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(k, 12) end
+        k:SetText(labelText); k:Hide()
+        local v = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+        v:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 78, rowY)
+        v:SetWidth(198); v:SetJustifyH('LEFT'); v:SetWordWrap(false)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(v, 13) end
+        v:Hide()
+        f.detailsKV[idx] = {key = k, val = v}
+    end
+    f.detailsDivider = f.detailsContent:CreateTexture(nil, 'ARTWORK')
+    f.detailsDivider:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, -166)
+    f.detailsDivider:SetSize(276, 1)
+    local divColor = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.divider or {0.20, 0.23, 0.29, 0.85}
+    f.detailsDivider:SetColorTexture(unpack(divColor))
+    f.detailsDivider:Hide()
+    f.detailsRosterHeader = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    f.detailsRosterHeader:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, -180)
+    f.detailsRosterHeader:SetWidth(276); f.detailsRosterHeader:SetJustifyH('LEFT')
+    if goldColor then f.detailsRosterHeader:SetTextColor(goldColor[1], goldColor[2], goldColor[3]) end
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.detailsRosterHeader, 13, true) end
+    f.detailsRosterHeader:SetText('Склад групи'); f.detailsRosterHeader:Hide()
     f.memberRows = {}
-    f.requestsButton = button(f, 'Заявки', 550, -288, 150, function()
+    f.requestsButton = button(f, 'Заявки', 587, -514, 296, function()
         if requestsWindow and requestsWindow:IsShown() then requestsWindow:Hide(); refresh() else showRequests() end
-    end)
-    f.searchFilter = input(f, 'Пошук за назвою або автором', 20, -350, 260, '')
+    end, 30)
+
+    -- Filters bar (one row in a 900 x 60 bordered panel above the list)
+    if OldKraken.UIStyle.PanelFrame then
+        f.filterPanel = OldKraken.UIStyle.PanelFrame(f)
+    else
+        f.filterPanel = CreateFrame('Frame', nil, f)
+        OldKraken.UIStyle.Panel(f.filterPanel, 0, 0, 900, 60)
+    end
+    f.filterPanel:SetSize(900, 60)
+    f.filterPanel:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -103)
+
+    f.searchFilter = CreateFrame('EditBox', nil, f, 'InputBoxTemplate')
+    OldKraken.UIStyle.Input(f.searchFilter)
+    f.searchFilter:SetSize(172, 34); f.searchFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 13, -116)
+    f.searchFilter:SetAutoFocus(false); f.searchFilter:SetTextInsets(8, 8, 0, 0); f.searchFilter:SetText('')
+    f.searchFilter.label = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    f.searchFilter.label:Hide()
+    f.searchHint = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.searchHint:SetPoint('LEFT', f.searchFilter, 'LEFT', 10, 0)
+    f.searchHint:SetText('Пошук групи')
+    if muted then f.searchHint:SetTextColor(muted[1], muted[2], muted[3]) end
+    f.searchFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
     f.searchFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
-    f.dungeonFilter = dropdown(f, 285, -368, 250, activityOptions,
+
+    f.dungeonFilter = dropdown(f, 195, -115, 176, activityOptions,
         function() return filterDungeon end, function(value) filterDungeon=value; offset=0; refresh() end)
+    UIDropDownMenu_SetText(f.dungeonFilter, 'Підземелля: усі')
     f.dungeonFilterLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    f.dungeonFilterLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 285, -350); f.dungeonFilterLabel:SetText('Підземелля / рейд')
-    f.levelFilter = input(f, 'Фільтр рівня', 20, -465, 80, '')
-    f.levelFilter:SetScript('OnTextChanged', refresh)
-    f.categoryFilter = dropdown(f, 110, -485, 155, choices(categories, categoryLabels, {value='all', label='Усі категорії'}),
+    f.dungeonFilterLabel:Hide()
+
+    f.categoryFilter = dropdown(f, 377, -115, 146, choices(categories, categoryLabels, {value='all', label='Категорія: усі'}),
         function() return filterCategory end, function(value) filterCategory=value; offset=0; refresh() end)
-    f.roleFilter = dropdown(f, 270, -485, 125, choices({'tank','healer','dps','flex'}, coloredRoleLabels, {value='', label='Усі ролі'}),
+    f.roleFilter = dropdown(f, 529, -115, 118, choices({'tank','healer','dps','flex'}, coloredRoleLabels, {value='', label='Роль: усі'}),
         function() return filterRole end, function(value) filterRole=value; offset=0; refresh() end)
-    f.freeFilter = dropdown(f, 400, -485, 135, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
+    f.freeFilter = dropdown(f, 529, -115, 118, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
         function() return filterFree end, function(value) filterFree=value; offset=0; refresh() end)
+    f.freeFilter:Hide()
+
+    f.levelRangeLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.levelRangeLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 654, -126)
+    f.levelRangeLabel:SetText('Рівень')
+    if muted then f.levelRangeLabel:SetTextColor(muted[1], muted[2], muted[3]) end
+
+    f.minLevelFilter = CreateFrame('EditBox', nil, f, 'InputBoxTemplate')
+    OldKraken.UIStyle.Input(f.minLevelFilter)
+    f.minLevelFilter:SetSize(44, 34); f.minLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 704, -116)
+    f.minLevelFilter:SetAutoFocus(false); f.minLevelFilter:SetTextInsets(6, 6, 0, 0); f.minLevelFilter:SetText('')
+    f.minLevelFilter.label = f.levelRangeLabel
+    f.minLevelHint = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.minLevelHint:SetPoint('CENTER', f.minLevelFilter, 'CENTER', 0, 0); f.minLevelHint:SetText('від')
+    if muted then f.minLevelHint:SetTextColor(muted[1], muted[2], muted[3]) end
+    f.minLevelFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
+    f.minLevelFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
+
+    f.levelDash = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.levelDash:SetPoint('TOPLEFT', f, 'TOPLEFT', 753, -126); f.levelDash:SetText('–')
+    if muted then f.levelDash:SetTextColor(muted[1], muted[2], muted[3]) end
+
+    f.maxLevelFilter = CreateFrame('EditBox', nil, f, 'InputBoxTemplate')
+    OldKraken.UIStyle.Input(f.maxLevelFilter)
+    f.maxLevelFilter:SetSize(44, 34); f.maxLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 764, -116)
+    f.maxLevelFilter:SetAutoFocus(false); f.maxLevelFilter:SetTextInsets(6, 6, 0, 0); f.maxLevelFilter:SetText('')
+    f.maxLevelHint = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.maxLevelHint:SetPoint('CENTER', f.maxLevelFilter, 'CENTER', 0, 0); f.maxLevelHint:SetText('до')
+    if muted then f.maxLevelHint:SetTextColor(muted[1], muted[2], muted[3]) end
+    f.maxLevelFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
+    f.maxLevelFilter:SetScript('OnTextChanged', function() offset=0; refresh() end)
+    -- Backward-compatible alias for single-input callers
+    f.levelFilter = f.minLevelFilter
+
+    f.resetFilterButton = button(f, 'Скинути', 822, -119, 64, resetAllFilters, 28)
+    local resetText = f.resetFilterButton:GetFontString()
+    local gold = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.brandGold
+    if resetText and gold then resetText:SetTextColor(gold[1], gold[2], gold[3]) end
+
     f.filterControls = {
-        f.searchFilter, f.searchFilter.label, f.dungeonFilter, f.dungeonFilterLabel,
-        f.levelFilter, f.levelFilter.label, f.categoryFilter, f.roleFilter, f.freeFilter,
+        f.filterPanel, f.searchFilter, f.searchHint, f.dungeonFilter,
+        f.levelRangeLabel, f.minLevelFilter, f.minLevelHint, f.levelDash, f.maxLevelFilter, f.maxLevelHint,
+        f.categoryFilter, f.roleFilter, f.resetFilterButton,
     }
     f.titleBox = input(f, 'Назва', 20, -330, 240, '')
     f.descriptionBox = input(f, 'Опис', 275, -330, 250, '')
@@ -854,16 +1218,17 @@ local function createWindow(parent)
         end)
     f.categoryLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText('Категорія')
-    f.roleButton = dropdown(f, 550, -330, 150, function()
+    f.roleButton = dropdown(f, 587, -504, 296, function()
         local allowed={}
         for _,value in ipairs(category == 'dungeon' and {'tank','healer','dps'} or roles) do
             if Finder:CanPerformRole(Finder.identity,value) then allowed[#allowed+1]=value end
         end
         return choices(allowed, coloredRoleLabels)
     end,
-        function() return role end, function(value) role=value end)
+        function() return role end, function(value) role=value; UIDropDownMenu_SetText(f.roleButton, 'Ваша роль: ' .. roleLabel(value)) end)
+    UIDropDownMenu_SetText(f.roleButton, 'Ваша роль: ' .. roleLabel(role))
     f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 550, -313); f.roleLabel:SetText('Роль')
+    f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 587, -490); f.roleLabel:SetText('Ваша роль')
     local function selectActivity(value)
         local title = f.titleBox:GetText()
         local replaceTitle = title == '' or (autoDungeonTitle and title == autoDungeonTitle)
@@ -882,7 +1247,7 @@ local function createWindow(parent)
     end
     -- An inline, clipped three-column grid. No popup or additional click is needed.
     local picker=CreateFrame('Frame',nil,f)
-    picker:SetSize(840,450); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-64)
+    picker:SetSize(840,450); picker:SetPoint('TOPLEFT',f,'TOPLEFT',18,-92)
     picker:EnableMouse(true); picker:EnableMouseWheel(true)
     local background=picker:CreateTexture(nil,'BACKGROUND')
     background:SetAllPoints(picker); background:SetColorTexture(0.035,0.04,0.05,1)
@@ -992,7 +1357,7 @@ local function createWindow(parent)
     end, nil, 'primary')
     f.advancedCreation=false
     local footer=CreateFrame('Frame',nil,f)
-    footer:SetSize(844,46); footer:SetPoint('TOPLEFT',f,'TOPLEFT',18,-527)
+    footer:SetSize(844,46); footer:SetPoint('TOPLEFT',f,'TOPLEFT',18,-552)
     local footerFill=footer:CreateTexture(nil,'BACKGROUND'); footerFill:SetAllPoints(footer); footerFill:SetColorTexture(0.055,0.06,0.075,1)
     f.creationFooter=footer
     f.creationArt=footer:CreateTexture(nil,'ARTWORK'); f.creationArt:SetSize(36,28); f.creationArt:SetPoint('TOPLEFT',footer,'TOPLEFT',3,-8)
@@ -1011,14 +1376,15 @@ local function createWindow(parent)
     end
     f.descriptionBox:SetParent(footer); f.descriptionBox:ClearAllPoints()
     f.descriptionBox:SetPoint('TOPLEFT',footer,'TOPLEFT',373,-8); f.descriptionBox:SetSize(207,28)
-    f.commentHint=footer:CreateFontString(nil,'OVERLAY','GameFontDisableSmall')
+    f.commentHint=footer:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
     f.commentHint:SetPoint('LEFT',f.descriptionBox,'LEFT',6,0); f.commentHint:SetText('Коментар')
+    if muted then f.commentHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.descriptionBox:SetScript('OnTextChanged',function(self) f.commentHint:SetShown(self:GetText()=='') end)
     f.creationOptionsButton=button(footer,'Деталі',590,-8,88,function() f.advancedCreation=not f.advancedCreation; refresh() end,28)
     f.createButton:SetParent(footer); f.createButton:ClearAllPoints()
     f.createButton:SetPoint('TOPLEFT',footer,'TOPLEFT',688,-8); f.createButton:SetSize(150,28)
     local options=CreateFrame('Frame',nil,f)
-    options:SetSize(840,82); options:SetPoint('TOPLEFT',f,'TOPLEFT',18,-440)
+    options:SetSize(840,82); options:SetPoint('TOPLEFT',f,'TOPLEFT',18,-466)
     local optionsFill=options:CreateTexture(nil,'BACKGROUND'); optionsFill:SetAllPoints(options); optionsFill:SetColorTexture(0.055,0.06,0.075,1)
     f.creationOptions=options
     local fields={{f.titleBox,12,240},{f.maxBox,267,65},{f.minBox,348,75},{f.maxLevelBox,438,75}}
@@ -1035,23 +1401,23 @@ local function createWindow(parent)
         clip:SetHeight(picker.viewportHeight); picker:ScrollTo(picker.offset)
     end
     options:Hide(); footer:Hide()
-    f.applyButton = button(f, 'Подати заявку', 550, -385, 140, function()
+    f.applyButton = button(f, 'Подати заявку', 587, -550, 296, function()
         local g=selected and Finder.groups[selected]
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
         elseif g then print('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.') end
-    end, nil, 'primary')
-    f.applicationActionButton = button(f, 'Відкликати', 700, -385, 140, function()
+    end, 40, 'primary')
+    f.applicationActionButton = button(f, 'Відкликати', 739, -550, 144, function()
         local g=selected and Finder.groups[selected]
         if not g or g.owner == Finder.identity or not Finder.pending[selected] then return end
         if Finder:DismissApplication(g.owner, g.id) then
             Finder:Changed(); selected=nil; refresh()
         else print('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.') end
-    end)
-    f.cancelButton = button(f, 'Закрити набір', 550, -253, 140, function()
+    end, 40)
+    f.cancelButton = button(f, 'Закрити набір', 587, -554, 144, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:Cancel(g.id) then Finder:Changed(); refresh() end
-    end)
-    f.bumpButton = button(f, 'Оновити набір', 700, -253, 150, function()
+    end, 36)
+    f.bumpButton = button(f, 'Оновити набір', 739, -554, 144, function()
         local group = selected and Finder.groups[selected]
         if not group or group.owner ~= Finder.identity or group.closed then return end
         local ok, reason, seconds = Finder:Reannounce(group.id)
