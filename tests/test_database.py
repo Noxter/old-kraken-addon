@@ -7,11 +7,14 @@ lua.execute('OldKraken = {version="0.3.3"}; OldKrakenDB = {schemaVersion=1, rost
 lua.execute(source)
 lua.execute('''
 local db = OldKraken.Database.Initialize()
-assert(db.schemaVersion == 2 and type(db.groupFinder) == 'table')
+assert(db.schemaVersion == 3 and type(db.groupFinder) == 'table' and type(db.workshop) == 'table')
 assert(db.roster.keep == 'roster' and db.events.keep == 'event')
 assert(db.settings.roster.search == 'тест')
+OldKrakenDB = {schemaVersion=2, groupFinder={keep="finder"}}
+db = OldKraken.Database.Initialize()
+assert(db.schemaVersion == 3 and db.groupFinder.keep == 'finder' and type(db.workshop) == 'table')
 OldKrakenDB = {schemaVersion=99, other='new'}
 db = OldKraken.Database.Initialize()
-assert(db.schemaVersion == 99 and db.other == 'new' and db.groupFinder == nil)
+assert(db.schemaVersion == 99 and db.other == 'new' and db.groupFinder == nil and db.workshop == nil)
 ''')
 print('Database migration checks passed')

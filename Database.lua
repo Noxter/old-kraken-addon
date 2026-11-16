@@ -3,7 +3,7 @@ OldKraken = OldKraken or {}
 local Database = {}
 OldKraken.Database = Database
 
-local SCHEMA_VERSION = 2
+local SCHEMA_VERSION = 3
 
 local function EnsureTable(parent, key)
     if type(parent[key]) ~= "table" then
@@ -39,6 +39,8 @@ local DEFAULTS = {
     },
     roster = {},
     events = {},
+    groupFinder = {},
+    workshop = {},
 }
 
 local function NormalizeRosterSettings(settings)
@@ -95,10 +97,17 @@ function Database.Initialize()
         db.schemaVersion = 2
     end
 
+    if schemaVersion < 3 then
+        EnsureTable(db, "workshop")
+        db.schemaVersion = 3
+    end
+
     EnsureTable(db, "settings")
     EnsureTable(db.settings, "roster")
     EnsureTable(db, "roster")
     EnsureTable(db, "events")
+    EnsureTable(db, "groupFinder")
+    EnsureTable(db, "workshop")
     ApplyDefaults(db, DEFAULTS)
     NormalizeRosterSettings(db.settings.roster)
 
