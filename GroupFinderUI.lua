@@ -1458,7 +1458,7 @@ local function createWindow(parent)
         elseif reason == 'cooldown' then print('Old Kraken: повторити оголошення можна через ' .. seconds .. ' с.')
         else print('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.') end
         UpdateReannounceButton(f.bumpButton)
-    end)
+    end, 36)
     f.bumpButton:SetScript('OnUpdate', function(self, elapsed)
         self.countdownElapsed = (self.countdownElapsed or 0) + elapsed
         if self.countdownElapsed < 0.25 then return end
