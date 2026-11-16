@@ -313,7 +313,11 @@ end
 local function ensureGroupCard(f, index)
     if f.rows[index] then return f.rows[index] end
     local card
-    card = button(f.listContent, '', 0, -(index - 1) * CARD_STEP, 534, function(self)
+    card = CreateFrame('Button', nil, f.listContent)
+    OldKraken.UIStyle.Button(card)
+    card:SetSize(554, CARD_HEIGHT)
+    card:SetPoint('TOPLEFT', f.listContent, 'TOPLEFT', 0, -(index - 1) * CARD_STEP)
+    card:SetScript('OnClick', function(self)
         local entry = (self and self.entry) or (card and card.entry) or (f.visible and f.visible[index])
         if entry then
             if requestsWindow then requestsWindow:Hide() end
@@ -321,8 +325,7 @@ local function ensureGroupCard(f, index)
             selected = entry.key
             refresh()
         end
-    end, CARD_HEIGHT)
-    card:SetHeight(CARD_HEIGHT)
+    end)
     card.art = card:CreateTexture(nil, 'ARTWORK')
     card.art:SetPoint('TOPLEFT', card, 'TOPLEFT', 11, -10); card.art:SetSize(64, 64)
     card.title = card:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
@@ -574,6 +577,8 @@ refresh=function()
     if clampedListScroll ~= rawListScroll then window.listScroll:SetVerticalScroll(clampedListScroll) end
     local firstCardIndex = math.floor(clampedListScroll / CARD_STEP) + 1
     local cardWidth = #lines > 4 and 530 or 554
+    window.listScroll:SetWidth(cardWidth)
+    window.listContent:SetWidth(cardWidth)
     for i = 1, #window.rows do
         local dataIndex = firstCardIndex + i - 1
         local entry = lines[dataIndex]
@@ -870,6 +875,9 @@ refresh=function()
     window.requestsButton:SetText(showingRequests and '← До деталей' or ('Заявки: ' .. requestCount))
     window.requestsButton:SetShown(tab ~= 'create' and tab ~= 'applications' and (haveOwned or showingRequests))
     for _, control in ipairs(window.filterControls) do control:SetShown(tab == 'all') end
+    if window.searchHint then window.searchHint:SetShown(tab == 'all' and searchText == '') end
+    if window.minLevelHint then window.minLevelHint:SetShown(tab == 'all' and minText == '') end
+    if window.maxLevelHint then window.maxLevelHint:SetShown(tab == 'all' and maxText == '') end
     if window.freeFilter then window.freeFilter:Hide() end
     window.creationFooter:SetShown(tab=='create')
     window.LayoutCreation()
@@ -1132,7 +1140,7 @@ local function createWindow(parent)
 
     f.searchFilter = CreateFrame('EditBox', nil, f, 'InputBoxTemplate')
     OldKraken.UIStyle.Input(f.searchFilter)
-    f.searchFilter:SetSize(172, 34); f.searchFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 13, -116)
+    f.searchFilter:SetSize(160, 34); f.searchFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 13, -116)
     f.searchFilter:SetAutoFocus(false); f.searchFilter:SetTextInsets(8, 8, 0, 0); f.searchFilter:SetText('')
     f.searchFilter.label = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.searchFilter.label:Hide()
@@ -1149,28 +1157,28 @@ local function createWindow(parent)
         offset=0; refresh()
     end)
 
-    f.dungeonFilter = dropdown(f, 195, -115, 176, activityOptions,
+    f.dungeonFilter = dropdown(f, 183, -117, 176, activityOptions,
         function() return filterDungeon end, function(value) filterDungeon=value; offset=0; refresh() end)
     UIDropDownMenu_SetText(f.dungeonFilter, 'Підземелля: усі')
     f.dungeonFilterLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonFilterLabel:Hide()
 
-    f.categoryFilter = dropdown(f, 377, -115, 146, choices(categories, categoryLabels, {value='all', label='Категорія: усі'}),
+    f.categoryFilter = dropdown(f, 369, -117, 156, choices(categories, categoryLabels, {value='all', label='Категорія: усі'}),
         function() return filterCategory end, function(value) filterCategory=value; offset=0; refresh() end)
-    f.roleFilter = dropdown(f, 529, -115, 118, choices({'tank','healer','dps','flex'}, coloredRoleLabels, {value='', label='Роль: усі'}),
+    f.roleFilter = dropdown(f, 535, -117, 118, choices({'tank','healer','dps','flex'}, coloredRoleLabels, {value='', label='Роль: усі'}),
         function() return filterRole end, function(value) filterRole=value; offset=0; refresh() end)
-    f.freeFilter = dropdown(f, 529, -115, 118, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
+    f.freeFilter = dropdown(f, 535, -117, 118, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
         function() return filterFree end, function(value) filterFree=value; offset=0; refresh() end)
     f.freeFilter:Hide()
 
-    f.levelRangeLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.levelRangeLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 654, -126)
+    f.levelRangeLabel = f.filterPanel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.levelRangeLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 661, -127)
     f.levelRangeLabel:SetText('Рівень')
     if muted then f.levelRangeLabel:SetTextColor(muted[1], muted[2], muted[3]) end
 
     f.minLevelFilter = CreateFrame('EditBox', nil, f, 'InputBoxTemplate')
     OldKraken.UIStyle.Input(f.minLevelFilter)
-    f.minLevelFilter:SetSize(44, 34); f.minLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 704, -116)
+    f.minLevelFilter:SetSize(42, 34); f.minLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 706, -116)
     f.minLevelFilter:SetAutoFocus(false); f.minLevelFilter:SetTextInsets(6, 6, 0, 0); f.minLevelFilter:SetText('')
     f.minLevelFilter.label = f.levelRangeLabel
     f.minLevelHint = f.minLevelFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
@@ -1185,13 +1193,13 @@ local function createWindow(parent)
         offset=0; refresh()
     end)
 
-    f.levelDash = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.levelDash:SetPoint('TOPLEFT', f, 'TOPLEFT', 753, -126); f.levelDash:SetText('–')
+    f.levelDash = f.filterPanel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.levelDash:SetPoint('TOPLEFT', f, 'TOPLEFT', 752, -127); f.levelDash:SetText('–')
     if muted then f.levelDash:SetTextColor(muted[1], muted[2], muted[3]) end
 
     f.maxLevelFilter = CreateFrame('EditBox', nil, f, 'InputBoxTemplate')
     OldKraken.UIStyle.Input(f.maxLevelFilter)
-    f.maxLevelFilter:SetSize(44, 34); f.maxLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 764, -116)
+    f.maxLevelFilter:SetSize(42, 34); f.maxLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 762, -116)
     f.maxLevelFilter:SetAutoFocus(false); f.maxLevelFilter:SetTextInsets(6, 6, 0, 0); f.maxLevelFilter:SetText('')
     f.maxLevelHint = f.maxLevelFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.maxLevelHint:SetPoint('CENTER', f.maxLevelFilter, 'CENTER', 0, 0); f.maxLevelHint:SetText('до')
@@ -1207,14 +1215,14 @@ local function createWindow(parent)
     -- Backward-compatible alias for single-input callers
     f.levelFilter = f.minLevelFilter
 
-    f.resetFilterButton = button(f, 'Скинути', 822, -119, 64, resetAllFilters, 28)
+    f.resetFilterButton = button(f, 'Скинути', 813, -116, 74, resetAllFilters, 34)
     local resetText = f.resetFilterButton:GetFontString()
     local gold = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.brandGold
     if resetText and gold then resetText:SetTextColor(gold[1], gold[2], gold[3]) end
 
     f.filterControls = {
-        f.filterPanel, f.searchFilter, f.searchHint, f.dungeonFilter,
-        f.levelRangeLabel, f.minLevelFilter, f.minLevelHint, f.levelDash, f.maxLevelFilter, f.maxLevelHint,
+        f.filterPanel, f.searchFilter, f.dungeonFilter,
+        f.levelRangeLabel, f.minLevelFilter, f.levelDash, f.maxLevelFilter,
         f.categoryFilter, f.roleFilter, f.resetFilterButton,
     }
     f.titleBox = input(f, 'Назва', 20, -330, 240, '')

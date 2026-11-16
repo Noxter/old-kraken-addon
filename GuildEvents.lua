@@ -530,6 +530,7 @@ local function selectMinutes(parent,x,y,get,set)
         elseif level==2 then
             local list=_G.DropDownList2
             if list then
+                if OldKraken.UIStyle.StyleDropDownList then OldKraken.UIStyle.StyleDropDownList(list) end
                 if not list.oldKrakenMinuteHook then
                     list:HookScript('OnHide',function(self)
                         if self.oldKrakenMinuteStrata then self:SetFrameStrata(self.oldKrakenMinuteStrata); self.oldKrakenMinuteStrata=nil end
@@ -651,6 +652,7 @@ refresh=function()
         window.alertDot:SetColorTexture(c[1], c[2], c[3], 1)
     end
     for _,control in ipairs(window.formControls) do control:SetShown(window.creationMode) end
+    if window.descriptionHint then window.descriptionHint:SetShown(window.creationMode and (window.description:GetText() or '') == '') end
     if window.creationMode then
         for _,control in ipairs(window.viewControls) do control:Hide() end
         for _,row in ipairs(rows) do row:Hide() end
@@ -1027,13 +1029,16 @@ local function createWindow(parent)
     f.description:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -451); f.description:SetSize(900, 34)
     f.description:SetAutoFocus(false); f.description:SetTextInsets(10, 10, 0, 0); f.description:SetText('')
     f.description.label = descCaption
-    f.descriptionHint = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.descriptionHint = f.description:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.descriptionHint:SetPoint('LEFT', f.description, 'LEFT', 12, 0)
     f.descriptionHint:SetText('Збір, вимоги, консумки…')
     if muted then f.descriptionHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.description:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
     f.description:SetScript('OnTextChanged', function(self)
-        if f.descriptionHint then f.descriptionHint:SetShown((self:GetText() or '') == '') end
+        if f.descriptionHint then
+            local text = (self and self.GetText and self:GetText()) or (f.description.GetText and f.description:GetText()) or ''
+            f.descriptionHint:SetShown(text == '')
+        end
     end)
 
     -- Step 2: Location cards + 'Без конкретної локації' button
@@ -1213,7 +1218,7 @@ local function createWindow(parent)
         f.title, f.title.label, f.dateButton, f.dateCaption,
         timeLabel, minuteLabel, f.hourMenu, f.minuteMenu,
         f.size, f.size.label, f.sizeMinus, f.sizePlus,
-        f.description, f.description.label, f.descriptionHint,
+        f.description, f.description.label,
         f.summaryBar, f.cancelCreate, f.submit,
     }
     f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleMenu}

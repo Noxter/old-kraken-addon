@@ -139,20 +139,34 @@ function OldKraken.UIStyle.Window(frame)
             close.fill = fill
             addOutline(close, colors.buttonEdge)
 
-            local cross = close:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-            OldKraken.UIStyle.Font(cross, 13, 'BOLD')
-            cross:SetPoint('CENTER', close, 'CENTER', 0, 0)
-            cross:SetText('✕')
-            cross:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3])
-            close.cross = cross
+            local crossParts = {}
+            local function setCrossColor(r, g, b, a)
+                for _, part in ipairs(crossParts) do
+                    part:SetColorTexture(r, g, b, a or 1)
+                end
+            end
+            for d = -4, 4 do
+                local p1 = close:CreateTexture(nil, 'OVERLAY')
+                p1:SetSize(2, 2)
+                p1:SetPoint('CENTER', close, 'CENTER', d, d)
+                crossParts[#crossParts + 1] = p1
+                if d ~= 0 then
+                    local p2 = close:CreateTexture(nil, 'OVERLAY')
+                    p2:SetSize(2, 2)
+                    p2:SetPoint('CENTER', close, 'CENTER', d, -d)
+                    crossParts[#crossParts + 1] = p2
+                end
+            end
+            close.crossParts = crossParts
+            setCrossColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3], 1)
 
             close:SetScript('OnEnter', function()
                 fill:SetColorTexture(colors.danger[1], colors.danger[2], colors.danger[3], 0.45)
-                cross:SetTextColor(1, 1, 1)
+                setCrossColor(1, 1, 1, 1)
             end)
             close:SetScript('OnLeave', function()
                 fill:SetColorTexture(unpack(colors.button))
-                cross:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3])
+                setCrossColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3], 1)
             end)
             close.oldKrakenStyled = true
         end
@@ -163,6 +177,39 @@ function OldKraken.UIStyle.Button(button, variant)
     if button.NineSlice then button.NineSlice:Hide() end
     for _, part in ipairs({'Left', 'Middle', 'Right'}) do
         if button[part] then button[part]:Hide() end
+    end
+    button.fitTextWidthPadding = nil
+    button.fitTextCanWidthDecrease = false
+    if not button.oldKrakenFixedWidthHook then
+        button.oldKrakenFixedWidthHook = true
+        local origSetSize = button.SetSize
+        local origSetWidth = button.SetWidth
+        local origSetText = button.SetText
+        if type(origSetSize) == 'function' then
+            function button:SetSize(w, h)
+                self.oldKrakenWidth = w
+                self.oldKrakenHeight = h
+                return origSetSize(self, w, h)
+            end
+        end
+        if type(origSetWidth) == 'function' then
+            function button:SetWidth(w)
+                self.oldKrakenWidth = w
+                return origSetWidth(self, w)
+            end
+        end
+        if type(origSetText) == 'function' then
+            function button:SetText(text)
+                local result = origSetText(self, text)
+                if self.oldKrakenWidth and type(origSetWidth) == 'function' then
+                    origSetWidth(self, self.oldKrakenWidth)
+                end
+                if self.oldKrakenHeight and type(self.SetHeight) == 'function' then
+                    self:SetHeight(self.oldKrakenHeight)
+                end
+                return result
+            end
+        end
     end
     local normal, pushed = button:GetNormalTexture(), button:GetPushedTexture()
     if normal then normal:SetAlpha(0) end
@@ -209,10 +256,91 @@ function OldKraken.UIStyle.Input(editBox)
     editBox:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
 end
 
+local dropdownHooksInstalled = false
+
+local function layoutDropdownText(dropdownFrame)
+    if not dropdownFrame or not dropdownFrame.oldKrakenFill then return end
+    local name = type(dropdownFrame.GetName) == 'function' and dropdownFrame:GetName()
+    local label = name and _G[name .. 'Text']
+    if not label then return end
+    if type(label.SetWidth) == 'function' then label:SetWidth(0) end
+    if type(label.ClearAllPoints) == 'function' then
+        label:ClearAllPoints()
+        label:SetPoint('LEFT', dropdownFrame.oldKrakenFill, 'LEFT', 10, 0)
+        label:SetPoint('RIGHT', dropdownFrame.oldKrakenFill, 'RIGHT', -22, 0)
+    end
+    if type(label.SetJustifyH) == 'function' then label:SetJustifyH('LEFT') end
+    if type(label.SetWordWrap) == 'function' then label:SetWordWrap(false) end
+end
+
+function OldKraken.UIStyle.StyleDropDownList(list)
+    if not list or type(list) ~= 'table' then return end
+    local colors = OldKraken.UIStyle.Colors
+    local listName = type(list.GetName) == 'function' and list:GetName()
+    for _, suffix in ipairs({'Backdrop', 'MenuBackdrop'}) do
+        local backdrop = list[suffix] or (listName and _G[listName .. suffix])
+        if backdrop and type(backdrop) == 'table' and type(backdrop.SetAlpha) == 'function' then
+            backdrop:SetAlpha(0)
+        end
+    end
+    if not list.oldKrakenSkinTextures then
+        local fill = list:CreateTexture(nil, 'BACKGROUND', nil, -7)
+        fill:SetPoint('TOPLEFT', list, 'TOPLEFT', 6, -6)
+        fill:SetPoint('BOTTOMRIGHT', list, 'BOTTOMRIGHT', -6, 6)
+        fill:SetColorTexture(colors.panel[1], colors.panel[2], colors.panel[3], 0.98)
+        local top = list:CreateTexture(nil, 'BORDER', nil, -6)
+        top:SetPoint('TOPLEFT', fill, 'TOPLEFT', 0, 0)
+        top:SetPoint('TOPRIGHT', fill, 'TOPRIGHT', 0, 0)
+        top:SetHeight(1)
+        top:SetColorTexture(unpack(colors.buttonEdge))
+        local bottom = list:CreateTexture(nil, 'BORDER', nil, -6)
+        bottom:SetPoint('BOTTOMLEFT', fill, 'BOTTOMLEFT', 0, 0)
+        bottom:SetPoint('BOTTOMRIGHT', fill, 'BOTTOMRIGHT', 0, 0)
+        bottom:SetHeight(1)
+        bottom:SetColorTexture(unpack(colors.buttonEdge))
+        local left = list:CreateTexture(nil, 'BORDER', nil, -6)
+        left:SetPoint('TOPLEFT', fill, 'TOPLEFT', 0, 0)
+        left:SetPoint('BOTTOMLEFT', fill, 'BOTTOMLEFT', 0, 0)
+        left:SetWidth(1)
+        left:SetColorTexture(unpack(colors.buttonEdge))
+        local right = list:CreateTexture(nil, 'BORDER', nil, -6)
+        right:SetPoint('TOPRIGHT', fill, 'TOPRIGHT', 0, 0)
+        right:SetPoint('BOTTOMRIGHT', fill, 'BOTTOMRIGHT', 0, 0)
+        right:SetWidth(1)
+        right:SetColorTexture(unpack(colors.buttonEdge))
+        list.oldKrakenSkinTextures = {fill, top, bottom, left, right}
+    end
+    for _, tex in ipairs(list.oldKrakenSkinTextures) do
+        if tex and tex.Show then tex:Show() end
+    end
+    if not list.oldKrakenRestoreHook and type(list.HookScript) == 'function' then
+        list:HookScript('OnHide', function(self)
+            if self.oldKrakenStrata then
+                self:SetFrameStrata(self.oldKrakenStrata)
+                self.oldKrakenStrata = nil
+            end
+            local selfName = type(self.GetName) == 'function' and self:GetName()
+            for _, suffix in ipairs({'Backdrop', 'MenuBackdrop'}) do
+                local backdrop = self[suffix] or (selfName and _G[selfName .. suffix])
+                if backdrop and type(backdrop) == 'table' and type(backdrop.SetAlpha) == 'function' then
+                    backdrop:SetAlpha(1)
+                end
+            end
+            if self.oldKrakenSkinTextures then
+                for _, tex in ipairs(self.oldKrakenSkinTextures) do
+                    if tex and tex.Hide then tex:Hide() end
+                end
+            end
+        end)
+        list.oldKrakenRestoreHook = true
+    end
+end
+
 function OldKraken.UIStyle.Dropdown(frame)
     local colors = OldKraken.UIStyle.Colors
     local name = frame:GetName()
     if not name then return end
+    if type(frame.SetHeight) == 'function' then frame:SetHeight(36) end
     for _, part in ipairs({'Left', 'Middle', 'Right'}) do
         local texture = _G[name .. part]
         if texture then
@@ -224,7 +352,7 @@ function OldKraken.UIStyle.Dropdown(frame)
     if not frame.oldKrakenFill then
         local fill = frame:CreateTexture(nil, 'BACKGROUND', nil, -7)
         fill:SetPoint('TOPLEFT', frame, 'TOPLEFT', 16, -2)
-        fill:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -16, 4)
+        fill:SetPoint('BOTTOMRIGHT', frame, 'BOTTOMRIGHT', -16, 0)
         fill:SetColorTexture(unpack(colors.button))
         frame.oldKrakenFill = fill
 
@@ -247,6 +375,18 @@ function OldKraken.UIStyle.Dropdown(frame)
         frame.oldKrakenEdges = edges
         frame.oldKrakenBox = frame
     end
+    if not dropdownHooksInstalled and type(hooksecurefunc) == 'function' then
+        dropdownHooksInstalled = true
+        if type(UIDropDownMenu_SetWidth) == 'function' then
+            hooksecurefunc('UIDropDownMenu_SetWidth', function(dropdownFrame) layoutDropdownText(dropdownFrame) end)
+        end
+        if type(UIDropDownMenu_JustifyText) == 'function' then
+            hooksecurefunc('UIDropDownMenu_JustifyText', function(dropdownFrame) layoutDropdownText(dropdownFrame) end)
+        end
+        if type(UIDropDownMenu_SetText) == 'function' then
+            hooksecurefunc('UIDropDownMenu_SetText', function(dropdownFrame) layoutDropdownText(dropdownFrame) end)
+        end
+    end
     local label = _G[name .. 'Text']
     if label then
         if label.SetDrawLayer then label:SetDrawLayer('OVERLAY', 7) end
@@ -254,37 +394,51 @@ function OldKraken.UIStyle.Dropdown(frame)
             label:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
         end
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(label, 12) end
-        if label.ClearAllPoints then
-            label:ClearAllPoints()
-            label:SetPoint('LEFT', frame, 'LEFT', 26, 1)
-            label:SetPoint('RIGHT', frame, 'RIGHT', -38, 1)
-        end
-        if label.SetJustifyH then label:SetJustifyH('LEFT') end
+        layoutDropdownText(frame)
         if label.Show then label:Show() end
     end
     local toggle = _G[name .. 'Button']
     if toggle then
         local arrow = type(toggle.GetNormalTexture) == 'function' and toggle:GetNormalTexture()
         if arrow and arrow.SetVertexColor then arrow:SetVertexColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
-        if toggle.ClearAllPoints then
+        for _, method in ipairs({'GetNormalTexture', 'GetPushedTexture', 'GetDisabledTexture', 'GetHighlightTexture'}) do
+            local tex = type(toggle[method]) == 'function' and toggle[method](toggle)
+            if tex and type(tex) == 'table' and type(tex.SetAlpha) == 'function' then
+                tex:SetAlpha(0)
+            end
+        end
+        if toggle.ClearAllPoints and frame.oldKrakenFill then
             toggle:ClearAllPoints()
-            toggle:SetPoint('RIGHT', frame, 'RIGHT', -20, 1)
-            toggle:SetSize(20, 20)
+            toggle:SetPoint('TOPLEFT', frame.oldKrakenFill, 'TOPLEFT', 0, 0)
+            toggle:SetPoint('BOTTOMRIGHT', frame.oldKrakenFill, 'BOTTOMRIGHT', 0, 0)
+        end
+        if not toggle.oldKrakenHighlight and type(toggle.CreateTexture) == 'function' and type(toggle.SetHighlightTexture) == 'function' then
+            local hl = toggle:CreateTexture(nil, 'HIGHLIGHT')
+            hl:SetAllPoints(toggle)
+            hl:SetColorTexture(unpack(colors.actionBlue))
+            toggle:SetHighlightTexture(hl)
+            toggle.oldKrakenHighlight = hl
         end
     end
-    if toggle and toggle.HookScript then
+    if not frame.oldKrakenChevron and frame.oldKrakenFill then
+        local chevron = {}
+        local widths = {7, 5, 3, 1}
+        local offsets = {2, 1, 0, -1}
+        for idx = 1, 4 do
+            local bar = frame:CreateTexture(nil, 'OVERLAY', nil, 7)
+            bar:SetSize(widths[idx], 1)
+            bar:SetPoint('CENTER', frame.oldKrakenFill, 'RIGHT', -13, offsets[idx])
+            bar:SetColorTexture(unpack(colors.brandGold))
+            chevron[idx] = bar
+        end
+        frame.oldKrakenChevron = chevron
+    end
+    if toggle and toggle.HookScript and not toggle.oldKrakenClickHook then
+        toggle.oldKrakenClickHook = true
         toggle:HookScript('OnClick', function()
             local list = _G.DropDownList1
             if not list or not list:IsShown() then return end
-            if not list.oldKrakenRestoreHook then
-                list:HookScript('OnHide', function(self)
-                    if self.oldKrakenStrata then
-                        self:SetFrameStrata(self.oldKrakenStrata)
-                        self.oldKrakenStrata = nil
-                    end
-                end)
-                list.oldKrakenRestoreHook = true
-            end
+            OldKraken.UIStyle.StyleDropDownList(list)
             if not list.oldKrakenStrata then list.oldKrakenStrata = list:GetFrameStrata() end
             list:SetFrameStrata('FULLSCREEN_DIALOG')
         end)
