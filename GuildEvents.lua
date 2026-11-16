@@ -844,13 +844,15 @@ local function createWindow(parent)
     f.eventRows=rows
     for i=1,EVENTS_PER_PAGE do
         local index=i
-        rows[i]=action(f,'',0,-103-(i-1)*77,embedded and 420 or 383,function() local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; if entry then selected=entry.key; refresh() end end)
+        rows[i]=action(f,'',0,-103-(i-1)*77,embedded and 450 or 420,function() local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; if entry then selected=entry.key; refresh() end end)
         rows[i]:SetHeight(70)
         rows[i].art=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].art:SetPoint('TOPLEFT',rows[i],'TOPLEFT',3,-3); rows[i].art:SetSize(48,48)
-        rows[i].title=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].title:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-5); rows[i].title:SetWidth(embedded and 352 or 315); rows[i].title:SetJustifyH('LEFT'); rows[i].title:SetWordWrap(true); rows[i].title:SetHeight(34); readableFont(rows[i].title,16)
-        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlight'); rows[i].meta:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-42); rows[i].meta:SetWidth(embedded and 352 or 315); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(true); rows[i].meta:SetHeight(27); readableFont(rows[i].meta,13)
+        rows[i].title=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].title:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-5); rows[i].title:SetWidth(embedded and 382 or 352); rows[i].title:SetJustifyH('LEFT'); rows[i].title:SetWordWrap(true); rows[i].title:SetHeight(34); readableFont(rows[i].title,16)
+        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlight'); rows[i].meta:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-42); rows[i].meta:SetWidth(embedded and 346 or 316); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(true); rows[i].meta:SetHeight(27); readableFont(rows[i].meta,13)
         local remove=CreateFrame('Button',nil,rows[i]); rows[i].delete=remove
-        remove:SetSize(24,23); remove:SetPoint('LEFT',rows[i],'RIGHT',3,0)
+        OldKraken.UIStyle.Button(remove)
+        remove:SetSize(26,26); remove:SetPoint('BOTTOMRIGHT',rows[i],'BOTTOMRIGHT',-8,7)
+        remove:SetHitRectInsets(-2,-2,-2,-2)
         local function trashPiece(x,y,width,height)
             local texture=remove:CreateTexture(nil,'ARTWORK'); texture:SetColorTexture(0.9,0.32,0.3,1)
             texture:SetSize(width,height); texture:SetPoint('TOPLEFT',remove,'TOPLEFT',x,-y)
