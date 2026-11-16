@@ -447,9 +447,11 @@ local function ensureGroupCard(f, index)
         card.slots[slotIndex] = slot
     end
     f.rows[index] = card
-    local remove = CreateFrame('Button', nil, f.listContent)
-    remove:SetSize(24, 23)
-    remove:SetPoint('TOPLEFT', card, 'TOPRIGHT', 2, -2)
+    local remove = CreateFrame('Button', nil, card)
+    OldKraken.UIStyle.Button(remove)
+    remove:SetSize(26, 26)
+    remove:SetPoint('BOTTOMRIGHT', card, 'BOTTOMRIGHT', -94, 10)
+    remove:SetHitRectInsets(-2, -2, -2, -2)
     local function piece(x, y, width, height)
         local texture = remove:CreateTexture(nil, 'ARTWORK')
         texture:SetColorTexture(0.9, 0.32, 0.3, 1)
