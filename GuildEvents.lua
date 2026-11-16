@@ -608,6 +608,12 @@ local function iconAction(button,row,x,texture,hint)
     end)
     button:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
 end
+local function readableFont(text,size)
+    local font=type(text.GetFont)=='function' and text:GetFont() or nil
+    if type(font)~='string' or font=='' then font=STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF' end
+    text:SetFont(font,size,'OUTLINE')
+    text:SetShadowColor(0,0,0,0.9); text:SetShadowOffset(1,-1)
+end
 local function largeRoleIcon(role,size)
     return ((catalog.roleIcons[role] or '—'):gsub(':16:16:',':'..size..':'..size..':'))
 end
@@ -709,7 +715,7 @@ refresh=function()
                 local row=window.signupRows[i]
                 if not row then
                     row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth,32)
-                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-174,26); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
+                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-174,26); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false); readableFont(row.label,15)
                     row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-168,-3); row.roleStatus:SetSize(28,28); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-118,30); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
@@ -788,8 +794,8 @@ local function createWindow(parent)
         rows[i]=action(f,'',18,-65-(i-1)*77,embedded and 420 or 383,function() local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; if entry then selected=entry.key; refresh() end end)
         rows[i]:SetHeight(70)
         rows[i].art=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].art:SetPoint('TOPLEFT',rows[i],'TOPLEFT',3,-3); rows[i].art:SetSize(48,48)
-        rows[i].title=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].title:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-9); rows[i].title:SetWidth(embedded and 352 or 315); rows[i].title:SetJustifyH('LEFT'); rows[i].title:SetWordWrap(false)
-        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlight'); rows[i].meta:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-31); rows[i].meta:SetWidth(embedded and 352 or 315); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false)
+        rows[i].title=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].title:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-5); rows[i].title:SetWidth(embedded and 352 or 315); rows[i].title:SetJustifyH('LEFT'); rows[i].title:SetWordWrap(true); rows[i].title:SetHeight(34); readableFont(rows[i].title,16)
+        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlight'); rows[i].meta:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-42); rows[i].meta:SetWidth(embedded and 352 or 315); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(true); rows[i].meta:SetHeight(27); readableFont(rows[i].meta,13)
         local remove=CreateFrame('Button',nil,rows[i]); rows[i].delete=remove
         remove:SetSize(24,23); remove:SetPoint('LEFT',rows[i],'RIGHT',3,0)
         local function trashPiece(x,y,width,height)
@@ -823,8 +829,8 @@ local function createWindow(parent)
     f.nextPage=action(f,'›',263+(embedded and 5 or 0),embedded and -560 or -380,45,function() page=page+1; refresh() end)
     local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,-66); scroll:SetSize(detailsWidth,embedded and 480 or 320)
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(detailsWidth,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
-    f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true)
-    f.roleSummary=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleSummary:SetWidth(detailsWidth); f.roleSummary:SetJustifyH('LEFT')
+    f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true); readableFont(f.detailsTitle,18)
+    f.roleSummary=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleSummary:SetWidth(detailsWidth); f.roleSummary:SetJustifyH('LEFT'); readableFont(f.roleSummary,15)
     f.roleColumns={}; f.roleButtons={}
     local function roleButton(column,role)
         local button=CreateFrame('Button',nil,f.detailsContent)
@@ -842,14 +848,14 @@ local function createWindow(parent)
     end
     for i=1,3 do
         local column=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight')
-        column:SetWidth(detailsWidth/3-7); column:SetJustifyH('LEFT'); column:SetWordWrap(true); column:SetSpacing(7)
+        column:SetWidth(detailsWidth/3-7); column:SetJustifyH('LEFT'); column:SetWordWrap(true); column:SetSpacing(7); readableFont(column,14)
         f.roleColumns[i]=column
         f.roleButtons[i]=roleButton(column,({'tank','healer','dps'})[i])
     end
-    f.roleFlex=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleFlex:SetWidth(detailsWidth); f.roleFlex:SetJustifyH('LEFT')
+    f.roleFlex=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleFlex:SetWidth(detailsWidth); f.roleFlex:SetJustifyH('LEFT'); readableFont(f.roleFlex,14)
     f.flexButton=roleButton(f.roleFlex,'flex'); f.flexButton:SetWidth(detailsWidth)
-    f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT')
-    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP')
+    f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT'); readableFont(f.participantHeader,15)
+    f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP'); f.details:SetWordWrap(true); f.details:SetSpacing(3); readableFont(f.details,15)
     f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,embedded and -560 or -395,150,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end)
     f.join=action(f,'Записатися',605+shift,embedded and -560 or -395,100,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary')
     f.leave=action(f,'Виписатися',605+shift,embedded and -560 or -395,100,function() if selected then Events:Signup(selected,'leave') end end)
