@@ -51,14 +51,13 @@ def test_recipe_picker_cancel_returns_to_order_form_without_losing_draft():
         local form=orderPanel.createForm
         form.item:SetText('Elixir of Test')
         form.quantity:SetText('3')
-        form.reward:SetText('17')
         form.note:SetText('Keep these values')
         selectOption(OldKrakenOrderProfession,171)
         selectOption(orderPanel.deadlineMenu,21600)
 
         local saved=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderDrafts['Picker Mon']
         assert(saved and saved.item=='Elixir of Test' and saved.quantity=='3')
-        assert(saved.reward=='17' and saved.note=='Keep these values')
+        assert(saved.note=='Keep these values')
         assert(saved.profession==171 and saved.deadline==21600)
 
         local callbackCalled=false
@@ -73,7 +72,7 @@ def test_recipe_picker_cancel_returns_to_order_form_without_losing_draft():
         assert(not callbackCalled, 'cancel unexpectedly selected a recipe')
         assert(form:IsShown(), 'order form was not restored')
         assert(form.item:GetText()=='Elixir of Test')
-        assert(form.quantity:GetText()=='3' and form.reward:GetText()=='17')
+        assert(form.quantity:GetText()=='3')
         assert(form.note:GetText()=='Keep these values')
         assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderDrafts['Picker Mon'].item=='Elixir of Test')
     """)
@@ -87,14 +86,13 @@ def test_order_draft_restores_after_reload_and_is_scoped_to_character_and_guild(
         local f=OldKrakenWorkshopOrdersFrame
         f.item:SetText('Drafted item')
         f.quantity:SetText('4')
-        f.reward:SetText('25')
         f.note:SetText('Persist me')
         selectOption(OldKrakenOrderProfession,171)
         selectOption(f.materialsMenu,'mixed')
         selectOption(f.deadlineMenu,604800)
         local scope=OldKraken.DB.workshop.guilds['Realm\\001Guild']
         local d=scope.orderDrafts['DraftOwner Mon']
-        assert(d and d.item=='Drafted item' and d.quantity=='4' and d.reward=='25')
+        assert(d and d.item=='Drafted item' and d.quantity=='4')
         assert(d.note=='Persist me' and d.profession==171)
         assert(d.materials=='mixed' and d.deadline==604800)
     """)
@@ -110,7 +108,7 @@ def test_order_draft_restores_after_reload_and_is_scoped_to_character_and_guild(
         OldKraken.WorkshopOrders:Show()
         local f=OldKrakenWorkshopOrdersFrame
         assert(f.item:GetText()=='Drafted item')
-        assert(f.quantity:GetText()=='4' and f.reward:GetText()=='25')
+        assert(f.quantity:GetText()=='4')
         assert(f.note:GetText()=='Persist me')
         assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderDrafts['DraftOwner Mon'].materials=='mixed')
 
