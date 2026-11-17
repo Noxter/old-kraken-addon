@@ -106,9 +106,9 @@ Group Finder, календар і Майстерня використовуют�
 
 ## Статус
 
-Гілка `alpha` залишається версією в розробці; стабільний реліз ще не опубліковано. Поточна версія аддона — `0.4.0`, interface — `16001`, SavedVariables — `OldKrakenDB`. Станом на 17 листопада 2026 HEAD гілки: [`ae173d0`](https://github.com/Noxter/old-kraken-addon/commit/ae173d0). Автоматизовані тести для цього HEAD слід запускати локально за інструкціями нижче; попередній CI run #156 стосується старішого commit і не є підтвердженням перевірки поточного стану.
+Стабільний реліз у `main` — **`0.5.0`** ([`f96958f`](https://github.com/Noxter/old-kraken-addon/commit/f96958f)), гілка подальшої розробки `alpha` — **`0.5.1-alpha.1`**, interface — `16001`, SavedVariables — `OldKrakenDB`. Усі 30 автоматизованих тестів (`tests/test_*.py`) проходять локально на Lua 5.1 runtime (`lupa`).
 
-Ідентичність включає ім'я та прізвище персонажа з обох значень `UnitName("player")`. Користувач підтвердив базову видимість оголошень між двома клієнтами й повідомив, що гільдійний Group Finder перевірено в грі та він працює добре; це не підтверджує окремо всі сценарії та крайові випадки. PR #6 із додатковими перевірками авторитетності Guild Events і захисту Group Finder від повторного відтворення злитий у `alpha`, але це не є криптографічною автентифікацією відправника. Основна alpha залишається Draft у PR #2; до `main` її не зливати, доки не виконані критерії ручного тестування.
+Ідентичність включає ім'я та прізвище персонажа з обох значень `UnitName("player")`. Групи, Івенти, Ростер і Майстерня перевірені в реальній грі; протокол не має криптографічної автентифікації відправника, тому рішення приймаються з перевіркою sender-authority.
 
 ## Цілі MVP
 
@@ -129,7 +129,7 @@ Group Finder, календар і Майстерня використовуют�
 
 Наявність функцій не гарантує доступність усіх операцій. Календар і обмін аддон-повідомленнями потребують окремих функціональних тестів.
 
-## Communication diagnostics v0.4.0-alpha.3
+## Communication diagnostics
 
 - `Communication.lua` додає окремий транспортний шар для guild addon messages.
 - Префікс: `OLDKRKN`; канал: `GUILD`.
@@ -140,7 +140,7 @@ Group Finder, календар і Майстерня використовуют�
 - Значення `AreOutgoingAddonChatMessagesRestricted()` виводиться як діагностика, але не блокує спробу відправлення: остаточний результат визначається функціональним тестом.
 - Потрібно перевірити на двох персонажах/клієнтах у гільдії. До цього спільна синхронізація не вважається підтвердженою.
 
-## Native Group Finder API discovery v0.4.0-alpha.3
+## Native Group Finder API discovery
 
 У клієнті WoW Forever 1.60.1 (70938), Interface `16001`, попередні внутрішньоігрові перевірки підтвердили:
 
@@ -170,7 +170,7 @@ Group Finder, календар і Майстерня використовуют�
 
 Джерела: [C_LFGList для Camelot](https://wowlua.dev/api/C_LFGList), [Search](https://wowlua.dev/api/C_LFGList/Search), [GetSearchResults](https://wowlua.dev/api/C_LFGList/GetSearchResults), [GetSearchResultInfo](https://wowlua.dev/api/C_LFGList/GetSearchResultInfo), [GetSearchResultPlayerInfo](https://wowlua.dev/api/C_LFGList/GetSearchResultPlayerInfo), [CreateListing](https://wowlua.dev/api/C_LFGList/CreateListing).
 
-## Guild Roster v0.4.0-alpha.3
+## Guild Roster
 
 - Пошук за ім'ям персонажа.
 - Перемикання фільтра статусу: усі / онлайн / офлайн.

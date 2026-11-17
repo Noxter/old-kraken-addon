@@ -3,10 +3,9 @@
 Інструкції для AI-агентів (OpenCode, Codex, Copilot, Antigravity, Gemini CLI, Claude Code) у цьому репозиторії.
 Файл **не дублює** `README.md` і `TESTING.md` — він фіксує те, що агент мусить знати, щоб не ламати аддон і не вигадувати API.
 
-> **Цей файл описує гілку `alpha`, а не `main`.** `main` — старий стан (4 файли, версія 0.3.3). Усе нижче — факти з робочої копії `alpha` станом на `44404b3` (версія `0.4.0-alpha.3`).
-> Якщо ти працюєш у клоні `main` — цей файл не застосовний.
+> **Цей файл описує актуальний стан коду (`alpha` — `0.5.1-alpha.1`, `main` — реліз `0.5.0`).** Обидві гілки містять повну 17-файлову структуру аддона, схема БД v3.
 >
-> **Посилання тут — на імена функцій, констант і розділів, а не на номери рядків.** Гілка `alpha` рухається швидко (за одну сесію `GuildEvents.lua` змінювався тричі), тож номери рядків застарівають щодня. Шукай за символом: `grep -rn "ReceiveGroup" --include="*.lua" .`
+> **Посилання тут — на імена функцій, констант і розділів, а не на номери рядків.** Гілка `alpha` рухається швидко, тож номери рядків застарівають. Шукай за символом: `grep -rn "ReceiveGroup" --include="*.lua" .`
 
 ---
 
@@ -22,7 +21,7 @@
 
 ### Розмір коду
 
-17 Lua-файлів, 8721 рядок. Найбільші: `GroupFinderUI.lua` (1509), `WorkshopOrders.lua` (1147), `WorkshopRecipes.lua` (1144), `GuildEvents.lua` (1020), `GuildRoster.lua` (750).
+17 Lua-файлів, 11 445 рядків. Найбільші: `GroupFinderUI.lua` (2139), `GuildEvents.lua` (1450), `WorkshopOrders.lua` (1263), `WorkshopRecipes.lua` (1260), `Core.lua` (1176), `GuildRoster.lua` (1018).
 
 ---
 
@@ -32,17 +31,11 @@
 
 | Шлях | Гілка / стан | Призначення |
 |---|---|---|
-| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка** |
-| `~/Projects/old-kraken-addon/` | `main` | старий стан + застарілий `AGENTS.md` |
+| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка (`0.5.1-alpha.1`)** |
+| `~/Projects/old-kraken-addon/` | `main` | **релізна гілка (`0.5.0`)** |
 | `~/Projects/copilot-worktrees/old-kraken-addon/copilot-prewarm-fluffy-winner` | detached worktree | службовий |
 
-**Перед початком роботи завжди:** `git status -sb` + `git log --oneline -1` у `old-kraken-alpha`. У репо одночасно працюють інші агенти (у сесії 2026-11-16 HEAD і `origin/alpha` рухалися кілька разів). Не роби `git reset --hard`, `git checkout .`, `git stash` — це знищить чужу роботу.
-
-**Незакомічені зміни, які не можна чіпати/відкочувати** (станом на 2026-11-16):
-- `.github/workflows/validate-pr.yml` — `branches: [main]` → `[main, alpha]`
-- `Database.lua` — `SCHEMA_VERSION` 2 → 3, `groupFinder`/`workshop` у `DEFAULTS`, міграція `< 3`
-- `TESTING.md` — схема 2 → 3
-- `tests/test_database.py` — відповідні очікування
+**Перед початком роботи завжди:** `git status -sb` + `git log --oneline -1` у `old-kraken-alpha`. Не роби `git reset --hard`, `git checkout .`, `git stash` без підтвердження користувача.
 
 ---
 
