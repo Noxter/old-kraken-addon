@@ -625,14 +625,16 @@ local function CreateRow(index, parent)
         row.cellHovers[cellIndex] = hover
     end
 
-    local GATHERING_PROFESSIONS = {[186]=true, [182]=true, [393]=true}
+    local function isGathering(id)
+        return OldKraken.Workshop and OldKraken.Workshop.IsGatheringProfession and OldKraken.Workshop:IsGatheringProfession(id)
+    end
     row.professions = {}
     for i=1,5 do
         local icon=CreateFrame('Button',nil,row)
         icon:SetSize(18,18); icon:SetPoint('LEFT',row,'LEFT',634+(i-1)*22,0)
         icon.texture=icon:CreateTexture(nil,'ARTWORK'); icon.texture:SetAllPoints(icon)
         icon:SetScript('OnClick',function(self)
-            if self.memberName and self.professionID and not GATHERING_PROFESSIONS[self.professionID] and OldKraken.WorkshopRecipes then
+            if self.memberName and self.professionID and not isGathering(self.professionID) and OldKraken.WorkshopRecipes then
                 OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName,self.professionID)
             end
         end)
@@ -646,7 +648,7 @@ local function CreateRow(index, parent)
                 if self.relayed then GameTooltip:AddLine('Отримано через гільдію',1,1,1) end
                 if type(self.updated)=='number' and type(GetServerTime)=='function' and GetServerTime()-self.updated>604800 then GameTooltip:AddLine('Дані застарілі',1,0.7,0.25) end
             end
-            if not GATHERING_PROFESSIONS[self.professionID] then
+            if not isGathering(self.professionID) then
                 GameTooltip:AddLine('Натисніть, щоб переглянути збережені рецепти.',0.6,0.9,1,true)
             end
             GameTooltip:Show()

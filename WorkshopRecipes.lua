@@ -733,11 +733,12 @@ render=function()
             frame.onlineOnly:SetText(mastersOnline and 'Лише онлайн: так' or 'Лише онлайн: ні')
         end
         local masters={}
-        local gatheringIDs={[186]=true,[182]=true,[393]=true}
-        if OldKraken.Workshop then
+        local workshop=OldKraken.Workshop
+        if workshop then
             for id in pairs(professionNames) do
-                if (not professionContext and not gatheringIDs[id]) or professionContext==id then
-                    for _,entry in ipairs(OldKraken.Workshop:GetProfessionMasters(id)) do entry.profession=id; masters[#masters+1]=entry end
+                local isGathering=workshop.IsGatheringProfession and workshop:IsGatheringProfession(id)
+                if (not professionContext and not isGathering) or professionContext==id then
+                    for _,entry in ipairs(workshop:GetProfessionMasters(id)) do entry.profession=id; masters[#masters+1]=entry end
                 end
             end
         end
@@ -808,13 +809,6 @@ render=function()
     offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
     frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
     frame.count:SetText('Знайдено: '..#list..' · результати можуть бути застарілими або неповними')
-    local function masterWord(n)
-        local m100,m10=n%100,n%10
-        if m100>=11 and m100<=14 then return 'майстрів' end
-        if m10==1 then return 'майстер' end
-        if m10>=2 and m10<=4 then return 'майстри' end
-        return 'майстрів'
-    end
     for i,row in ipairs(rows) do
         local entry=list[offset*PAGE_SIZE+i]
         if entry then
@@ -825,7 +819,8 @@ render=function()
             if byRecipe and totalMasters>1 then
                 local onCount=groupOnline[r.recipe] or 0
                 local onText=onCount>0 and ('|cff68d98c'..onCount..' онлайн|r') or '|cff9ba9bcофлайн|r'
-                row.meta:SetText(professionNames[r.profession]..' · '..totalMasters..' '..masterWord(totalMasters)..' · '..onText)
+                local mWord=OldKraken.Workshop and OldKraken.Workshop.PluralUk and OldKraken.Workshop:PluralUk(totalMasters,'майстер','майстри','майстрів') or 'майстрів'
+                row.meta:SetText(professionNames[r.profession]..' · '..totalMasters..' '..mWord..' · '..onText)
             else
                 row.meta:SetText((selectRecipe and entry.owner==identity and '|cffffb347Ваш рецепт|r · ' or '')..(GetServerTime()-r.seen>604800 and '|cffffb347застаріло|r · ' or '')..playerLabel(entry.owner,classes)..' · '..professionNames[r.profession]..' · '..statusLabel(entry.owner,online))
             end

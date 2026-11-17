@@ -331,6 +331,9 @@ local function pluralUk(n, one, few, many)
     if mod10 >= 2 and mod10 <= 4 then return few end
     return many
 end
+local GATHERING_PROFESSIONS = {[186]=true, [182]=true, [393]=true}
+function Workshop:IsGatheringProfession(id) return GATHERING_PROFESSIONS[id] == true end
+function Workshop:PluralUk(n, one, few, many) return pluralUk(n, one, few, many) end
 
 local function button(parent,text,x,y,width,callback,variant,options)
     local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant,options)
@@ -446,9 +449,8 @@ local function createWindow(parent)
     local stepY = embedded and 78 or 47
     local startX = embedded and 0 or 20
     local startY = embedded and -134 or y(-100)
-    local gatheringIDs = {[186]=true, [182]=true, [393]=true}
     local gridProfessions = {}
-    for _,p in ipairs(professions) do if not gatheringIDs[p.id] then gridProfessions[#gridProfessions+1]=p end end
+    for _,p in ipairs(professions) do if not GATHERING_PROFESSIONS[p.id] then gridProfessions[#gridProfessions+1]=p end end
     for i,p in ipairs(gridProfessions) do
         local entry=p; local col=(i-1)%3; local line=math.floor((i-1)/3)
         local card=button(content,'',startX+col*stepX,startY-line*stepY,cardW,function()
