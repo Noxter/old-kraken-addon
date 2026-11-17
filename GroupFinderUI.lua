@@ -10,7 +10,7 @@ local tab = 'all'
 local offset = 0
 local requestOffset = 0
 local editingDescriptionKey
-local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 2, 3
+local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 5, 3
 local category, role = 'dungeon', 'dps'
 local filterCategory, filterRole, filterFree = 'all', '', false
 local dungeon, filterDungeon = '', ''
@@ -255,7 +255,7 @@ local function showRequests()
         local f = CreateFrame('Frame', 'OldKrakenRequestsFrame', window)
         f:Hide()
         local colors = OldKraken.UIStyle.Colors or {}
-        f:SetSize(298, 360)
+        f:SetSize(298, 384)
         if type(window.detailPanel) == 'table' then
             f:SetPoint('TOPLEFT', window.detailPanel, 'TOPLEFT', 16, -16)
             if type(f.SetFrameLevel) == 'function' then
@@ -296,9 +296,16 @@ local function showRequests()
                 GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
                 GameTooltip:SetText(playerLabel(row.entry.name) .. ' · ' .. roleLabel(row.entry.role))
                 GameTooltip:AddLine('|cffffc36bОчікує|r', 1, 1, 1)
-                GameTooltip:AddLine(row.entry.title, 1, 1, 1, true); GameTooltip:Show()
+                GameTooltip:AddLine(row.entry.title, 1, 1, 1, true)
+                GameTooltip:AddLine('|cff68d98cНатисніть, щоб шепнути|r', 1, 1, 1)
+                GameTooltip:Show()
             end)
             row.hover:SetScript('OnLeave', function() GameTooltip:Hide() end)
+            row.hover:SetScript('OnMouseUp', function(_, btn)
+                if btn == 'LeftButton' and row.entry and row.entry.name and type(ChatFrame_SendTell) == 'function' then
+                    ChatFrame_SendTell(row.entry.name)
+                end
+            end)
             local function decide(accept)
                 local entry = row.entry
                 if not entry then return end
@@ -322,8 +329,8 @@ local function showRequests()
             row.reject:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
             f.rows[i] = row
         end
-        f.previousPage = button(f, '‹', 76, -172, 44, function() requestOffset=math.max(0, requestOffset-REQUESTS_PER_PAGE); refreshRequests() end, 26, nil, {rounded = true})
-        f.nextPage = button(f, '›', 178, -172, 44, function() if requestOffset + REQUESTS_PER_PAGE < #(f.entries or {}) then requestOffset=requestOffset+REQUESTS_PER_PAGE end; refreshRequests() end, 26, nil, {rounded = true})
+        f.previousPage = button(f, '‹', 76, -352, 44, function() requestOffset=math.max(0, requestOffset-REQUESTS_PER_PAGE); refreshRequests() end, 26, nil, {rounded = true})
+        f.nextPage = button(f, '›', 178, -352, 44, function() if requestOffset + REQUESTS_PER_PAGE < #(f.entries or {}) then requestOffset=requestOffset+REQUESTS_PER_PAGE end; refreshRequests() end, 26, nil, {rounded = true})
         f.page = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
         f.page:SetPoint('CENTER', f.previousPage, 'RIGHT', 29, 0); f.page:SetJustifyH('CENTER')
         requestsWindow = f
@@ -777,8 +784,8 @@ refresh=function()
     end
     local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
     if not canManage or selected ~= editingDescriptionKey then editingDescriptionKey = nil end
+    local editing = canManage and editingDescriptionKey == selected and not showingRequests
     if type(window.editDescButton) == 'table' then
-        local editing = canManage and editingDescriptionKey == selected and not showingRequests
         local descVal = window.detailsKV and window.detailsKV[5] and window.detailsKV[5].val
         if type(descVal) == 'table' then
             descVal:SetWidth(canManage and 122 or 198)
@@ -789,8 +796,16 @@ refresh=function()
         window.saveDescButton:SetShown(editing)
         window.cancelDescButton:SetShown(editing)
     end
+    if window.detailsDivider then
+        window.detailsDivider:ClearAllPoints()
+        window.detailsDivider:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -194 or -166)
+    end
+    if window.detailsRosterHeader then
+        window.detailsRosterHeader:ClearAllPoints()
+        window.detailsRosterHeader:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -208 or -180)
+    end
     local members = g and g.members or {}
-    local top = g and 212 or (window.details:GetStringHeight() + 8)
+    local top = g and (editing and 240 or 212) or (window.details:GetStringHeight() + 8)
     local viewport=tonumber((window.detailsScroll:GetHeight())) or 210
     if viewport<=0 then viewport=210 end
     local oldScroll=tonumber((window.detailsScroll:GetVerticalScroll())) or 0
@@ -1285,7 +1300,7 @@ local function createWindow(parent)
 
     f.editDescBox = CreateFrame('EditBox', nil, f.detailsContent, 'InputBoxTemplate')
     OldKraken.UIStyle.Input(f.editDescBox)
-    f.editDescBox:SetSize(132, 24); f.editDescBox:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 76, -130)
+    f.editDescBox:SetSize(276, 26); f.editDescBox:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, -156)
     f.editDescBox:SetAutoFocus(false)
     local function saveEditedDescription()
         local g = selected and Finder.groups[selected]
@@ -1303,9 +1318,9 @@ local function createWindow(parent)
     f.editDescBox:SetScript('OnEscapePressed', function(self) self:ClearFocus(); editingDescriptionKey = nil; refresh() end)
     f.editDescBox:Hide()
 
-    f.saveDescButton = button(f.detailsContent, 'Ок', 212, -130, 36, saveEditedDescription, 24, 'primary', {rounded = true})
+    f.saveDescButton = button(f.detailsContent, 'Ок', 208, -130, 38, saveEditedDescription, 22, 'primary', {rounded = true})
     f.saveDescButton:Hide()
-    f.cancelDescButton = button(f.detailsContent, '×', 250, -130, 26, function() editingDescriptionKey = nil; refresh() end, 24, nil, {rounded = true})
+    f.cancelDescButton = button(f.detailsContent, '×', 250, -130, 26, function() editingDescriptionKey = nil; refresh() end, 22, nil, {rounded = true})
     f.cancelDescButton:Hide()
     f.detailsDivider = f.detailsContent:CreateTexture(nil, 'ARTWORK')
     f.detailsDivider:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, -166)
