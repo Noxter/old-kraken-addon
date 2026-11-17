@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.5.1-alpha.1"
+OldKraken.version = "0.5.1"
 OldKraken._listeners = OldKraken._listeners or {}
 
 -- Shared dark theme for the addon's native controls.
