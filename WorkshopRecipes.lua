@@ -175,6 +175,7 @@ local function playerHasProfession(profession)
     end
     return false
 end
+local function isAsciiText(value) return type(value)=='string' and value~='' and not value:find('[\128-\255]') end
 local function recordLearned(r,deferRefresh)
     local own=people[identity]; local previous=own[r.recipe]
     local tomb=scope.recipeTombstones[identity][r.recipe]
@@ -190,8 +191,15 @@ local function recordLearned(r,deferRefresh)
     end
     own[r.recipe]=r; scope.recipeTombstones[identity][r.recipe]=nil
     if recipeCatalog and (recipeCatalog[r.recipe] or catalogSize<10000) then
-        if not recipeCatalog[r.recipe] then catalogSize=catalogSize+1 end
-        recipeCatalog[r.recipe]={recipe=r.recipe,item=r.item,profession=r.profession,seen=r.seen,name=r.name,product=r.product}
+        local existing=recipeCatalog[r.recipe]
+        if not existing then catalogSize=catalogSize+1 end
+        local catName=r.name
+        local catProduct=r.product
+        if type(existing)=='table' then
+            if isAsciiText(existing.name) and not isAsciiText(catName) then catName=existing.name end
+            if isAsciiText(existing.product) and not isAsciiText(catProduct) then catProduct=existing.product end
+        end
+        recipeCatalog[r.recipe]={recipe=r.recipe,item=r.item,profession=r.profession,seen=r.seen,name=catName,product=catProduct}
     end
     indexRevision=indexRevision+1; recipeChanged=true
     if pendingLearned[r.recipe] then
@@ -317,6 +325,37 @@ local function scan()
     if frame and frame:IsShown() then frame.status:SetText(scanStatus) end
     return true
 end
+local function clientItemName(id)
+    if not id or id<=0 then return nil end
+    if C_Item and type(C_Item.GetItemNameByID)=='function' then
+        local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and safeText(value,1,120) then return value end
+    end
+    if type(GetItemInfo)=='function' then
+        local ok,value=pcall(GetItemInfo,id); if ok and safeText(value,1,120) then return value end
+    end
+    return nil
+end
+local function clientSpellName(id)
+    if not id or id<=0 then return nil end
+    if C_Spell and type(C_Spell.GetSpellName)=='function' then
+        local ok,value=pcall(C_Spell.GetSpellName,id); if ok and safeText(value,1,120) then return value end
+    end
+    if type(GetSpellInfo)=='function' then
+        local ok,value=pcall(GetSpellInfo,id); if ok and safeText(value,1,120) then return value end
+    end
+    return nil
+end
+local function displayRecipeName(r)
+    if type(r)~='table' then return '' end
+    local localName=r.item>0 and clientItemName(r.item) or clientSpellName(r.recipe)
+    if localName then return localName end
+    local cat=recipeCatalog and recipeCatalog[r.recipe]
+    if type(cat)=='table' then
+        local catText=cat.product~='' and cat.product or cat.name
+        if isAsciiText(catText) then return catText end
+    end
+    return r.product~='' and r.product or r.name
+end
 matches=function(r,query)
     if not validRecord(r) then return false end
     local profession=query:match('^prof:(%d+)$')
@@ -325,7 +364,7 @@ matches=function(r,query)
     if item then return r.item==tonumber(item) end
     local recipe=query:match('^recipe:(%d+)$')
     if recipe then return r.recipe==tonumber(recipe) end
-    return lower(r.name):find(query,1,true)~=nil or lower(r.product):find(query,1,true)~=nil
+    return lower(r.name):find(query,1,true)~=nil or lower(r.product):find(query,1,true)~=nil or lower(displayRecipeName(r)):find(query,1,true)~=nil
 end
 local function resolveProduct(r)
     if validRecord(r) and r.product=='' and r.item>0 and type(GetItemInfo)=='function' then
@@ -341,7 +380,7 @@ local function matchesFilter(r,filter)
     local recipe=filter:match('^recipe:(%d+)$')
     if recipe then return r.recipe==tonumber(recipe) end
     filter=filter:match('item:(%d+)') or filter
-    return lower(r.name):find(filter,1,true)~=nil or lower(r.product):find(filter,1,true)~=nil or tostring(r.item):find(filter,1,true)~=nil
+    return lower(r.name):find(filter,1,true)~=nil or lower(r.product):find(filter,1,true)~=nil or lower(displayRecipeName(r)):find(filter,1,true)~=nil or tostring(r.item):find(filter,1,true)~=nil
 end
 local function scanCachedRecords(visit,done,valid)
     local owners={}; for name in pairs(people) do owners[#owners+1]=name end
@@ -822,7 +861,7 @@ render=function()
         end
     end
     if byRecipe then for _,entry in pairs(grouped) do list[#list+1]=entry end end
-    table.sort(list,function(a,b) if a.record.name~=b.record.name then return a.record.name<b.record.name end return a.owner<b.owner end)
+    table.sort(list,function(a,b) local an,bn=displayRecipeName(a.record),displayRecipeName(b.record); if an~=bn then return an<bn end return a.owner<b.owner end)
     offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
     frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
     frame.count:SetText('Знайдено: '..#list..' · результати можуть бути застарілими або неповними')
@@ -831,7 +870,7 @@ render=function()
         if entry then
             local r=entry.record; row.entry=entry
             row.icon:SetTexture(recipeIcon(r))
-            row.name:SetText(r.product~='' and r.product or r.name)
+            row.name:SetText(displayRecipeName(r))
             local totalMasters=byRecipe and (groupCounts[r.recipe] or 1) or 1
             if byRecipe and totalMasters>1 then
                 local onCount=groupOnline[r.recipe] or 0
@@ -853,7 +892,7 @@ render=function()
     frame.order:SetShown(r~=nil and entry.owner~=identity and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false)
     if r then
         frame.detailIcon:SetTexture(recipeIcon(r))
-        frame.detailTitle:SetText(r.product~='' and r.product or r.name)
+        frame.detailTitle:SetText(displayRecipeName(r))
         local masters=Recipes:FindMasters(r.item,r.recipe); local names={}
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
         for i=1,math.min(#masters,8) do local m=masters[i]; names[#names+1]=playerLabel(m.name,classes)..' · '..statusLabel(m.name,online)..(GetServerTime()-m.seen>604800 and ' · |cffffb347застаріло|r' or '') end
