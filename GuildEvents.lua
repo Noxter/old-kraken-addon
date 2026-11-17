@@ -1319,7 +1319,20 @@ local function createWindow(parent)
     f.summaryBar:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -543)
     f.summaryLine = f.summaryBar:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
     f.summaryLine:SetPoint('LEFT', f.summaryBar, 'LEFT', 17, 0)
-    f.summaryLine:SetWidth(560); f.summaryLine:SetJustifyH('LEFT'); f.summaryLine:SetWordWrap(false)
+    f.summaryLine:SetWidth(445); f.summaryLine:SetJustifyH('LEFT'); f.summaryLine:SetWordWrap(false)
+
+    f.announceGuildEnabled = true
+    if OldKraken.UIStyle.Chip then
+        f.announceGuild = OldKraken.UIStyle.Chip(f.summaryBar, 'Чат гільдії', {dot = 'success', active = true, width = 112, height = 34, rounded = true})
+        f.announceGuild:SetPoint('TOPLEFT', f.summaryBar, 'TOPLEFT', 471, -15)
+        f.announceGuild:SetScript('OnClick', function(self)
+            f.announceGuildEnabled = not f.announceGuildEnabled
+            self:SetActive(f.announceGuildEnabled)
+            if self.SetDotColor then self:SetDotColor(f.announceGuildEnabled and 'success' or 'neutral') end
+        end)
+        f.announceGuild:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_TOP'); GameTooltip:SetText('Надіслати анонс у гільд-чат після створення івенту'); GameTooltip:Show() end end)
+        f.announceGuild:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    end
 
     f.cancelCreate = action(f.summaryBar, 'Скасувати', 593, -13, 110, function()
         f.creationMode = false
@@ -1345,7 +1358,21 @@ local function createWindow(parent)
         highlightDateMissing(false)
         local when = parseDate(day.day, day.month, day.year, hour, minute)
         if not when then showSubmitError('Оберіть коректні дату та місцевий час.'); return end
+        local eventTitle = (f.title:GetText() or ''):match('^%s*(.-)%s*$')
         if Events:Create(f.title:GetText(), f.description:GetText(), when, currentKind, f.size:GetText(), activity) then
+            if f.announceGuildEnabled and type(IsInGuild) == 'function' and IsInGuild() then
+                local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
+                    or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
+                local maxSize = tonumber(f.size:GetText())
+                local sizePart = (maxSize and maxSize > 0) and (' (' .. maxSize .. ' місць)') or ''
+                local msg = ('[Old Kraken] Новий івент: ' .. eventTitle .. ' · ' .. date('%d.%m %H:%M', when) .. sizePart .. ' — запис у вкладці «Івенти» (/okr).'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+                if sendChat then
+                    local sent, err = pcall(sendChat, msg, 'GUILD')
+                    if not sent then print('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ' .. tostring(err)) end
+                else
+                    print('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.')
+                end
+            end
             autoFilledTitle = nil
             f.title:SetText(''); f.description:SetText(''); f.creationMode = false; refresh()
             print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')

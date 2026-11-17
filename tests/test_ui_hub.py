@@ -142,18 +142,18 @@ local scope = {records={['Tester Realm']={timestamp=GetServerTime(),list={{id=17
 OldKraken.DB.workshop.guilds['Test Realm\\001Guild'] = scope
 OldKraken.Workshop:Show()
 local workshopFrame = OldKraken.UIHub.pages.workshop.frame
-assert(workshopFrame.width == 900 and workshopFrame.height == 590)
+assert(workshopFrame.width == 900 and workshopFrame.height == 608)
 assert(rawget(workshopFrame, 'page') == nil and rawget(workshopFrame, 'previousPage') == nil and rawget(workshopFrame, 'nextPage') == nil)
-assert(#workshopFrame.professionCards == 12)
+assert(#workshopFrame.professionCards == 9)
 local alchemy = workshopFrame.professionCards[1]
-assert(alchemy.profession == 171 and alchemy.detail.text == '3 рецептів · 2 майстрів')
+assert(alchemy.profession == 171 and alchemy.detail.text == '3 рецепти · 2 майстри')
 alchemy.scripts.OnClick(alchemy)
 assert(selectedProfession == 171, 'profession card did not open its profession')
 
 for i=2,13 do scope.records['Tester Realm'].list[i] = {id=171,rank=i,maximum=75} end
 OldKraken.Workshop:Show()
-assert(#workshopFrame.professionCards == 12 and rawget(workshopFrame, 'page') == nil)
-local fishing = workshopFrame.professionCards[12]
+assert(#workshopFrame.professionCards == 9 and rawget(workshopFrame, 'page') == nil)
+local fishing = workshopFrame.professionCards[9]
 fishing.scripts.OnClick(fishing)
 assert(selectedProfession == 356, 'profession cards changed when saved records increased')
 ''')

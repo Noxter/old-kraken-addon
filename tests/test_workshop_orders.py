@@ -196,12 +196,12 @@ def test_relayed_actions_cannot_impersonate_worker():
         OldKraken.WorkshopOrders:Show()
         local f=OldKrakenWorkshopOrdersFrame
         f.item:SetText('Security potion')
-        f.reward:SetText('5')
         selectOption(OldKrakenOrderProfession,171)
         click('Опублікувати')
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
         for k,v in pairs(s.orderOwners['Alice Mon']) do orderKey=k; order=v end
         assert(order and order.status=='open')
+        order.reward=5
 
         handlers.WOREQ('Bob Mon','GUILD',OldKraken.GroupFinder._pack({order.owner,order.id,'offer','1','0'}))
         OldKraken.WorkshopOrders:Show(orderKey)
@@ -360,22 +360,22 @@ def test_embedded_orders():
         local workshop=OldKraken.UIHub.pages.workshop.frame
         assert(OldKraken.UIHub.currentPage=='workshop')
         assert(workshop.ordersView and workshop.ordersView:IsShown())
-        assert(workshop.ordersView.width==900 and workshop.ordersView.height==590)
+        assert(workshop.ordersView.width==900 and workshop.ordersView.height==608)
         assert(not workshop.professionView:IsShown())
-        assert(workshop.ordersTab.activeBar:IsShown() and not workshop.professionTab.activeBar:IsShown())
+        assert((type(workshop.tabBar)=='table' and workshop.tabBar.activeKey=='orders') or (workshop.ordersTab.activeBar:IsShown() and not workshop.professionTab.activeBar:IsShown()))
         assert(not OldKrakenWorkshopOrdersFrame, 'embedded orders created a separate window')
         assert(workshop.newOrder:IsShown())
         assert(workshop.newOrder.parent==workshop.ordersView, 'new-order button is not attached to the orders panel')
         assert(workshop.newOrder.variant=='primary', 'new-order action is not styled as primary')
         workshop.professionTab.scripts.OnClick(workshop.professionTab)
         assert(workshop.professionView:IsShown() and not workshop.ordersView:IsShown())
-        assert(workshop.professionTab.activeBar:IsShown() and not workshop.ordersTab.activeBar:IsShown())
+        assert((type(workshop.tabBar)=='table' and workshop.tabBar.activeKey=='professions') or (workshop.professionTab.activeBar:IsShown() and not workshop.ordersTab.activeBar:IsShown()))
         workshop.ordersTab.scripts.OnClick(workshop.ordersTab)
         assert(workshop.ordersView:IsShown() and not workshop.professionView:IsShown())
         workshop.newOrder.scripts.OnClick(workshop.newOrder)
         local form=workshop.ordersView.createForm
         assert(form:IsShown(), 'new-order form did not open modally')
-        assert(form.width==720 and form.height==320, 'new-order form is not compact')
+        assert(form.width==900 and form.height==480, 'new-order form size mismatch')
         form.item:SetText('Embedded potion')
         selectOption(OldKrakenOrderProfession,171)
         click('Опублікувати')

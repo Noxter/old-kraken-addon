@@ -1158,6 +1158,8 @@ local function createWindow(parent)
     f.emptyList = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
     f.emptyList:SetPoint('TOP', f.listScroll, 'TOP', 0, -135)
     f.emptyList:SetWidth(460); f.emptyList:SetJustifyH('CENTER')
+    if type(f.emptyList.SetSpacing) == 'function' then f.emptyList:SetSpacing(5) end
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.emptyList, 14) end
     f.emptyList:SetText('Доступних груп поки немає.\nСтворіть перше оголошення для гільдії.')
     f.emptyAction = button(f, 'Створити оголошення', 182, -365, 190, function()
         local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= ''
@@ -1278,7 +1280,7 @@ local function createWindow(parent)
 
     f.categoryFilter = dropdown(f, 373, -117, 156, choices(categories, categoryLabels, {value='all', label='Категорія: усі'}),
         function() return filterCategory end, function(value) filterCategory=value; offset=0; refresh() end)
-    f.roleFilter = dropdown(f, 539, -117, 110, choices({'tank','healer','dps','flex'}, coloredRoleLabels, {value='', label='Роль: усі'}),
+    f.roleFilter = dropdown(f, 539, -117, 110, choices({'tank','healer','dps'}, coloredRoleLabels, {value='', label='Роль: усі'}),
         function() return filterRole end, function(value) filterRole=value; offset=0; refresh() end)
     f.freeFilter = dropdown(f, 539, -117, 110, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
         function() return filterFree end, function(value) filterFree=value; offset=0; refresh() end)
@@ -1473,6 +1475,7 @@ local function createWindow(parent)
                         if GameTooltip and self.entry then
                             GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.entry.label)
                             GameTooltip:AddLine('Рекомендовані рівні: '..self.entry.min..'–'..self.entry.max,1,1,1,true)
+                            if self.levelNote then GameTooltip:AddLine(self.levelNote,self.levelColor[1],self.levelColor[2],self.levelColor[3],true) end
                             GameTooltip:Show()
                         end
                     end)
@@ -1480,19 +1483,38 @@ local function createWindow(parent)
                     picker.cards[count]=card
                 end
                 local fits=level==0 or (entry.min and entry.max and level>=entry.min-2 and level<=entry.max+2)
+                local tooLow=level>0 and entry.min and level<entry.min-2
+                local tooHigh=level>0 and entry.max and level>entry.max+2
                 if fits and not firstFit then firstFit=count end
                 if entry.value==dungeon then selectedIndex=count end
                 card.entry=entry; card.fitsLevel=fits and true or false
+                if tooLow then
+                    card.levelNote='Ваш рівень нижчий за рекомендований'; card.levelColor={1,0.48,0.43}
+                elseif tooHigh then
+                    card.levelNote='Ваш рівень вищий за рекомендований'; card.levelColor={0.61,0.66,0.74}
+                else
+                    card.levelNote=nil; card.levelColor=nil
+                end
                 catalog.SetArtwork(card.art,entry.value); card.art:SetDesaturated(not fits); card.art:SetAlpha(fits and 1 or 0.65)
-                card.title:SetText(entry.label)
-                card.title:SetTextColor(fits and 1 or 0.8,fits and 0.91 or 0.8,fits and 0.65 or 0.8)
-                card.levels:SetText(entry.min..'–'..entry.max..(fits and '  |cff69dc8cпід ваш рівень|r' or ''))
-                card.fill:SetColorTexture(fits and 0.16 or 0.06,fits and 0.12 or 0.065,0.06,1)
                 card.selected=entry.value==dungeon
+                card.title:SetText(entry.label)
+                if card.selected then
+                    card.title:SetTextColor(1,1,1)
+                    card.fill:SetColorTexture(0.15,0.21,0.44,1)
+                else
+                    card.title:SetTextColor(fits and 1 or 0.8,fits and 0.91 or 0.8,fits and 0.65 or 0.8)
+                    card.fill:SetColorTexture(fits and 0.14 or 0.06,fits and 0.11 or 0.065,0.06,1)
+                end
+                local levelBadge = fits and '  |cff69dc8cпід ваш рівень|r' or (tooLow and '  |cffff7a6eнизький рівень|r' or (tooHigh and '  |cff9ba9bcвище рівня|r' or ''))
+                card.levels:SetText(entry.min..'–'..entry.max..levelBadge)
                 local r,g,b=0.23,0.25,0.28
-                if card.selected then r,g,b=1,0.75,0.2
-                elseif fits then r,g,b=0.65,0.49,0.18 end
-                for _,edge in ipairs(card.edges) do edge:SetColorTexture(r,g,b,1) end
+                local thickness=1
+                if card.selected then r,g,b=0.45,0.60,1.0; thickness=2
+                elseif fits then r,g,b=0.55,0.42,0.16 end
+                for idx,edge in ipairs(card.edges) do
+                    edge:SetColorTexture(r,g,b,1)
+                    if idx<=2 then edge:SetHeight(thickness) else edge:SetWidth(thickness) end
+                end
                 card:Show()
             end
         end
@@ -1508,9 +1530,32 @@ local function createWindow(parent)
     end
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
+    f.announceGuildEnabled = true
     f.createButton = button(f, 'Створити', 550, -455, 150, function()
+        local titleText = (f.titleBox:GetText() or ''):match('^%s*(.-)%s*$')
         local ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
-        if ok then Finder:Changed(); tab='mine'; refresh()
+        if ok then
+            if f.announceGuildEnabled and type(IsInGuild) == 'function' and IsInGuild() then
+                local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
+                    or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
+                local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or 'Група')
+                local maxPlayers = tonumber(f.maxBox:GetText()) or 5
+                local minLv, maxLv = tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText())
+                local descText = (f.descriptionBox:GetText() or ''):match('^%s*(.-)%s*$')
+                local metaParts = {'1/' .. maxPlayers}
+                if minLv and maxLv and minLv > 0 and maxLv > 0 then
+                    metaParts[#metaParts + 1] = 'рівні ' .. minLv .. '–' .. maxLv
+                end
+                local notePart = descText ~= '' and (' · ' .. descText) or ''
+                local msg = ('[Old Kraken] Збір групи: ' .. activityName .. ' (' .. table.concat(metaParts, ', ') .. ')' .. notePart .. ' — запис у вкладці «Групи» (/okr).'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+                if sendChat then
+                    local sent, err = pcall(sendChat, msg, 'GUILD')
+                    if not sent then print('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ' .. tostring(err)) end
+                else
+                    print('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.')
+                end
+            end
+            Finder:Changed(); tab='mine'; refresh()
         else print('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.') end
     end, nil, 'primary')
     f.advancedCreation=false
@@ -1527,7 +1572,7 @@ local function createWindow(parent)
     local roleChipWidths = {tank = 52, healer = 56, dps = 48, flex = 64}
     local roleChipTitles = {tank = 'Танк', healer = 'Лікар', dps = 'DPS', flex = 'Гнучка'}
     local chipX = 194
-    for i,value in ipairs({'tank','healer','dps','flex'}) do
+    for i,value in ipairs({'tank','healer','dps'}) do
         local chosen=value
         local chipW = roleChipWidths[value] or 54
         local control=button(footer,roleChipTitles[value] or value,chipX,-8,chipW,function() role=chosen; refresh() end,28,nil,{rounded=true})
@@ -1542,12 +1587,23 @@ local function createWindow(parent)
         chipX = chipX + chipW + 4
     end
     f.descriptionBox:SetParent(footer); f.descriptionBox:ClearAllPoints()
-    f.descriptionBox:SetPoint('TOPLEFT',footer,'TOPLEFT',432,-8); f.descriptionBox:SetSize(150,28)
+    f.descriptionBox:SetPoint('TOPLEFT',footer,'TOPLEFT',364,-8); f.descriptionBox:SetSize(134,28)
     f.commentHint=footer:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
     f.commentHint:SetPoint('LEFT',f.descriptionBox,'LEFT',8,0); f.commentHint:SetText('Коментар')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.commentHint, 12) end
     if muted then f.commentHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.descriptionBox:SetScript('OnTextChanged',function(self) f.commentHint:SetShown(self:GetText()=='') end)
+    if OldKraken.UIStyle.Chip then
+        f.announceGuild = OldKraken.UIStyle.Chip(footer, 'У чат', {dot = 'success', active = true, width = 80, height = 28, rounded = true})
+        f.announceGuild:SetPoint('TOPLEFT', footer, 'TOPLEFT', 504, -8)
+        f.announceGuild:SetScript('OnClick', function(self)
+            f.announceGuildEnabled = not f.announceGuildEnabled
+            self:SetActive(f.announceGuildEnabled)
+            if self.SetDotColor then self:SetDotColor(f.announceGuildEnabled and 'success' or 'neutral') end
+        end)
+        f.announceGuild:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_TOP'); GameTooltip:SetText('Повідомити в гільд-чат про нову групу'); GameTooltip:Show() end end)
+        f.announceGuild:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    end
     f.creationOptionsButton=button(footer,'Деталі',590,-8,88,function() f.advancedCreation=not f.advancedCreation; refresh() end,28)
     f.createButton:SetParent(footer); f.createButton:ClearAllPoints()
     f.createButton:SetPoint('TOPLEFT',footer,'TOPLEFT',688,-8); f.createButton:SetSize(150,28)

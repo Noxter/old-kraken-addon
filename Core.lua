@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.4.0"
+OldKraken.version = "0.5.0-alpha.1"
 OldKraken._listeners = OldKraken._listeners or {}
 
 -- Shared dark theme for the addon's native controls.
@@ -340,6 +340,9 @@ function OldKraken.UIStyle.Input(editBox, options)
     editBox:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
     if type(editBox.SetFont) == 'function' then
         OldKraken.UIStyle.Font(editBox, 13)
+    end
+    if type(editBox.SetTextInsets) == 'function' then
+        editBox:SetTextInsets(10, 10, 0, 0)
     end
 end
 
@@ -773,6 +776,7 @@ function OldKraken.UIStyle.Chip(parent, text, options)
         self.label:SetTextColor(text[1], text[2], text[3])
         if options.selStyle then OldKraken.UIStyle.Font(self.label, options.fontSize or 13, self.active) end
     end
+    chip.SetText = chip.SetLabel
     chip:SetLabel(text)
     chip:SetActive(options.active)
     return chip
