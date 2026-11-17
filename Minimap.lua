@@ -38,13 +38,16 @@ OldKraken:On('INITIALIZED', function(db)
     background:SetTexture('Interface\\Minimap\\UI-Minimap-Background')
     background:SetPoint('CENTER'); background:SetSize(24, 24)
     background:SetVertexColor(unpack(OldKraken.UIStyle.Colors.window))
+    button.background = background
     local icon = button:CreateTexture(nil, 'ARTWORK')
     icon:SetPoint('CENTER', button, 'CENTER', 0, 0)
     icon:SetSize(28, 28)
     icon:SetTexture(OldKraken.UIStyle.EmblemPath())
+    button.icon = icon
     local border = button:CreateTexture(nil, 'OVERLAY')
     border:SetTexture('Interface\\Minimap\\MiniMap-TrackingBorder')
     border:SetSize(54, 54); border:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
+    button.border = border
     button:SetHighlightTexture('Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight')
     button:SetScript('OnClick', function(_, mouseButton)
         local target = mouseButton == 'RightButton' and OldKraken.GroupFinder or OldKraken.GuildRoster

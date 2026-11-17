@@ -121,6 +121,43 @@ function Hub:RegisterPage(key, title, shortcut, create)
     if self.frame then createPageButton(page) end
 end
 
+local SCALE_PRESETS = {0.85, 1.0, 1.15, 1.25, 1.4}
+
+local function savedScale()
+    local s = OldKraken.DB and OldKraken.DB.settings
+    local val = type(s) == 'table' and tonumber(s.uiScale)
+    if val and val >= 0.75 and val <= 1.5 then return val end
+    return 1.0
+end
+
+local function applyScale(value)
+    local scale = tonumber(value)
+    if not scale or scale < 0.75 or scale > 1.5 then scale = 1.0 end
+    if OldKraken.DB and type(OldKraken.DB.settings) == 'table' then
+        OldKraken.DB.settings.uiScale = scale
+    end
+    if Hub.frame and type(Hub.frame.SetScale) == 'function' then
+        Hub.frame:SetScale(scale)
+    end
+    if Hub.scaleButton then
+        Hub.scaleButton:SetText(math.floor(scale * 100 + 0.5) .. '%')
+    end
+end
+
+function Hub:HandleScaleWheel(delta)
+    if type(IsControlKeyDown) ~= 'function' or not IsControlKeyDown() then return false end
+    if not delta or delta == 0 then return false end
+    local current = savedScale()
+    local closest, bestDist = 1, math.abs(current - SCALE_PRESETS[1])
+    for i = 2, #SCALE_PRESETS do
+        local dist = math.abs(current - SCALE_PRESETS[i])
+        if dist < bestDist then closest, bestDist = i, dist end
+    end
+    local target = delta > 0 and math.min(#SCALE_PRESETS, closest + 1) or math.max(1, closest - 1)
+    applyScale(SCALE_PRESETS[target])
+    return true
+end
+
 local function createWindow()
     local frame = CreateFrame('Frame', 'OldKrakenHubFrame', UIParent, 'BasicFrameTemplateWithInset')
     frame:SetSize(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -133,6 +170,46 @@ local function createWindow()
     frame:SetClampedToScreen(true)
     OldKraken.UIStyle.Window(frame)
     if frame.TitleText then frame.TitleText:SetText('Old Kraken') end
+    local scaleBtn = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+    OldKraken.UIStyle.Button(scaleBtn, nil, {rounded = true})
+    scaleBtn:SetSize(48, 22)
+    scaleBtn:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -34, -4)
+    local scaleLbl = type(scaleBtn.GetFontString) == 'function' and scaleBtn:GetFontString()
+    if type(scaleLbl) == 'table' and OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(scaleLbl, 11) end
+    scaleBtn:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+    scaleBtn:SetScript('OnClick', function(_, mouseButton)
+        if mouseButton == 'RightButton' then
+            applyScale(1.0)
+            return
+        end
+        local current = savedScale()
+        local nextScale = SCALE_PRESETS[1]
+        for i, preset in ipairs(SCALE_PRESETS) do
+            if math.abs(current - preset) < 0.03 then
+                nextScale = SCALE_PRESETS[(i % #SCALE_PRESETS) + 1]
+                break
+            elseif preset > current then
+                nextScale = preset
+                break
+            end
+        end
+        applyScale(nextScale)
+    end)
+    scaleBtn:SetScript('OnEnter', function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
+            GameTooltip:SetText('Масштаб вікна: ' .. math.floor(savedScale() * 100 + 0.5) .. '%')
+            GameTooltip:AddLine('Лівий клік — змінити (85%–140%)', 1, 1, 1, true)
+            GameTooltip:AddLine('Правий клік — скинути на 100%', 0.75, 0.82, 0.9, true)
+            GameTooltip:AddLine('Ctrl + скрол — змінити масштаб', 0.75, 0.82, 0.9, true)
+            GameTooltip:Show()
+        end
+    end)
+    scaleBtn:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    Hub.scaleButton = scaleBtn
+
+    frame:EnableMouseWheel(true)
+    frame:SetScript('OnMouseWheel', function(_, delta) Hub:HandleScaleWheel(delta) end)
     table.insert(UISpecialFrames, 'OldKrakenHubFrame')
     frame:HookScript('OnHide', function()
         for _, page in ipairs(Hub.pageOrder) do
@@ -173,6 +250,7 @@ local function createWindow()
     Hub.contentRule:SetColorTexture(unpack(colors.panelEdge))
     Hub.contentRule:Hide()
     Hub.frame = frame
+    applyScale(savedScale())
     for _, page in ipairs(Hub.pageOrder) do createPageButton(page) end
     return frame
 end
@@ -196,6 +274,7 @@ function Hub:ShowPage(key)
         if item.frame then item.frame:SetShown(item == page) end
     end
     updateButtons()
+    applyScale(savedScale())
     self.frame:Show()
     page.frame:Show()
     return page.frame

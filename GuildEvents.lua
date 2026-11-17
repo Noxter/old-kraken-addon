@@ -1211,7 +1211,10 @@ local function createWindow(parent)
         self.offset = math.max(0, math.min(math.max(0, self.full - 70), value))
         body:ClearAllPoints(); body:SetPoint('TOPLEFT', clip, 'TOPLEFT', 0, self.offset)
     end
-    local function wheel(_, delta) grid:ScrollTo(grid.offset - delta * 70) end
+    local function wheel(_, delta)
+        if OldKraken.UIHub and OldKraken.UIHub.HandleScaleWheel and OldKraken.UIHub:HandleScaleWheel(delta) then return end
+        grid:ScrollTo(grid.offset - delta * 70)
+    end
     grid:SetScript('OnMouseWheel', wheel); clip:EnableMouseWheel(true); clip:SetScript('OnMouseWheel', wheel)
     f.activityCards = grid
     function f:ShowActivityCards()

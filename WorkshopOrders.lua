@@ -1215,6 +1215,19 @@ function Orders:Show(k)
     window:Show(); refresh()
 end
 function Orders:SupportsProfession(id) return professionNames[id]~=nil end
+function Orders:GetOpenCounts()
+    connect(); if not active then return 0,0 end
+    local openCount,availableCount=0,0
+    for _,source in ipairs({own,observed}) do
+        for _,o in pairs(source) do
+            if type(o)=='table' and o.status~='deleted' and displayStatus(o)=='open' then
+                openCount=openCount+1
+                if o.owner~=identity and canCraft(o) then availableCount=availableCount+1 end
+            end
+        end
+    end
+    return openCount,availableCount
+end
 function Orders:ShowRecipe(r,owner)
     if type(r)~='table' or not professionNames[r.profession] or not int(r.recipe,1,100000000) or not int(r.item,0,100000000) then
         print('Old Kraken: замовлення для цієї професії недоступне.'); return

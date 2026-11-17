@@ -331,6 +331,10 @@ local function pluralUk(n, one, few, many)
     if mod10 >= 2 and mod10 <= 4 then return few end
     return many
 end
+local GATHERING_PROFESSIONS = {[186]=true, [182]=true, [393]=true}
+local SECONDARY_PROFESSIONS = {[185]=true, [129]=true, [356]=true}
+function Workshop:IsGatheringProfession(id) return GATHERING_PROFESSIONS[id] == true end
+function Workshop:PluralUk(n, one, few, many) return pluralUk(n, one, few, many) end
 
 local function button(parent,text,x,y,width,callback,variant,options)
     local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant,options)
@@ -340,15 +344,49 @@ render=function()
     if not frame or not frame:IsShown() or (frame.professionView and not frame.professionView:IsShown()) then return end
     frame.heading:SetText(scanState=='checking' and 'Перевіряємо зміни професій…' or (scanState==false and 'Власні дані професій не отримано. Відкрийте професію у грі.' or 'Оберіть професію, щоб переглянути майстрів і рецепти.'))
     local summaries=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:GetProfessionSummaries() or {}
+    local online = OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.GetRosterPresentation and OldKraken.WorkshopRecipes:GetRosterPresentation() or {}
+    local totalRecipes, onlineMastersMap = 0, {}
     for _,card in ipairs(frame.professionCards) do
         local summary=summaries[card.profession]
         if summary then
             local rWord = pluralUk(summary.recipes, 'рецепт', 'рецепти', 'рецептів')
             local mWord = pluralUk(summary.members, 'майстер', 'майстри', 'майстрів')
             card.detail:SetText(summary.recipes..' '..rWord..' · '..summary.members..' '..mWord)
+            totalRecipes = totalRecipes + (summary.recipes or 0)
         else
             card.detail:SetText('Немає збережених рецептів')
         end
+        if card.online then
+            local onCount = 0
+            for _, m in ipairs(Workshop:GetProfessionMasters(card.profession)) do
+                if m.name == identity or online[m.name] == true then
+                    onCount = onCount + 1
+                    onlineMastersMap[m.name] = true
+                end
+            end
+            if onCount > 0 then
+                card.online:SetText('|cff68d98c• ' .. onCount .. ' онлайн|r')
+            else
+                card.online:SetText('|cff9ba9bcНемає майстрів онлайн|r')
+            end
+        end
+    end
+    if type(frame.ordersSummaryLine1) == 'table' then
+        local openCount, availableCount = 0, 0
+        if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders.GetOpenCounts then
+            openCount, availableCount = OldKraken.WorkshopOrders:GetOpenCounts()
+        end
+        local oWord = pluralUk(openCount, 'відкрите замовлення', 'відкритих замовлення', 'відкритих замовлень')
+        frame.ordersSummaryLine1:SetText('У гільдії зараз |cffffd35a' .. openCount .. '|r ' .. oWord .. '.')
+        frame.ordersSummaryLine2:SetText('Доступно вам для виконання: |cff68d98c' .. availableCount .. '|r.')
+    end
+    if type(frame.recipesSummaryLine1) == 'table' then
+        local onlineMasters = 0
+        for _ in pairs(onlineMastersMap) do onlineMasters = onlineMasters + 1 end
+        local rWord = pluralUk(totalRecipes, 'рецепт', 'рецепти', 'рецептів')
+        local mWord = pluralUk(onlineMasters, 'майстер онлайн', 'майстри онлайн', 'майстрів онлайн')
+        frame.recipesSummaryLine1:SetText('У базі гільдії збережено |cffffd35a' .. totalRecipes .. '|r ' .. rWord .. '.')
+        frame.recipesSummaryLine2:SetText('Зараз у мережі |cff68d98c' .. onlineMasters .. '|r ' .. mWord .. '.')
     end
 end
 local function createWindow(parent)
@@ -441,16 +479,20 @@ local function createWindow(parent)
     if colors.mutedText then f.heading:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
     f.professionCards={}
     local cardW = embedded and 288 or 232
-    local cardH = embedded and 66 or 42
+    local cardH = embedded and 82 or 42
     local stepX = embedded and 306 or 242
-    local stepY = embedded and 78 or 47
+    local stepY = embedded and 96 or 47
     local startX = embedded and 0 or 20
     local startY = embedded and -134 or y(-100)
-    local gatheringIDs = {[186]=true, [182]=true, [393]=true}
     local gridProfessions = {}
-    for _,p in ipairs(professions) do if not gatheringIDs[p.id] then gridProfessions[#gridProfessions+1]=p end end
+    for _,p in ipairs(professions) do
+        if not GATHERING_PROFESSIONS[p.id] and (not embedded or not SECONDARY_PROFESSIONS[p.id]) then
+            gridProfessions[#gridProfessions+1]=p
+        end
+    end
+    local cols = 3
     for i,p in ipairs(gridProfessions) do
-        local entry=p; local col=(i-1)%3; local line=math.floor((i-1)/3)
+        local entry=p; local col=(i-1)%cols; local line=math.floor((i-1)/cols)
         local card=button(content,'',startX+col*stepX,startY-line*stepY,cardW,function()
             if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:ShowProfession(entry.id) end
         end,nil,{height=cardH})
@@ -466,21 +508,69 @@ local function createWindow(parent)
             art:SetColorTexture(panelBg[1], panelBg[2], panelBg[3], 1)
         end
         local shade=card:CreateTexture(nil,'BACKGROUND',nil,2); shade:SetAllPoints(card); shade:SetColorTexture(0,0,0,0.45)
-        local iconSize = embedded and 42 or 32
-        local icon=card:CreateTexture(nil,'ARTWORK'); icon:SetSize(iconSize,iconSize); icon:SetPoint('LEFT',card,'LEFT',12,0); icon:SetTexture(image and image[1] or 134400)
-        local textLeft = embedded and 66 or 45
+        local iconSize = embedded and 44 or 32
+        local icon=card:CreateTexture(nil,'ARTWORK'); icon:SetSize(iconSize,iconSize); icon:SetPoint('LEFT',card,'LEFT',embedded and 16 or 12,0); icon:SetTexture(image and image[1] or 134400)
+        local textLeft = embedded and 72 or 45
         local name=card:CreateFontString(nil,'OVERLAY','GameFontNormal')
-        name:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -13 or -5); name:SetWidth(cardW - textLeft - 10); name:SetJustifyH('LEFT'); name:SetWordWrap(false); name:SetText(entry.name)
+        name:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -12 or -5); name:SetWidth(cardW - textLeft - 14); name:SetJustifyH('LEFT'); name:SetWordWrap(false); name:SetText(entry.name)
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(name, embedded and 14 or 13, true) end
         if colors.brandGold then name:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
         local detail=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-        detail:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -35 or -24); detail:SetWidth(cardW - textLeft - 10); detail:SetJustifyH('LEFT'); detail:SetWordWrap(false)
+        detail:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -34 or -24); detail:SetWidth(cardW - textLeft - 14); detail:SetJustifyH('LEFT'); detail:SetWordWrap(false)
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(detail, 12) end
         if colors.mutedText then detail:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
         card.detail=detail
-        card:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(entry.name); GameTooltip:AddLine('Натисніть, щоб переглянути майстрів'); GameTooltip:Show() end end)
+        if embedded then
+            local onLine=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+            onLine:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,-54); onLine:SetWidth(cardW - textLeft - 14); onLine:SetJustifyH('LEFT'); onLine:SetWordWrap(false)
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(onLine, 12) end
+            card.online=onLine
+        end
+        card:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(entry.name); GameTooltip:AddLine('Натисніть, щоб переглянути майстрів і рецепти'); GameTooltip:Show() end end)
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         f.professionCards[i]=card
+    end
+    if embedded and OldKraken.UIStyle.PanelFrame then
+        local function makeSummaryPanel(xPos, titleText, hintText)
+            local p = OldKraken.UIStyle.PanelFrame(content, 'buttonEdge')
+            p:SetSize(440, 210); p:SetPoint('TOPLEFT', content, 'TOPLEFT', xPos, -346)
+            local title = p:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+            title:SetPoint('TOPLEFT', p, 'TOPLEFT', 18, -18); title:SetText(titleText)
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(title, 15, true) end
+            if colors.brandGold then title:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
+            local line1 = p:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+            line1:SetPoint('TOPLEFT', p, 'TOPLEFT', 18, -50); line1:SetWidth(404); line1:SetJustifyH('LEFT')
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(line1, 13) end
+            local line2 = p:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+            line2:SetPoint('TOPLEFT', p, 'TOPLEFT', 18, -74); line2:SetWidth(404); line2:SetJustifyH('LEFT')
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(line2, 13) end
+            local hint = p:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+            hint:SetPoint('TOPLEFT', p, 'TOPLEFT', 18, -106); hint:SetWidth(404); hint:SetJustifyH('LEFT'); hint:SetWordWrap(true)
+            if type(hint.SetSpacing) == 'function' then hint:SetSpacing(3) end
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(hint, 12) end
+            if colors.mutedText then hint:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+            hint:SetText(hintText)
+            return p, line1, line2
+        end
+        local op, o1, o2 = makeSummaryPanel(0, 'Активні замовлення', 'Оберіть або створіть запит на крафт для учасників гільдії.')
+        f.ordersSummaryPanel, f.ordersSummaryLine1, f.ordersSummaryLine2 = op, o1, o2
+        button(op, 'Відкрити замовлення', 18, -158, 185, function()
+            if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+        end, 'primary', {rounded=true, height=34})
+        button(op, 'Створити', 213, -158, 115, function()
+            if OldKraken.WorkshopOrders then
+                OldKraken.WorkshopOrders:Show()
+                OldKraken.WorkshopOrders:OpenCreateForm()
+            end
+        end, nil, {rounded=true, height=34})
+        local rp, r1, r2 = makeSummaryPanel(460, 'Пошук рецептів і майстри', 'Шукайте потрібний предмет за назвою або перегляньте список майстрів.')
+        f.recipesSummaryPanel, f.recipesSummaryLine1, f.recipesSummaryLine2 = rp, r1, r2
+        button(rp, 'Знайти рецепт', 18, -158, 155, function()
+            if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:SelectTab('recipes') end
+        end, 'primary', {rounded=true, height=34})
+        button(rp, 'Усі майстри', 183, -158, 140, function()
+            if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:SelectTab('masters') end
+        end, nil, {rounded=true, height=34})
     end
     if not embedded then
         button(content,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)

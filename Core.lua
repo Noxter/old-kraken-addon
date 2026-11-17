@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.5.0"
+OldKraken.version = "0.5.1"
 OldKraken._listeners = OldKraken._listeners or {}
 
 -- Shared dark theme for the addon's native controls.
@@ -154,7 +154,14 @@ function OldKraken.UIStyle.Window(frame)
     accent:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', 0, -30)
     accent:SetHeight(1)
     addOutline(frame, colors.panelEdge)
-    if frame.TitleText then frame.TitleText:SetTextColor(unpack(colors.text)) end
+    if frame.TitleText then
+        frame.TitleText:SetTextColor(unpack(colors.text))
+        if type(frame.TitleText.ClearAllPoints) == 'function' then
+            frame.TitleText:ClearAllPoints()
+            frame.TitleText:SetPoint('CENTER', header, 'CENTER', 0, 0)
+        end
+        OldKraken.UIStyle.Font(frame.TitleText, 14, true)
+    end
 
     local close = frame.CloseButton or (type(frame.GetName) == 'function' and frame:GetName() and _G[frame:GetName() .. 'CloseButton'])
     if close and type(close) == 'table' and type(close.SetSize) == 'function' then
@@ -652,18 +659,21 @@ local function setBorderColor(edges, color, alpha)
     end
 end
 
-function OldKraken.UIStyle.FontPath()
-    return 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\Font.ttf'
+function OldKraken.UIStyle.FontPath(weight)
+    local base = 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\Fonts\\'
+    if weight == 'semibold' then return base .. 'NotoSans-SemiBold.ttf' end
+    if weight == 'medium' then return base .. 'NotoSans-Medium.ttf' end
+    return base .. 'NotoSans-Regular.ttf'
 end
 
 function OldKraken.UIStyle.Font(fontString, size, bold)
-    local path = OldKraken.UIStyle.FontPath()
     local currentPath, currentSize
     if type(fontString.GetFont) == 'function' then
         currentPath, currentSize = fontString:GetFont()
     end
-    path = path or currentPath or STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF'
     local effectiveSize = size or currentSize or 13
+    local weight = bold and (effectiveSize >= 15 and 'semibold' or 'medium') or 'regular'
+    local path = OldKraken.UIStyle.FontPath(weight) or currentPath or STANDARD_TEXT_FONT or 'Fonts\\FRIZQT__.TTF'
     if type(fontString.SetFont) == 'function' then
         fontString:SetFont(path, effectiveSize, bold and 'OUTLINE' or '')
     end
