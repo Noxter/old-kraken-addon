@@ -101,6 +101,28 @@ local function ShowMemberMenu(row)
         Action("Скопіювати ім'я", function() CopyName(member.name) end)
     end, 'MENU')
     ToggleDropDownMenu(1, nil, memberMenu, 'cursor', 0, 0)
+    local list = _G and _G.DropDownList1
+    if type(list) == 'table' and list:IsShown() then
+        local num = list.numButtons or 0
+        if num > 0 then
+            local width = math.max(185, (list:GetWidth() or 150) + 26)
+            list:SetWidth(width)
+            for i = 1, num do
+                local btn = _G['DropDownList1Button' .. i]
+                if type(btn) == 'table' then
+                    btn:SetHeight(i == 1 and 22 or 24)
+                    btn:SetWidth(width - 20)
+                    btn:ClearAllPoints()
+                    btn:SetPoint('TOPLEFT', list, 'TOPLEFT', 10, -14 - (i == 1 and 0 or (22 + 4 + (i - 2) * 24)))
+                    local nt = _G['DropDownList1Button' .. i .. 'NormalText']
+                    if type(nt) == 'table' and OldKraken.UIStyle and OldKraken.UIStyle.Font then
+                        OldKraken.UIStyle.Font(nt, 13, i == 1)
+                    end
+                end
+            end
+            list:SetHeight(14 + 22 + 4 + math.max(0, num - 1) * 24 + 14)
+        end
+    end
 end
 
 local function GetSettings()
@@ -603,13 +625,14 @@ local function CreateRow(index, parent)
         row.cellHovers[cellIndex] = hover
     end
 
+    local GATHERING_PROFESSIONS = {[186]=true, [182]=true, [393]=true}
     row.professions = {}
     for i=1,5 do
         local icon=CreateFrame('Button',nil,row)
         icon:SetSize(18,18); icon:SetPoint('LEFT',row,'LEFT',634+(i-1)*22,0)
         icon.texture=icon:CreateTexture(nil,'ARTWORK'); icon.texture:SetAllPoints(icon)
         icon:SetScript('OnClick',function(self)
-            if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
+            if self.memberName and self.professionID and not GATHERING_PROFESSIONS[self.professionID] and OldKraken.WorkshopRecipes then
                 OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName,self.professionID)
             end
         end)
@@ -623,7 +646,10 @@ local function CreateRow(index, parent)
                 if self.relayed then GameTooltip:AddLine('Отримано через гільдію',1,1,1) end
                 if type(self.updated)=='number' and type(GetServerTime)=='function' and GetServerTime()-self.updated>604800 then GameTooltip:AddLine('Дані застарілі',1,0.7,0.25) end
             end
-            GameTooltip:AddLine('Натисніть, щоб переглянути збережені рецепти.',0.6,0.9,1,true); GameTooltip:Show()
+            if not GATHERING_PROFESSIONS[self.professionID] then
+                GameTooltip:AddLine('Натисніть, щоб переглянути збережені рецепти.',0.6,0.9,1,true)
+            end
+            GameTooltip:Show()
         end)
         icon:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         icon:Hide(); row.professions[i]=icon

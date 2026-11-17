@@ -324,17 +324,31 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then
     end)
 end
 
-local function button(parent,text,x,y,width,callback,variant)
-    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant)
-    b:SetSize(width,24); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(text); b:SetScript('OnClick',callback); return b
+local function pluralUk(n, one, few, many)
+    local mod100, mod10 = n % 100, n % 10
+    if mod100 >= 11 and mod100 <= 14 then return many end
+    if mod10 == 1 then return one end
+    if mod10 >= 2 and mod10 <= 4 then return few end
+    return many
+end
+
+local function button(parent,text,x,y,width,callback,variant,options)
+    local b=CreateFrame('Button',nil,parent,'UIPanelButtonTemplate'); OldKraken.UIStyle.Button(b,variant,options)
+    b:SetSize(width,(options and options.height) or 28); b:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y); b:SetText(text); b:SetScript('OnClick',callback); return b
 end
 render=function()
     if not frame or not frame:IsShown() or (frame.professionView and not frame.professionView:IsShown()) then return end
-    frame.heading:SetText(scanState=='checking' and 'Перевіряємо зміни професій…' or (scanState==false and 'Власні дані професій не отримано. Відкрийте професію.' or 'Оберіть професію, щоб переглянути майстрів.'))
+    frame.heading:SetText(scanState=='checking' and 'Перевіряємо зміни професій…' or (scanState==false and 'Власні дані професій не отримано. Відкрийте професію у грі.' or 'Оберіть професію, щоб переглянути майстрів і рецепти.'))
     local summaries=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:GetProfessionSummaries() or {}
     for _,card in ipairs(frame.professionCards) do
         local summary=summaries[card.profession]
-        card.detail:SetText(summary and (summary.recipes..' рецептів · '..summary.members..' майстрів') or 'Немає збережених рецептів')
+        if summary then
+            local rWord = pluralUk(summary.recipes, 'рецепт', 'рецепти', 'рецептів')
+            local mWord = pluralUk(summary.members, 'майстер', 'майстри', 'майстрів')
+            card.detail:SetText(summary.recipes..' '..rWord..' · '..summary.members..' '..mWord)
+        else
+            card.detail:SetText('Немає збережених рецептів')
+        end
     end
 end
 local function createWindow(parent)
@@ -350,8 +364,9 @@ local function createWindow(parent)
         OldKraken.UIStyle.Window(f)
     end
     local embedded=parent~=nil
-    f:SetSize(embedded and 900 or 780,embedded and 590 or 520); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
+    f:SetSize(embedded and 900 or 780,embedded and 608 or 520); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
     if f.TitleText then f.TitleText:SetText('Old Kraken — Майстерня') end
+    local colors = OldKraken.UIStyle.Colors or {}
     local content=f
     local verticalShift=embedded and 32 or 0
     local function y(value) return value-verticalShift end
@@ -368,27 +383,49 @@ local function createWindow(parent)
         else
             f.recipesView=false
         end
-        f.professionTab=button(f,'Професії',18,-38,110,function() Workshop:Show('professions') end)
-        f.recipeTab=button(f,'Рецепти',136,-38,110,function()
-            if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('recipes') end
-        end)
-        f.masterTab=button(f,'Майстри',254,-38,110,function()
-            if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('masters') end
-        end)
-        f.ordersTab=button(f,'Замовлення',372,-38,120,function()
-            if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
-        end)
-        for _,tab in ipairs({f.professionTab,f.recipeTab,f.masterTab,f.ordersTab}) do
-            tab.activeBar=tab:CreateTexture(nil,'ARTWORK')
-            tab.activeBar:SetPoint('BOTTOMLEFT',tab,'BOTTOMLEFT',2,1)
-            tab.activeBar:SetSize(tab==f.ordersTab and 116 or 106,2)
-            tab.activeBar:SetColorTexture(unpack(OldKraken.UIStyle.Colors.brandGold))
+        if OldKraken.UIStyle.SegmentedTabs then
+            f.tabBar = OldKraken.UIStyle.SegmentedTabs(f, {
+                {key = 'professions', label = 'Професії', width = 102},
+                {key = 'recipes', label = 'Рецепти', width = 96},
+                {key = 'masters', label = 'Майстри', width = 96},
+                {key = 'orders', label = 'Замовлення', width = 112},
+            }, function(key)
+                if key == 'professions' then Workshop:Show('professions')
+                elseif key == 'recipes' or key == 'masters' then
+                    if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab(key) end
+                elseif key == 'orders' then
+                    if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+                end
+            end, {active = 'professions', height = 40, edgeKey = 'buttonEdge', rounded = true})
+            f.tabBar:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -47)
+            if type(f.tabBar.SetFrameLevel)=='function' then f.tabBar:SetFrameLevel(((type(f.GetFrameLevel)=='function' and f:GetFrameLevel()) or 1)+10) end
+            f.professionTab = f.tabBar.tabs.professions
+            f.recipeTab = f.tabBar.tabs.recipes
+            f.masterTab = f.tabBar.tabs.masters
+            f.ordersTab = f.tabBar.tabs.orders
+        else
+            local function legacyTab(label, xPos, onClick)
+                local b=button(f,label,xPos,-47,104,onClick)
+                b.activeBar=b:CreateTexture(nil,'OVERLAY'); b.activeBar:SetHeight(2); b.activeBar:SetPoint('BOTTOMLEFT',b,'BOTTOMLEFT',2,1); b.activeBar:SetPoint('BOTTOMRIGHT',b,'BOTTOMRIGHT',-2,1); b.activeBar:Hide()
+                return b
+            end
+            f.professionTab=legacyTab('Професії',0,function() Workshop:Show('professions') end)
+            f.recipeTab=legacyTab('Рецепти',110,function()
+                if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('recipes') end
+            end)
+            f.masterTab=legacyTab('Майстри',214,function()
+                if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('masters') end
+            end)
+            f.ordersTab=legacyTab('Замовлення',318,function()
+                if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+            end)
         end
-        f.newOrder=button(f.ordersView or f,'Нове замовлення',720,-38,150,function()
+        f.newOrder=button(f.ordersView or f,'Нове замовлення',750,-50,150,function()
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:OpenCreateForm() end
-        end,'primary')
+        end,'primary',{rounded=true,height=34})
         f.newOrder:Hide()
-        f.back=button(f,'‹ Назад',570,-38,130,function() Workshop:Back() end)
+        f.back=button(f,'‹ Назад',770,-50,130,function() Workshop:Back() end,nil,{rounded=true,height=34})
+        if type(f.back.SetFrameLevel)=='function' then f.back:SetFrameLevel(((type(f.GetFrameLevel)=='function' and f:GetFrameLevel()) or 1)+10) end
         f.back:Hide()
         f:HookScript('OnHide',function()
             local recipes=OldKraken.WorkshopRecipes
@@ -397,26 +434,49 @@ local function createWindow(parent)
             end
         end)
     end
-    button(content,'Оновити',590,y(-43),120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end)
-    f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',20,y(-52))
+    button(content,'Оновити',embedded and 770 or 590,embedded and -50 or y(-43),embedded and 130 or 120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end,nil,{rounded=true,height=34})
+    f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlight')
+    f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 0 or 20,embedded and -104 or y(-52))
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.heading, 13) end
+    if colors.mutedText then f.heading:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
     f.professionCards={}
-    for i,p in ipairs(professions) do
+    local cardW = embedded and 288 or 232
+    local cardH = embedded and 66 or 42
+    local stepX = embedded and 306 or 242
+    local stepY = embedded and 78 or 47
+    local startX = embedded and 0 or 20
+    local startY = embedded and -134 or y(-100)
+    local gatheringIDs = {[186]=true, [182]=true, [393]=true}
+    local gridProfessions = {}
+    for _,p in ipairs(professions) do if not gatheringIDs[p.id] then gridProfessions[#gridProfessions+1]=p end end
+    for i,p in ipairs(gridProfessions) do
         local entry=p; local col=(i-1)%3; local line=math.floor((i-1)/3)
-        local card=button(content,'',20+col*242,y(-100-line*47),232,function()
+        local card=button(content,'',startX+col*stepX,startY-line*stepY,cardW,function()
             if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:ShowProfession(entry.id) end
-        end)
-        card:SetHeight(42); card.profession=entry.id
+        end,nil,{height=cardH})
+        card:SetHeight(cardH); card.profession=entry.id
         local art=card:CreateTexture(nil,'BACKGROUND',nil,1); art:SetAllPoints(card)
         local image=professionArt[entry.id]; local atlas=image and ('Profession-background-card-'..image[2])
         local ok,info=false,nil
         if atlas and C_Texture and type(C_Texture.GetAtlasInfo)=='function' then ok,info=pcall(C_Texture.GetAtlasInfo,atlas) end
         if ok and type(info)=='table' and info.file and info.leftTexCoord and info.rightTexCoord and info.topTexCoord and info.bottomTexCoord then
-            art:SetTexture(info.file); art:SetTexCoord(info.leftTexCoord,info.rightTexCoord,info.topTexCoord,info.bottomTexCoord); art:SetAlpha(0.55)
-        else art:SetColorTexture(0.10,0.12,0.15,1) end
-        local shade=card:CreateTexture(nil,'BACKGROUND',nil,2); shade:SetAllPoints(card); shade:SetColorTexture(0,0,0,0.4)
-        local icon=card:CreateTexture(nil,'ARTWORK'); icon:SetSize(32,32); icon:SetPoint('LEFT',card,'LEFT',6,0); icon:SetTexture(image and image[1] or 134400)
-        local name=card:CreateFontString(nil,'OVERLAY','GameFontNormal'); name:SetPoint('TOPLEFT',card,'TOPLEFT',45,-5); name:SetWidth(180); name:SetJustifyH('LEFT'); name:SetWordWrap(false); name:SetText(entry.name)
-        local detail=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); detail:SetPoint('TOPLEFT',card,'TOPLEFT',45,-24); detail:SetWidth(180); detail:SetJustifyH('LEFT'); detail:SetWordWrap(false)
+            art:SetTexture(info.file); art:SetTexCoord(info.leftTexCoord,info.rightTexCoord,info.topTexCoord,info.bottomTexCoord); art:SetAlpha(0.45)
+        else
+            local panelBg = colors.panel or {0.055, 0.07, 0.095, 0.96}
+            art:SetColorTexture(panelBg[1], panelBg[2], panelBg[3], 1)
+        end
+        local shade=card:CreateTexture(nil,'BACKGROUND',nil,2); shade:SetAllPoints(card); shade:SetColorTexture(0,0,0,0.45)
+        local iconSize = embedded and 42 or 32
+        local icon=card:CreateTexture(nil,'ARTWORK'); icon:SetSize(iconSize,iconSize); icon:SetPoint('LEFT',card,'LEFT',12,0); icon:SetTexture(image and image[1] or 134400)
+        local textLeft = embedded and 66 or 45
+        local name=card:CreateFontString(nil,'OVERLAY','GameFontNormal')
+        name:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -13 or -5); name:SetWidth(cardW - textLeft - 10); name:SetJustifyH('LEFT'); name:SetWordWrap(false); name:SetText(entry.name)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(name, embedded and 14 or 13, true) end
+        if colors.brandGold then name:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
+        local detail=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+        detail:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -35 or -24); detail:SetWidth(cardW - textLeft - 10); detail:SetJustifyH('LEFT'); detail:SetWordWrap(false)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(detail, 12) end
+        if colors.mutedText then detail:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
         card.detail=detail
         card:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(entry.name); GameTooltip:AddLine('Натисніть, щоб переглянути майстрів'); GameTooltip:Show() end end)
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
@@ -424,9 +484,9 @@ local function createWindow(parent)
     end
     if not embedded then
         button(content,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
+        button(content,'Пошук рецептів',175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
+        local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',200,y(-321)); note:SetText('Відкрийте професії, щоб переглянути майстрів.')
     end
-    if not embedded then button(content,'Пошук рецептів',175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end) end
-    local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 20 or 200,y(-321)); note:SetText('Відкрийте професії, щоб переглянути майстрів.')
     content:HookScript('OnShow',render)
     f:Hide(); return f
 end
@@ -436,10 +496,16 @@ function Workshop:UpdateTabs()
     if not frame or not frame.professionView then return end
     local view=self.currentView
     local recipeTab=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.GetTab and OldKraken.WorkshopRecipes:GetTab() or 'recipes'
-    frame.professionTab.activeBar:SetShown(view=='professions')
-    frame.recipeTab.activeBar:SetShown(view=='recipes' and recipeTab=='recipes')
-    frame.masterTab.activeBar:SetShown(view=='recipes' and recipeTab=='masters')
-    frame.ordersTab.activeBar:SetShown(view=='orders' or view=='orderCreate')
+    if type(frame.tabBar)=='table' and frame.tabBar.SetActive then
+        local activeKey = view == 'professions' and 'professions'
+            or ((view == 'orders' or view == 'orderCreate') and 'orders' or recipeTab)
+        frame.tabBar:SetActive(activeKey)
+    else
+        if type(frame.professionTab)=='table' and type(frame.professionTab.activeBar)=='table' then frame.professionTab.activeBar:SetShown(view=='professions') end
+        if type(frame.recipeTab)=='table' and type(frame.recipeTab.activeBar)=='table' then frame.recipeTab.activeBar:SetShown(view=='recipes' and recipeTab=='recipes') end
+        if type(frame.masterTab)=='table' and type(frame.masterTab.activeBar)=='table' then frame.masterTab.activeBar:SetShown(view=='recipes' and recipeTab=='masters') end
+        if type(frame.ordersTab)=='table' and type(frame.ordersTab.activeBar)=='table' then frame.ordersTab.activeBar:SetShown(view=='orders' or view=='orderCreate') end
+    end
 end
 function Workshop:SetView(view)
     if not frame or not frame.professionView then return end
@@ -453,7 +519,11 @@ function Workshop:SetView(view)
     if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders.ShowCreatePanel then OldKraken.WorkshopOrders:ShowCreatePanel(view=='orderCreate') end
     self:UpdateTabs()
     if frame.newOrder then frame.newOrder:SetShown(view=='orders') end
-    if frame.back then frame.back:SetShown(#self.navigationStack>0) end
+    if frame.back then
+        frame.back:SetShown(#self.navigationStack>0)
+        frame.back:ClearAllPoints()
+        frame.back:SetPoint('TOPLEFT', frame, 'TOPLEFT', (view=='orders' and 612 or 770), -50)
+    end
     if view=='orders' and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:RefreshEmbedded() end
     if view=='recipes' and OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.RefreshPanel then OldKraken.WorkshopRecipes:RefreshPanel() end
 end
