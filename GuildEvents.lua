@@ -13,7 +13,7 @@ local active, identity, profile, storage = false, nil, nil, nil
 local events, directEvents, relayEvents, dirty, intents, newDirty, relayDirty = {}, {}, {}, {}, {}, {}, {}
 local sequence, lastQuery, nextRetry = 0, 0, 0
 local relayStats = {invalid_payload=0, rejected_relay_cancelled=0, rejected_relay_sender=0, rejected_relay_mismatch=0, rejected_relay_stale=0, rejected_relay_equivocation=0, rejected_direct_stale=0, rejected_direct_equivocation=0, rejected_capacity=0}
-local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'flex', 'raid'
+local window, selected, rows, currentRole, currentKind = nil, nil, {}, 'dps', 'raid'
 local refresh
 local page = 1
 local EVENTS_PER_PAGE = 4
@@ -618,8 +618,10 @@ local function datePicker(parent, onChanged)
 end
 local function iconAction(button,row,x,texture,hint)
     button:ClearAllPoints(); button:SetPoint('TOPLEFT',row,'TOPLEFT',x,-4); button:SetSize(24,24); button:SetText('')
-    button.art=button:CreateTexture(nil,'ARTWORK'); button.art:SetSize(16,16); button.art:SetPoint('CENTER',button,'CENTER',0,0)
-    button.art:SetTexture(texture)
+    if texture then
+        button.art=button:CreateTexture(nil,'ARTWORK'); button.art:SetSize(16,16); button.art:SetPoint('CENTER',button,'CENTER',0,0)
+        button.art:SetTexture(texture)
+    end
     button:SetScript('OnEnter',function(self)
         if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(hint); GameTooltip:AddLine(row.member or '',1,1,1); GameTooltip:Show() end
     end)
@@ -635,15 +637,12 @@ local function largeRoleIcon(role,size)
     return ((catalog.roleIcons[role] or ''):gsub(':16:16:',':'..size..':'..size..':'))
 end
 local function roleColumnText(e,classes,role)
-    local names={}
+    local count=0
     for name,memberRole in pairs(e.people) do
-        if memberRole==role and (e.statuses[name] or 'accepted')=='accepted' then names[#names+1]=name end
+        if memberRole==role and (e.statuses[name] or 'accepted')=='accepted' then count=count+1 end
     end
-    table.sort(names)
     local labels={tank='Танки',healer='Лікарі',dps='DPS',flex='Інші'}
-    local lines={largeRoleIcon(role,20)..' |c'..roleColors[role]..labels[role]..' ('..#names..')|r'}
-    for _,name in ipairs(names) do lines[#lines+1]=participantName(name,classes) end
-    return table.concat(lines,'\n'),#names
+    return largeRoleIcon(role,16)..' |c'..roleColors[role]..labels[role]..' ('..count..')|r',count
 end
 refresh=function()
     if not window then return end
@@ -688,11 +687,12 @@ refresh=function()
             local e=entry.event
             catalog.SetArtwork(row.art,e.activity)
             row.title:SetText(e.title)
-            local activity=e.activity~='' and (activityLabels[e.activity] or e.activity) or kinds[e.kind]
-            row.meta:SetText(activity..' · '..date('%d.%m %H:%M',e.when)..' · '..acceptedCount(e)..'/'..e.size)
+            row.meta:SetText((kinds[e.kind] or e.kind)..' · '..acceptedCount(e)..'/'..e.size)
+            if row.date then row.date:SetText(date('%d.%m %H:%M',e.when)) end
             if OldKraken.UIStyle.ApplySelection then OldKraken.UIStyle.ApplySelection(row, selected==entry.key) end
             if selected==entry.key then row:LockHighlight() else row:UnlockHighlight() end
             row:Show(); row.delete:SetShown(e.owner==identity)
+            if row.delete.SetAlpha then row.delete:SetAlpha(0) end
         else row:UnlockHighlight(); row.delete:Hide(); row:Hide() end
     end
     local e=selected and events[selected]
@@ -768,29 +768,37 @@ refresh=function()
                 local row=window.signupRows[i]
                 if not row then
                     row=CreateFrame('Frame',nil,window.detailsContent); row:SetSize(window.detailsWidth,32)
-                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-174,26); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false); readableFont(row.label,15)
-                    row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-168,-3); row.roleStatus:SetSize(28,28); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
+                    row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.label:SetPoint('TOPLEFT',row,'TOPLEFT',0,0); row.label:SetSize(window.detailsWidth-224,26); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false); readableFont(row.label,14)
+                    row.roleStatus=row:CreateFontString(nil,'OVERLAY','GameFontHighlight'); row.roleStatus:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-218,-3); row.roleStatus:SetSize(30,28); row.roleStatus:SetJustifyH('LEFT'); row.roleStatus:SetWordWrap(false)
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-118,30); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
                     row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
                     row.accept=action(row,'Прийняти',0,-40,24,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.') end end,nil,{rounded=true,capWidth=4,height=24})
                     row.reserve=action(row,'Резерв',100,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end,nil,{rounded=true,capWidth=4,height=24})
                     row.reject=action(row,'Відхилити',200,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end,nil,{rounded=true,capWidth=4,height=24})
-                    row.invite=action(row,'Інвайт у рейд',0,-68,24,function(self) Events:InviteMember(selected,self:GetParent().member) end,nil,{rounded=true,capWidth=4,height=24})
+                    row.invite=action(row,'Інвайт у рейд',0,-68,24,function(self) Events:InviteMember(selected,self:GetParent().member) end,'primary',{rounded=true,capWidth=4,height=24})
                     local left=window.detailsWidth-112
                     iconAction(row.accept,row,left,'Interface\\RaidFrame\\ReadyCheck-Ready','Прийняти учасника')
                     iconAction(row.reserve,row,left+28,'Interface\\RaidFrame\\ReadyCheck-Waiting','Перевести в резерв')
                     iconAction(row.reject,row,left+56,'Interface\\RaidFrame\\ReadyCheck-NotReady','Відхилити заявку')
-                    iconAction(row.invite,row,left+84,'Interface\\Buttons\\UI-PlusButton-Up','Запросити в рейд')
-                    row.state= row:CreateTexture(nil,'ARTWORK'); row.state:SetSize(15,15); row.state:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-140,-7)
-                    row.state:SetTexture('Interface\\AddOns\\OldKraken\\Media\\RoleSlot.tga')
+                    iconAction(row.invite,row,left+84,nil,'Запросити в рейд')
+                    local plusColor = (OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.white) or {1, 1, 1, 1}
+                    local plusH = row.invite:CreateTexture(nil,'ARTWORK')
+                    plusH:SetSize(10,2); plusH:SetPoint('CENTER',row.invite,'CENTER',0,0)
+                    plusH:SetColorTexture(plusColor[1],plusColor[2],plusColor[3],1)
+                    local plusV = row.invite:CreateTexture(nil,'ARTWORK')
+                    plusV:SetSize(2,10); plusV:SetPoint('CENTER',row.invite,'CENTER',0,0)
+                    plusV:SetColorTexture(plusColor[1],plusColor[2],plusColor[3],1)
+                    row.stateText=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+                    row.stateText:SetPoint('TOPLEFT',row,'TOPLEFT',window.detailsWidth-186,-5); row.stateText:SetSize(70,20); row.stateText:SetJustifyH('LEFT'); row.stateText:SetWordWrap(false); readableFont(row.stateText,12)
                     window.signupRows[i]=row
                 end
                 row.member=name; row:ClearAllPoints(); row:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,-height-(i-1)*32)
                 local role=e.people[name]
+                local st=e.statuses[name] or 'accepted'
                 row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(largeRoleIcon(role,26))
-                local tint=statusColors[e.statuses[name] or 'accepted'] or statusColors.pending
-                row.state:SetVertexColor(tonumber(tint:sub(3,4),16)/255,tonumber(tint:sub(5,6),16)/255,tonumber(tint:sub(7,8),16)/255)
+                local tint=statusColors[st] or statusColors.pending
+                row.stateText:SetText('|c'..tint..(statuses[st] or st)..'|r')
                 row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
                 row.invite:SetShown(own and e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
                 row.accept:SetEnabled(canPerformRole(name,role)); row.reserve:SetEnabled(canPerformRole(name,role))
@@ -802,19 +810,40 @@ refresh=function()
         if detailsScrollBar and detailsScrollBar.SetShown then detailsScrollBar:SetShown(#names > 5) end
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.inviteAll:SetShown(own and e.kind=='raid')
-        window.cancel:SetShown(e.owner==identity)
-        if window.cancel:IsShown() then
-            window.join:SetWidth(122)
-            window.leave:SetWidth(122)
-        else
-            window.join:SetWidth(254)
-            window.leave:SetWidth(254)
+        if currentRole == 'flex' or not canPerformRole(identity, currentRole) then
+            currentRole = 'dps'
+            for _, candidate in ipairs({'tank', 'healer', 'dps'}) do
+                if canPerformRole(identity, candidate) then currentRole = candidate; break end
+            end
+            UIDropDownMenu_SetText(window.roleMenu, roles[currentRole])
         end
-        if not canPerformRole(identity,currentRole) then currentRole='flex'; UIDropDownMenu_SetText(window.roleMenu,roles[currentRole]) end
         local canJoin=not e.relayed and not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
         window.join:SetShown(canJoin)
         window.roleMenu:SetShown(canJoin)
         window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
+        window.cancel:SetShown(e.owner==identity)
+        if window.leaveBaseX and window.leaveY then
+            window.leave:ClearAllPoints()
+            if window.cancel:IsShown() then
+                window.join:SetWidth(116)
+                if canJoin then
+                    window.leave:SetPoint('TOPLEFT', window, 'TOPLEFT', window.leaveBaseX + 140, window.leaveY)
+                    window.leave:SetWidth(116)
+                else
+                    window.leave:SetPoint('TOPLEFT', window, 'TOPLEFT', window.leaveBaseX, window.leaveY)
+                    window.leave:SetWidth(256)
+                end
+            else
+                window.join:SetWidth(260)
+                if canJoin then
+                    window.leave:SetPoint('TOPLEFT', window, 'TOPLEFT', window.leaveBaseX + 140, window.leaveY)
+                    window.leave:SetWidth(260)
+                else
+                    window.leave:SetPoint('TOPLEFT', window, 'TOPLEFT', window.leaveBaseX, window.leaveY)
+                    window.leave:SetWidth(window.detailsWidth)
+                end
+            end
+        end
     else
         if window.detailsDivider then window.detailsDivider:Hide() end
         if window.participantsDivider then window.participantsDivider:Hide() end
@@ -897,9 +926,15 @@ local function createWindow(parent)
         local index=i
         rows[i]=action(f,'',0,-103-(i-1)*77,embedded and 450 or 420,function() local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; if entry then selected=entry.key; refresh() end end)
         rows[i]:SetHeight(70)
-        rows[i].art=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].art:SetPoint('TOPLEFT',rows[i],'TOPLEFT',3,-3); rows[i].art:SetSize(48,48)
-        rows[i].title=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].title:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-5); rows[i].title:SetWidth(embedded and 382 or 352); rows[i].title:SetJustifyH('LEFT'); rows[i].title:SetWordWrap(true); rows[i].title:SetHeight(34); readableFont(rows[i].title,16)
-        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlight'); rows[i].meta:SetPoint('TOPLEFT',rows[i],'TOPLEFT',60,-42); rows[i].meta:SetWidth(embedded and 346 or 316); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(true); rows[i].meta:SetHeight(27); readableFont(rows[i].meta,13)
+        rows[i].art=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].art:SetPoint('TOPLEFT',rows[i],'TOPLEFT',10,-11); rows[i].art:SetSize(48,48)
+        rows[i].title=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].title:SetPoint('TOPLEFT',rows[i],'TOPLEFT',68,-10); rows[i].title:SetWidth(embedded and 272 or 242); rows[i].title:SetJustifyH('LEFT'); rows[i].title:SetWordWrap(false); rows[i].title:SetHeight(22); readableFont(rows[i].title,15)
+        local goldColor = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.brandGold
+        if goldColor then rows[i].title:SetTextColor(goldColor[1], goldColor[2], goldColor[3]) end
+        rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlight'); rows[i].meta:SetPoint('TOPLEFT',rows[i],'TOPLEFT',68,-38); rows[i].meta:SetWidth(embedded and 230 or 200); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false); rows[i].meta:SetHeight(20); readableFont(rows[i].meta,13)
+        local mutedColor = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+        if mutedColor then rows[i].meta:SetTextColor(mutedColor[1], mutedColor[2], mutedColor[3]) end
+        rows[i].date=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); rows[i].date:SetPoint('TOPRIGHT',rows[i],'TOPRIGHT',-12,-12); rows[i].date:SetWidth(98); rows[i].date:SetJustifyH('RIGHT'); rows[i].date:SetWordWrap(false); readableFont(rows[i].date,12)
+        if mutedColor then rows[i].date:SetTextColor(mutedColor[1], mutedColor[2], mutedColor[3]) end
         local remove=CreateFrame('Button',nil,rows[i]); rows[i].delete=remove
         OldKraken.UIStyle.Button(remove)
         remove:SetSize(26,26); remove:SetPoint('BOTTOMRIGHT',rows[i],'BOTTOMRIGHT',-8,7)
@@ -925,8 +960,16 @@ local function createWindow(parent)
             if not popup.oldKrakenStrata then popup.oldKrakenStrata=popup:GetFrameStrata() end
             popup:SetFrameStrata('FULLSCREEN_DIALOG')
         end)
-        remove:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити подію'); GameTooltip:Show() end end)
-        remove:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        rows[i]:SetScript('OnEnter',function() if remove:IsShown() and remove.SetAlpha then remove:SetAlpha(1) end end)
+        rows[i]:SetScript('OnLeave',function() if remove.SetAlpha then remove:SetAlpha(0) end end)
+        remove:SetScript('OnEnter',function(self)
+            if remove.SetAlpha then remove:SetAlpha(1) end
+            if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити подію'); GameTooltip:Show() end
+        end)
+        remove:SetScript('OnLeave',function()
+            if remove.SetAlpha then remove:SetAlpha(0) end
+            if GameTooltip then GameTooltip:Hide() end
+        end)
         remove:Hide()
     end
     f.previousPage=action(f,'‹',138+(embedded and 5 or 0),embedded and -568 or -380,45,function() page=page-1; refresh() end,nil,{rounded=true,height=24})
@@ -944,6 +987,7 @@ local function createWindow(parent)
     f.detailPanel:SetSize(detailsWidth + 24, embedded and 504 or 428)
 
     local scroll=CreateFrame('ScrollFrame','OldKrakenEventsDetailsScroll',f,'UIPanelScrollFrameTemplate'); scroll:SetPoint('TOPLEFT',f,'TOPLEFT',450+shift,embedded and -117 or -103); scroll:SetSize(detailsWidth,embedded and 432 or 320)
+    if OldKraken.UIStyle.ScrollBar then OldKraken.UIStyle.ScrollBar(scroll) end
     f.detailsContent=CreateFrame('Frame',nil,scroll); f.detailsContent:SetSize(detailsWidth,250); scroll:SetScrollChild(f.detailsContent); f.signupRows={}
     f.detailsTitle=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); f.detailsTitle:SetPoint('TOPLEFT'); f.detailsTitle:SetWidth(detailsWidth); f.detailsTitle:SetJustifyH('LEFT'); f.detailsTitle:SetWordWrap(true); f.detailsTitle:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.detailsTitle,18)
 
@@ -977,18 +1021,20 @@ local function createWindow(parent)
     end
     for i=1,3 do
         local column=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight')
-        column:SetWidth(detailsWidth/3-7); column:SetJustifyH('LEFT'); column:SetWordWrap(true); column:SetSpacing(7); readableFont(column,14)
+        column:SetWidth(math.floor(detailsWidth/3)-4); column:SetJustifyH('LEFT'); column:SetWordWrap(true); column:SetSpacing(6); readableFont(column,13)
         f.roleColumns[i]=column
         f.roleButtons[i]=roleButton(column,({'tank','healer','dps'})[i])
     end
-    f.roleFlex=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleFlex:SetWidth(detailsWidth); f.roleFlex:SetJustifyH('LEFT'); readableFont(f.roleFlex,14)
+    f.roleFlex=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.roleFlex:SetWidth(detailsWidth); f.roleFlex:SetJustifyH('LEFT'); readableFont(f.roleFlex,13)
     f.flexButton=roleButton(f.roleFlex,'flex'); f.flexButton:SetWidth(detailsWidth)
     f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT'); f.participantHeader:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.participantHeader,15)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP'); f.details:SetWordWrap(true); f.details:SetSpacing(4); readableFont(f.details,15)
-    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,embedded and -562 or -395,140,{'tank','healer','dps','flex'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end,nil,{rounded=true})
-    f.join=action(f,'Записатися',450+shift+146,embedded and -562 or -395,122,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary',{rounded=true,height=34})
-    f.leave=action(f,'Виписатися',450+shift+146,embedded and -562 or -395,122,function() if selected then Events:Signup(selected,'leave') end end,nil,{rounded=true,height=34})
-    f.cancel=action(f,'Скасувати',450+shift+274,embedded and -562 or -395,126,function() if selected then Events:Cancel(selected) end end,nil,{rounded=true,height=34})
+    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,embedded and -562 or -395,134,{'tank','healer','dps'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end,nil,{rounded=true})
+    f.join=action(f,'Записатися',450+shift+140,embedded and -562 or -395,116,function() if selected and not Events:Signup(selected,currentRole) then print('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.') end end,'primary',{rounded=true,height=34})
+    f.leaveBaseX = 450 + shift
+    f.leaveY = embedded and -562 or -395
+    f.leave=action(f,'Виписатися',f.leaveBaseX+140,f.leaveY,116,function() if selected then Events:Signup(selected,'leave') end end,nil,{rounded=true,height=34})
+    f.cancel=action(f,'Скасувати подію',450+shift+262,embedded and -562 or -395,138,function() if selected then Events:Cancel(selected) end end,'danger',{rounded=true,height=34})
     f.inviteAll=action(f,'Запросити всіх у рейд',450+shift+detailsWidth-180,-47,180,function() if selected then Events:InviteAll(selected) end end,'primary',{rounded=true,height=32})
     f.inviteAll:Hide()
 
@@ -1049,8 +1095,21 @@ local function createWindow(parent)
         settingAutoTitle = false
     end
 
+    local function highlightDateMissing(missing)
+        local colors = OldKraken.UIStyle.Colors or {}
+        local edge = missing and (colors.danger or {1, 0.48, 0.43, 1}) or (colors.buttonEdge or {0.20, 0.23, 0.29, 0.85})
+        if f.dateButton and type(f.dateButton.borderEdges) == 'table' then
+            for _, t in ipairs(f.dateButton.borderEdges) do
+                if type(t.SetColorTexture) == 'function' then t:SetColorTexture(edge[1], edge[2], edge[3], edge[4] or 1) end
+            end
+        end
+    end
+
     function f:UpdateSummary()
         if not self.summaryLine then return end
+        local textColor = (OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.text) or {0.93, 0.94, 0.96}
+        self.summaryLine:SetTextColor(textColor[1], textColor[2], textColor[3])
+        if getDate and getDate() then highlightDateMissing(false) end
         local kindName = kinds[currentKind] or currentKind
         local titleText = (self.title:GetText() or '') ~= '' and self.title:GetText() or ((activity ~= '' and activityLabels[activity]) or kindName)
         local day = getDate and getDate()
@@ -1267,16 +1326,31 @@ local function createWindow(parent)
         refresh()
     end, nil, {rounded = true, height = 38})
 
+    local function showSubmitError(msg)
+        print('|cffff5555Old Kraken|r: ' .. msg)
+        if f.summaryLine then
+            local d = (OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.danger) or {1, 0.48, 0.43, 1}
+            f.summaryLine:SetTextColor(d[1], d[2], d[3])
+            f.summaryLine:SetText(msg)
+        end
+    end
+
     f.submit = action(f.summaryBar, 'Створити івент', 713, -13, 170, function()
         local day = getDate()
-        local when = day and parseDate(day.day, day.month, day.year, hour, minute)
-        if not when then print('Old Kraken: оберіть коректні дату та місцевий час.'); return end
+        if not day then
+            highlightDateMissing(true)
+            showSubmitError('Оберіть дату події.')
+            return
+        end
+        highlightDateMissing(false)
+        local when = parseDate(day.day, day.month, day.year, hour, minute)
+        if not when then showSubmitError('Оберіть коректні дату та місцевий час.'); return end
         if Events:Create(f.title:GetText(), f.description:GetText(), when, currentKind, f.size:GetText(), activity) then
             autoFilledTitle = nil
             f.title:SetText(''); f.description:SetText(''); f.creationMode = false; refresh()
             print('Old Kraken: подію збережено; синхронізацію поставлено в чергу.')
         else
-            print('Old Kraken: перевірте назву, дату, кількість місць і належність до гільдії.')
+            showSubmitError('Перевірте назву, дату, кількість місць і належність до гільдії.')
         end
     end, 'primary', {rounded = true, height = 38})
 

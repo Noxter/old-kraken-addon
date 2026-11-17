@@ -8,7 +8,7 @@ OldKraken._listeners = OldKraken._listeners or {}
 -- Shared dark theme for the addon's native controls.
 OldKraken.UIStyle = {}
 OldKraken.UIStyle.Colors = {
-    window = {0.025, 0.035, 0.055, 0.98},
+    window = {0.025, 0.035, 0.055, 1},
     header = {0.075, 0.085, 0.11, 1},
     panel = {0.055, 0.07, 0.095, 0.96},
     panelEdge = {0.33, 0.26, 0.14, 0.68},
@@ -16,8 +16,12 @@ OldKraken.UIStyle.Colors = {
     buttonEdge = {0.20, 0.23, 0.29, 0.85},
     primaryButton = {0.20, 0.31, 0.56, 1},
     primaryButtonEdge = {0.33, 0.47, 0.76, 1},
+    dangerButton = {0.38, 0.12, 0.13, 1},
+    dangerButtonEdge = {0.82, 0.32, 0.30, 1},
     brandGold = {0.88, 0.69, 0.32, 1},
     actionBlue = {0.24, 0.38, 0.75, 0.24},
+    scrollTrack = {0.035, 0.045, 0.068, 0.9},
+    scrollThumb = {0.34, 0.41, 0.56, 0.95},
     text = {0.93, 0.94, 0.96},
     mutedText = {0.63, 0.67, 0.73},
     dropdownTint = {0.68, 0.59, 0.42},
@@ -250,8 +254,9 @@ function OldKraken.UIStyle.Button(button, variant, options)
     if pushed then pushed:SetAlpha(0) end
     local colors = OldKraken.UIStyle.Colors
     local primary = variant == 'primary'
-    local fillColor = primary and colors.primaryButton or colors.button
-    local edgeColor = primary and colors.primaryButtonEdge or colors.buttonEdge
+    local danger = variant == 'danger'
+    local fillColor = primary and colors.primaryButton or (danger and colors.dangerButton or colors.button)
+    local edgeColor = primary and colors.primaryButtonEdge or (danger and colors.dangerButtonEdge or colors.buttonEdge)
     if options.rounded then
         local fillParts, ringParts = slicePill(button, 'BACKGROUND', nil, options.capWidth or 6)
         button.fillParts, button.ringParts = fillParts, ringParts
@@ -929,7 +934,7 @@ function OldKraken.UIStyle.SegmentedTabs(parent, items, onSelect, options)
         end
         tab.badge.text = tab.badge:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
         OldKraken.UIStyle.Font(tab.badge.text, 11, false)
-        tab.badge.text:SetPoint('CENTER', tab, 'CENTER', 0, 0)
+        tab.badge.text:SetPoint('CENTER', tab.badge, 'CENTER', 0, 0)
         tab.badge.text:SetTextColor(0.06, 0.07, 0.10, 1)
         tab.badge:Hide()
         tab:SetScript('OnClick', function() if onSelect then onSelect(item.key) end end)
@@ -1025,15 +1030,89 @@ end
 function OldKraken.UIStyle.ApplySelection(card, selected)
     local colors = OldKraken.UIStyle.Colors
     if not card.selFill then
-        card.selFill = solid(card, 'BACKGROUND', colors.sel)
+        card.selFill = card:CreateTexture(nil, 'BACKGROUND', nil, 1)
         card.selFill:SetAllPoints(card)
         card.selEdges = createBorder(card, colors.buttonEdge)
+        for _, edge in ipairs(card.selEdges) do
+            if type(edge.SetDrawLayer) == 'function' then edge:SetDrawLayer('BORDER', 2) end
+        end
     end
     local fill = selected and colors.sel or colors.panel
     local edge = selected and colors.selEdge or colors.buttonEdge
     card.selFill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
     setBorderColor(card.selEdges, edge)
+    if card.fill and type(card.fill.SetColorTexture) == 'function' then
+        card.fill:SetColorTexture(fill[1], fill[2], fill[3], fill[4] or 1)
+    end
+    if card.borderEdges then
+        setBorderColor(card.borderEdges, edge)
+    end
     card.isSelected = selected and true or false
+end
+
+local function hideScrollButtonTextures(target)
+    if type(target) ~= 'table' then return end
+    for _, method in ipairs({'GetNormalTexture', 'GetPushedTexture', 'GetDisabledTexture', 'GetHighlightTexture'}) do
+        local tex = type(target[method]) == 'function' and target[method](target)
+        if type(tex) == 'table' then
+            if type(tex.SetTexture) == 'function' then tex:SetTexture(nil) end
+            if type(tex.SetAlpha) == 'function' then tex:SetAlpha(0) end
+            if type(tex.Hide) == 'function' then tex:Hide() end
+        end
+    end
+end
+
+function OldKraken.UIStyle.ScrollBar(scrollFrame, options)
+    if type(scrollFrame) ~= 'table' then return end
+    options = options or {}
+    local name = type(scrollFrame.GetName) == 'function' and scrollFrame:GetName()
+    local sb = scrollFrame.ScrollBar or (name and _G[name .. 'ScrollBar'])
+    if type(sb) ~= 'table' then return end
+    local colors = OldKraken.UIStyle.Colors
+    local sbName = type(sb.GetName) == 'function' and sb:GetName()
+    if type(sb.SetWidth) == 'function' then sb:SetWidth(8) end
+    if options.inside and type(sb.ClearAllPoints) == 'function' then
+        sb:ClearAllPoints()
+        sb:SetPoint('TOPRIGHT', scrollFrame, 'TOPRIGHT', -4, -4)
+        sb:SetPoint('BOTTOMRIGHT', scrollFrame, 'BOTTOMRIGHT', -4, 4)
+    end
+    if type(scrollFrame.GetFrameLevel) == 'function' and type(sb.SetFrameLevel) == 'function' then
+        sb:SetFrameLevel(scrollFrame:GetFrameLevel() + 5)
+    end
+    if type(sb.GetRegions) == 'function' then
+        for _, region in ipairs({sb:GetRegions()}) do
+            if type(region) == 'table' and type(region.Hide) == 'function' and not region.oldKrakenScrollPart then
+                region:Hide()
+            end
+        end
+    end
+    for _, suffix in ipairs({'ScrollUpButton', 'ScrollDownButton'}) do
+        local btn = sb[suffix] or (sbName and _G[sbName .. suffix])
+        if type(btn) == 'table' then
+            hideScrollButtonTextures(btn)
+            if type(btn.SetSize) == 'function' then btn:SetSize(8, 2) end
+            if type(btn.SetAlpha) == 'function' then btn:SetAlpha(0) end
+        end
+    end
+    if not sb.oldKrakenTrack and type(sb.CreateTexture) == 'function' then
+        local track = sb:CreateTexture(nil, 'BACKGROUND')
+        track.oldKrakenScrollPart = true
+        track:SetAllPoints(sb)
+        track:SetColorTexture(unpack(colors.scrollTrack))
+        sb.oldKrakenTrack = track
+    end
+    local thumb = (type(sb.GetThumbTexture) == 'function' and sb:GetThumbTexture())
+        or sb.ThumbTexture or (sbName and _G[sbName .. 'ThumbTexture'])
+    if type(thumb) == 'table' then
+        thumb.oldKrakenScrollPart = true
+        if type(thumb.SetTexture) == 'function' then thumb:SetTexture(nil) end
+        if type(thumb.SetColorTexture) == 'function' then thumb:SetColorTexture(unpack(colors.scrollThumb)) end
+        if type(thumb.SetSize) == 'function' then
+            thumb:SetSize(6, 36)
+        elseif type(thumb.SetWidth) == 'function' then
+            thumb:SetWidth(6)
+        end
+    end
 end
 
 function OldKraken:InvitePlayer(name)
