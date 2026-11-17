@@ -334,6 +334,7 @@ end
 local GATHERING_PROFESSIONS = {[186]=true, [182]=true, [393]=true}
 local SECONDARY_PROFESSIONS = {[185]=true, [129]=true, [356]=true}
 function Workshop:IsGatheringProfession(id) return GATHERING_PROFESSIONS[id] == true end
+function Workshop:IsSecondaryProfession(id) return SECONDARY_PROFESSIONS[id] == true end
 function Workshop:PluralUk(n, one, few, many) return pluralUk(n, one, few, many) end
 
 local function button(parent,text,x,y,width,callback,variant,options)

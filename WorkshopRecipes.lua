@@ -792,7 +792,8 @@ render=function()
         if workshop then
             for id in pairs(professionNames) do
                 local isGathering=workshop.IsGatheringProfession and workshop:IsGatheringProfession(id)
-                if (not professionContext and not isGathering) or professionContext==id then
+                local isSecondary=workshop.IsSecondaryProfession and workshop:IsSecondaryProfession(id)
+                if (not professionContext and not isGathering and not isSecondary) or professionContext==id then
                     for _,entry in ipairs(workshop:GetProfessionMasters(id)) do entry.profession=id; masters[#masters+1]=entry end
                 end
             end
@@ -845,8 +846,11 @@ render=function()
     end
     local list,grouped,groupCounts,groupOnline={},{},{},{}
     local byRecipe=not selectRecipe and not viewOwner and not (filter and (filter:find('^item:') or filter:find('^recipe:')))
+    local workshop=OldKraken.Workshop
     for _,entry in pairs(resultSet) do
+        local isSecondary=workshop and workshop.IsSecondaryProfession and workshop:IsSecondaryProfession(entry.record and entry.record.profession)
         if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
+            and (professionContext or viewOwner or not isSecondary)
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
             and matchesFilter(entry.record,filter) then
