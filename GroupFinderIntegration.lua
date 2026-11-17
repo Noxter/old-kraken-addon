@@ -203,10 +203,18 @@ function finder:Changed()
     OldKraken:Fire('GROUP_FINDER_CHANGED')
 end
 
+local ROLE_MAP = {TANK = 'tank', HEALER = 'healer', DAMAGER = 'dps'}
+
+local function readAssignedRole(unit)
+    if type(UnitGroupRolesAssigned) ~= 'function' then return nil end
+    local ok, assigned = pcall(UnitGroupRolesAssigned, unit)
+    return ok and ROLE_MAP[assigned] or nil
+end
+
 local function readParty()
     if type(IsInGroup) ~= 'function' or type(IsInRaid) ~= 'function'
         or type(GetNumGroupMembers) ~= 'function' or type(UnitName) ~= 'function' then return nil end
-    local ok, result, isGrouped = pcall(function()
+    local ok, result, isGrouped, partyRoles = pcall(function()
         local function plain(value)
             if type(issecretvalue) == 'function' and issecretvalue(value) then error('unavailable group data') end
             return value
@@ -215,32 +223,38 @@ local function readParty()
         if raid ~= nil and raid ~= true and raid ~= false and raid ~= 1 then return nil end
         if grouped ~= nil and grouped ~= true and grouped ~= false and grouped ~= 1 then return nil end
         if raid and not grouped then return nil end
-        if not grouped then return {}, false end
+        local roles = {}
+        local playerRole = readAssignedRole('player')
+        if playerRole and finder.identity then roles[finder.identity] = playerRole end
+        if not grouped then return {}, false, roles end
         local count = plain(GetNumGroupMembers())
         if type(count) ~= 'number' or count % 1 ~= 0 or count < 1 or count > (raid and 40 or 5)
             or (not raid and count < 2) then return nil end
         local names, seen, foundPlayer = {}, {}, not raid
         local limit = raid and count or count - 1
         for i = 1, limit do
-            local name, surname = UnitName((raid and 'raid' or 'party') .. i)
+            local unit = (raid and 'raid' or 'party') .. i
+            local name, surname = UnitName(unit)
             name, surname = plain(name), plain(surname)
             if type(name) ~= 'string' or name == '' then return nil end
             if finder.identity:find(' ', 1, true) and (type(surname) ~= 'string' or surname == '') then return nil end
             local fullName = type(surname) == 'string' and surname ~= '' and (name .. ' ' .. surname) or name
             if seen[fullName] then return nil end
             seen[fullName] = true
+            local unitRole = readAssignedRole(unit)
+            if unitRole then roles[fullName] = unitRole end
             if raid and fullName == finder.identity then foundPlayer = true
             else names[#names + 1] = fullName end
         end
         if not foundPlayer then return nil end
-        return names, true
+        return names, true, roles
     end)
-    if ok then return result, isGrouped end
+    if ok then return result, isGrouped, partyRoles end
     return nil
 end
 
 local function reconcileParty(additionsOnly)
-    local party, isGrouped = readParty()
+    local party, isGrouped, partyRoles = readParty()
     if not party then soloSince = nil; diagnostics.partySyncError = 'unavailable'; return end
     if isGrouped then soloSince = nil end
     if additionsOnly then
@@ -265,7 +279,7 @@ local function reconcileParty(additionsOnly)
         if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
         if not complete then partyDirty = true; return end
     end
-    local complete, changed, reason = finder:SyncPartyMembers(party)
+    local complete, changed, reason = finder:SyncPartyMembers(party, partyRoles)
     partyDirty = not complete
     if reason == 'payload' and diagnostics.partySyncError ~= 'payload' then
         print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
@@ -304,12 +318,14 @@ local frame = CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
 frame:RegisterEvent('GUILD_ROSTER_UPDATE')
 frame:RegisterEvent('GROUP_ROSTER_UPDATE')
+pcall(frame.RegisterEvent, frame, 'PLAYER_ROLES_ASSIGNED')
+pcall(frame.RegisterEvent, frame, 'ROLE_CHANGED_INFORM')
 frame:SetScript('OnEvent', function(_, event)
-    if event == 'GROUP_ROSTER_UPDATE' then
+    if event == 'GROUP_ROSTER_UPDATE' or event == 'PLAYER_ROLES_ASSIGNED' or event == 'ROLE_CHANGED_INFORM' then
         partyDirty = true
-        -- Capture a confirmed join immediately; defer removals until the
+        -- Capture a confirmed join or role update; defer removals until the
         -- next tick so transient, incomplete roster updates cannot disband it.
-        if active then reconcileParty(true) end
+        if active then reconcileParty(event == 'GROUP_ROSTER_UPDATE') end
         return
     end
     local identity, name = playerIdentity()

@@ -211,18 +211,30 @@ end
 local function CreateColumnHeader(parent, label, key, x, width)
     local colors = OldKraken.UIStyle.Colors or {}
     local muted = colors.mutedText or {0.63, 0.67, 0.73}
+    local gold = colors.brandGold or {0.88, 0.69, 0.32, 1}
     local button = CreateFrame("Button", nil, parent)
     button:SetSize(width, 32)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -123)
     local text = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     text:SetPoint("LEFT", button, "LEFT", 0, 0)
-    text:SetWidth(width - 4)
     text:SetJustifyH("LEFT")
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(text, 12, false) end
     text:SetTextColor(muted[1], muted[2], muted[3])
     text:SetText(label)
     button.label = text
+    button.sortKey = key
     if key then
+        local arrow = CreateFrame("Frame", nil, button)
+        arrow:SetSize(8, 6)
+        arrow:SetPoint("LEFT", text, "RIGHT", 5, 0)
+        arrow.bars = {}
+        for idx = 1, 3 do
+            local bar = arrow:CreateTexture(nil, "OVERLAY")
+            bar:SetColorTexture(gold[1], gold[2], gold[3], 1)
+            arrow.bars[idx] = bar
+        end
+        arrow:Hide()
+        button.sortArrow = arrow
         button:SetScript("OnClick", function()
             if settings.sort == key then
                 settings.ascending = not settings.ascending
@@ -235,7 +247,36 @@ local function CreateColumnHeader(parent, label, key, x, width)
     else
         button:EnableMouse(false)
     end
+    if type(parent.columnHeaders) ~= 'table' then parent.columnHeaders = {} end
+    parent.columnHeaders[#parent.columnHeaders + 1] = button
     return button
+end
+
+local function UpdateSortHeaders()
+    if not rosterFrame or not rosterFrame.columnHeaders then return end
+    local colors = OldKraken.UIStyle.Colors or {}
+    local muted = colors.mutedText or {0.63, 0.67, 0.73}
+    local gold = colors.brandGold or {0.88, 0.69, 0.32, 1}
+    for _, btn in ipairs(rosterFrame.columnHeaders) do
+        local active = btn.sortKey and btn.sortKey == settings.sort
+        if btn.label then
+            local c = active and gold or muted
+            btn.label:SetTextColor(c[1], c[2], c[3])
+        end
+        if type(btn.sortArrow) == 'table' then
+            btn.sortArrow:SetShown(active)
+            if active then
+                local widths = settings.ascending and {1, 3, 5} or {5, 3, 1}
+                local offsets = {2, 0, -2}
+                for idx = 1, 3 do
+                    local bar = btn.sortArrow.bars[idx]
+                    bar:SetSize(widths[idx], 1)
+                    bar:ClearAllPoints()
+                    bar:SetPoint("CENTER", btn.sortArrow, "CENTER", 0, offsets[idx])
+                end
+            end
+        end
+    end
 end
 
 local function CreateStatChip(parent, x, width)
@@ -434,9 +475,35 @@ local function CreateRosterWindow(parent)
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -155)
-    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 42)
+    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 42)
     scroll:EnableMouseWheel(true)
     if scroll.SetClipsChildren then pcall(scroll.SetClipsChildren, scroll, true) end
+    if OldKraken.UIStyle.ScrollBar then OldKraken.UIStyle.ScrollBar(scroll, {inside = true}) end
+
+    local emptyText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    emptyText:SetPoint("CENTER", scroll, "CENTER", 0, 14)
+    emptyText:SetText("За обраними фільтрами гравців не знайдено.")
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(emptyText, 13) end
+    if OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText then
+        local m = OldKraken.UIStyle.Colors.mutedText
+        emptyText:SetTextColor(m[1], m[2], m[3])
+    end
+    emptyText:Hide()
+    frame.emptyText = emptyText
+
+    local emptyReset = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(emptyReset, nil, {rounded = true})
+    emptyReset:SetSize(140, 32)
+    emptyReset:SetPoint("TOP", emptyText, "BOTTOM", 0, -12)
+    emptyReset:SetText("Скинути фільтри")
+    emptyReset:SetScript("OnClick", function()
+        if resetButton and resetButton.GetScript then
+            local onClick = resetButton:GetScript("OnClick")
+            if onClick then onClick() end
+        end
+    end)
+    emptyReset:Hide()
+    frame.emptyReset = emptyReset
 
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(CONTENT_WIDTH, 1)
@@ -480,6 +547,11 @@ local function CreateRow(index, parent)
     stripe:SetColorTexture(unpack(zebra))
     stripe:SetShown(index % 2 == 0)
     row.stripe = stripe
+    local hoverColor = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.actionBlue or {0.24, 0.38, 0.75, 0.24}
+    local rowHighlight = row:CreateTexture(nil, "HIGHLIGHT")
+    rowHighlight:SetAllPoints(row)
+    rowHighlight:SetColorTexture(hoverColor[1], hoverColor[2], hoverColor[3], 0.16)
+    row:SetHighlightTexture(rowHighlight)
 
     local columns = {
         { x = 40, width = 190 },
@@ -635,6 +707,7 @@ function Roster:Render()
 
     UpdateSummary()
     UpdateFilterButtonLabels()
+    UpdateSortHeaders()
 
     self:RenderVisible()
 end
@@ -646,7 +719,14 @@ function Roster:RenderVisible()
     local scroll = rosterFrame.scrollFrame
     local viewport = tonumber((scroll:GetHeight())) or 440
     if viewport <= 0 then viewport = 440 end
-    content:SetHeight(math.max(1, #filteredData * ROW_HEIGHT))
+    local fullHeight = #filteredData * ROW_HEIGHT
+    content:SetHeight(math.max(1, fullHeight))
+    local scrollBar = _G.OldKrakenRosterScrollFrameScrollBar
+    if type(scrollBar) == 'table' and scrollBar.SetShown then
+        scrollBar:SetShown(fullHeight > viewport)
+    end
+    if rosterFrame.emptyText then rosterFrame.emptyText:SetShown(#filteredData == 0) end
+    if rosterFrame.emptyReset then rosterFrame.emptyReset:SetShown(#filteredData == 0) end
     local offset = math.max(0, math.min(tonumber((scroll:GetVerticalScroll())) or 0, math.max(0, #filteredData * ROW_HEIGHT - viewport)))
     if offset ~= (tonumber((scroll:GetVerticalScroll())) or 0) then scroll:SetVerticalScroll(offset) end
     local first = math.floor(offset / ROW_HEIGHT) + 1
@@ -666,7 +746,12 @@ function Roster:RenderVisible()
         cells[7]:Show()
         row.cellHovers[7]:Show()
 
-        if HasAddon(member.name) then cells[7]:SetTextColor(0.25, 1, 0.25) else cells[7]:SetTextColor(0.7, 0.7, 0.7) end
+        if HasAddon(member.name) then
+            cells[7]:SetTextColor(0.25, 1, 0.25)
+        else
+            local muted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText or {0.63, 0.67, 0.73}
+            cells[7]:SetTextColor(muted[1], muted[2], muted[3])
+        end
         local version = comm and comm.GetRosterVersion and comm:GetRosterVersion(member.name)
         local comparison = version and comm.CompareVersions and comm:CompareVersions(version, localVersion)
         row.addonDot:SetTexture(HasAddon(member.name) and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
@@ -682,7 +767,7 @@ function Roster:RenderVisible()
             cells[7]:SetTextColor(0.7, 0.7, 0.7)
             versionStatus = 'Не вдалося порівняти номер версії.'
         end
-        cells[7]:SetText(version or '?')
+        cells[7]:SetText(version or '—')
         if row.versionBadge then
             if version then
                 row.addonDot:Hide()
@@ -694,7 +779,7 @@ function Roster:RenderVisible()
                 cells[7]:SetJustifyH('CENTER')
                 if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(cells[7], 11, false) end
             else
-                row.addonDot:Show()
+                row.addonDot:Hide()
                 row.versionBadge:Hide()
                 cells[7]:ClearAllPoints()
                 cells[7]:SetPoint('LEFT', row, 'LEFT', 768, 0)

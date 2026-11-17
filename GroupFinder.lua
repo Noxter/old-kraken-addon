@@ -198,7 +198,7 @@ end
 
 -- Combine actual party or raid members with accepted reservations that have
 -- not joined yet. An observed member frees their place on leaving.
-function Finder:SyncPartyMembers(party)
+function Finder:SyncPartyMembers(party, partyRoles)
     if type(party) ~= 'table' or #party > 39 then return false, false end
     local current, partyNames = {}, {}
     for _, name in ipairs(party) do
@@ -232,16 +232,53 @@ function Finder:SyncPartyMembers(party)
             if not observedChanged then
                 for name in pairs(current) do if not previous[name] then observedChanged = true; break end end
             end
-            if differs or observedChanged then
+            local rolesChanged = false
+            if type(partyRoles) == 'table' then
+                local ownerRole = partyRoles[self.identity]
+                if ownerRole and roles[ownerRole] and ownerRole ~= '' and group.role ~= ownerRole then
+                    rolesChanged = true
+                end
+                for _, name in ipairs(members) do
+                    if name ~= self.identity then
+                        local r = partyRoles[name]
+                        if r and roles[r] and r ~= '' and (not group.memberRoles or group.memberRoles[name] ~= r) then
+                            rolesChanged = true; break
+                        end
+                    end
+                end
+            end
+            if differs or observedChanged or rolesChanged then
                 local oldMembers, oldMax, oldRevision, oldObserved = group.members, group.maxSize, group.revision, group.partyObserved
+                local oldRole = group.role
+                local oldMemberRoles = {}
+                if group.memberRoles then for k, v in pairs(group.memberRoles) do oldMemberRoles[k] = v end end
                 group.members = members
                 group.maxSize = math.max(group.maxSize, #members)
                 group.revision = group.revision + 1
                 group.partyObserved = current
+                if type(partyRoles) == 'table' then
+                    local ownerRole = partyRoles[self.identity]
+                    if ownerRole and roles[ownerRole] and ownerRole ~= '' then
+                        group.role = ownerRole
+                        group.memberRoles = group.memberRoles or {}
+                        group.memberRoles[self.identity] = ownerRole
+                    end
+                    for _, name in ipairs(members) do
+                        if name ~= self.identity then
+                            local r = partyRoles[name]
+                            if r and roles[r] and r ~= '' then
+                                group.memberRoles = group.memberRoles or {}
+                                group.memberRoles[name] = r
+                            end
+                        end
+                    end
+                end
                 local payload = self:EncodeGroup(group)
                 local sent = #payload <= 2560 and self.send('UPDATE', payload)
                 if not sent then
                     group.members, group.maxSize, group.revision, group.partyObserved = oldMembers, oldMax, oldRevision, oldObserved
+                    group.role = oldRole
+                    if group.memberRoles then group.memberRoles = oldMemberRoles end
                     return false, changed, #payload > 2560 and 'payload' or 'queue'
                 end
                 if group.memberRoles then
@@ -307,6 +344,8 @@ function Finder:ReceiveGroup(sender, payload)
         elseif closed == '1' then
             self.pending[key], self.pendingVersions[key], self.pendingRoles[key] = 'closed', nil, nil
         end
+    elseif self.pending[key] == 'closed' and closed == '0' then
+        self.pending[key], self.pendingVersions[key], self.pendingRoles[key] = nil, nil, nil
     end
     return true
 end
@@ -464,6 +503,17 @@ function Finder:Cancel(id)
     group.closed, group.revision = true, group.revision + 1
     if not self.send('CANCEL', self:EncodeGroup(group)) then
         group.closed, group.revision = false, group.revision - 1
+        return false
+    end
+    return true
+end
+
+function Finder:Reopen(id)
+    local group = self.groups[self.identity .. '\001' .. id]
+    if not group or not group.closed or group.hidden then return false end
+    group.closed, group.revision = false, group.revision + 1
+    if not self.send('UPDATE', self:EncodeGroup(group)) then
+        group.closed, group.revision = true, group.revision - 1
         return false
     end
     return true

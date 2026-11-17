@@ -50,7 +50,7 @@ assert(row.cells[7].shown and row.cellHovers[7].shown)
 assert(row.addonDot.texture:find('StatusOnline.tga',1,true) and offline.addonDot.texture:find('StatusOffline.tga',1,true))
 assert(row.cells[7].text == '0.4.0-alpha.2' and row.cells[7].textColor[2]==0.55)
 assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'warning')
-assert(offline.cells[7].text == '?' and offline.cells[7].textColor[1] == 0.7)
+assert(offline.cells[7].text == '—' and offline.cells[7].textColor[1] == 0.63)
 assert(not offline.versionBadge:IsShown())
 assert(row.cellHovers[7].fullText:find('Застаріла',1,true))
 assert(OldKrakenRosterFrame.totalChip.label.text == 'Учасників 2')
@@ -70,7 +70,7 @@ local origCompare = OldKraken.Communication.CompareVersions
 function OldKraken.Communication:GetRosterVersion() return nil end
 OldKraken.GuildRoster:Render()
 assert(row.addonDot.texture:find('StatusOnline.tga', 1, true))
-assert(not row.versionBadge:IsShown() and row.cells[7].text == '?')
+assert(not row.versionBadge:IsShown() and row.cells[7].text == '—')
 assert(row.cells[7].textColor[1] == 0.25 and row.cells[7].textColor[2] == 1 and row.cells[7].textColor[3] == 0.25)
 -- State 3: version received with success / info / neutral comparisons.
 function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Member' then return '0.4.0' end end
