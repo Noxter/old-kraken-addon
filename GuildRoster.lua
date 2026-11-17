@@ -532,6 +532,7 @@ local function CreateRosterWindow(parent)
     scroll:SetScrollChild(content)
 
     scroll:SetScript("OnMouseWheel", function(self, delta)
+        if OldKraken.UIHub and OldKraken.UIHub.HandleScaleWheel and OldKraken.UIHub:HandleScaleWheel(delta) then return end
         local current = self:GetVerticalScroll()
         local maximum = math.max(0, content:GetHeight() - self:GetHeight())
         local nextValue = math.max(0, math.min(maximum, current - delta * ROW_HEIGHT * 3))
@@ -559,7 +560,7 @@ end
 
 local function CreateRow(index, parent)
     local row = CreateFrame("Button", nil, parent)
-    row:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+    row:RegisterForClicks('RightButtonUp')
     row:SetScript('OnClick', ShowMemberMenu)
     row:SetSize(CONTENT_WIDTH, ROW_HEIGHT)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
@@ -613,7 +614,7 @@ local function CreateRow(index, parent)
     row.cellHovers = {}
     for _, cellIndex in ipairs({1, 2, 4, 5, 7}) do
         local hover = CreateFrame('Button', nil, row)
-        hover:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+        hover:RegisterForClicks('RightButtonUp')
         hover:SetScript('OnClick', function() ShowMemberMenu(row) end)
         hover:SetAllPoints(row.cells[cellIndex]); hover:EnableMouse(true)
         hover:SetScript('OnEnter', function(self)

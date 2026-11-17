@@ -616,6 +616,22 @@ end
 function Recipes:GetRosterPresentation() return onlineIndex() end
 function Recipes:FormatPlayerName(name,classes) return playerLabel(name,classes or {}) end
 function Recipes:FormatOnlineStatus(name,online) return statusLabel(name,online or {}) end
+local bopCache={}
+local function isBindOnPickup(r)
+    local id=r and r.item or 0
+    if id<=0 then return false end
+    local cached=bopCache[id]
+    if cached~=nil then return cached end
+    if type(GetItemInfo)=='function' then
+        local ok,_,_,_,_,_,_,_,_,_,_,_,_,_,bindType=pcall(GetItemInfo,id)
+        if ok and type(bindType)=='number' then
+            cached=bindType==1
+            bopCache[id]=cached
+            return cached
+        end
+    end
+    return false
+end
 local function recipeIcon(r)
     local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
     if r.item>0 and type(getIcon)=='function' then
@@ -691,8 +707,8 @@ end
 local function resizeInfo()
     if frame and frame.infoContent then
         local rowsHeight=0
-        for _,row in ipairs(frame.reagentRows or {}) do if row:IsShown() then rowsHeight=rowsHeight+22 end end
-        local reagents=frame.embedded and (frame.detailReagents:GetStringHeight()+rowsHeight+20) or 0
+        for _,row in ipairs(frame.reagentRows or {}) do if row:IsShown() then rowsHeight=rowsHeight+26 end end
+        local reagents=frame.embedded and (frame.detailReagents:GetStringHeight()+rowsHeight+24) or 0
         frame.infoContent:SetHeight(math.max(frame.embedded and 262 or 110,frame.detailInfo:GetStringHeight()+reagents+8))
     end
 end
@@ -793,6 +809,7 @@ render=function()
     for _,entry in pairs(resultSet) do
         if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
+            and not isBindOnPickup(entry.record)
             and matchesFilter(entry.record,filter) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
@@ -986,7 +1003,7 @@ local function createWindow(parent)
     f.reagentRows={}
     for i=1,9 do
         local row=CreateFrame('Frame',nil,f)
-        row:SetSize(275,20); row:SetPoint('TOPLEFT',f.detailReagents,'BOTTOMLEFT',0,-6-(i-1)*22); row:EnableMouse(true)
+        row:SetSize(275,22); row:SetPoint('TOPLEFT',f.detailReagents,'BOTTOMLEFT',0,-8-(i-1)*26); row:EnableMouse(true)
         row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); row.label:SetAllPoints(row); row.label:SetJustifyH('LEFT'); row.label:SetWordWrap(false)
         readableFont(row.label,13)
         row:SetScript('OnEnter',function(self) if self.itemID then showItemTooltip(self,self.itemID,0) end end)
@@ -1042,15 +1059,15 @@ local function createWindow(parent)
         f.detailReagents:SetParent(f.infoContent); f.detailReagents:ClearAllPoints()
         f.detailReagents:SetPoint('TOPLEFT',f.detailInfo,'BOTTOMLEFT',0,-16); f.detailReagents:SetWidth(344)
         for i,row in ipairs(f.reagentRows) do
-            row:SetParent(f.infoContent); row:SetSize(344,20); row:ClearAllPoints()
-            row:SetPoint('TOPLEFT',f.detailReagents,'BOTTOMLEFT',0,-6-(i-1)*22)
+            row:SetParent(f.infoContent); row:SetSize(344,22); row:ClearAllPoints()
+            row:SetPoint('TOPLEFT',f.detailReagents,'BOTTOMLEFT',0,-8-(i-1)*26)
         end
         place(f.whisper,514,-474,132,34); place(f.order,658,-474,226,34)
         place(f.masterRecipes,658,-474,226,34)
         place(f.previousPage,160,-480,44,28)
         f.page:ClearAllPoints(); f.page:SetPoint('CENTER',f.previousPage,'RIGHT',37,0); f.page:SetJustifyH('CENTER')
         place(f.nextPage,278,-480,44,28)
-        place(f.status,0,-516); f.status:SetWidth(580)
+        place(f.status,0,-514); f.status:SetWidth(482)
         place(f.cancelPick,740,-512,160,30)
     end
     for _,row in ipairs(rows) do

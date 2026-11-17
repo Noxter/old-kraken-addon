@@ -29,6 +29,7 @@ end
 
 local DEFAULTS = {
     settings = {
+        uiScale = 1,
         roster = {
             status = "all",
             sort = "level",

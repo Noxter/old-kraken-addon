@@ -9,6 +9,7 @@ local ALERT_DURATION, ALERT_FADE_DURATION, ALERT_SOUND_INTERVAL = 9, 1, 60
 local tab = 'all'
 local offset = 0
 local requestOffset = 0
+local editingDescriptionKey
 local REQUESTS_PER_PAGE, CARDS_PER_PAGE = 2, 3
 local category, role = 'dungeon', 'dps'
 local filterCategory, filterRole, filterFree = 'all', '', false
@@ -775,6 +776,19 @@ refresh=function()
         if window.detailsRosterHeader then window.detailsRosterHeader:Hide() end
     end
     local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
+    if not canManage or selected ~= editingDescriptionKey then editingDescriptionKey = nil end
+    if type(window.editDescButton) == 'table' then
+        local editing = canManage and editingDescriptionKey == selected and not showingRequests
+        local descVal = window.detailsKV and window.detailsKV[5] and window.detailsKV[5].val
+        if type(descVal) == 'table' then
+            descVal:SetWidth(canManage and 122 or 198)
+            descVal:SetShown(g ~= nil and not editing)
+        end
+        window.editDescButton:SetShown(canManage and not editing and not showingRequests)
+        window.editDescBox:SetShown(editing)
+        window.saveDescButton:SetShown(editing)
+        window.cancelDescButton:SetShown(editing)
+    end
     local members = g and g.members or {}
     local top = g and 212 or (window.details:GetStringHeight() + 8)
     local viewport=tonumber((window.detailsScroll:GetHeight())) or 210
@@ -1033,7 +1047,7 @@ refresh=function()
             label:SetAlpha(allowed and 1 or 0.4)
         end
     end
-    window.creationOptionsButton:SetText(window.advancedCreation and 'Менше' or 'Деталі')
+    window.creationOptionsButton:SetText(window.advancedCreation and 'Параметри ▼' or 'Параметри ▲')
     local selectedActivity=dungeon~='' and dungeonLabels[dungeon] or nil
     window.dungeonSelection:SetText(selectedActivity or ((category=='dungeon' or category=='raid') and 'Оберіть картку вище' or categoryLabels[category]))
     catalog.SetArtwork(window.creationArt,dungeon)
@@ -1153,6 +1167,7 @@ local function createWindow(parent)
     f.listContent:SetSize(534, 1)
     f.listScroll:SetScrollChild(f.listContent)
     f.listScroll:SetScript('OnMouseWheel', function(self, delta)
+        if OldKraken.UIHub and OldKraken.UIHub.HandleScaleWheel and OldKraken.UIHub:HandleScaleWheel(delta) then return end
         local current = tonumber((self:GetVerticalScroll())) or 0
         local maxScroll = math.max(0, (tonumber((f.listContent:GetHeight())) or 0) - (tonumber((self:GetHeight())) or 400))
         self:SetVerticalScroll(math.max(0, math.min(maxScroll, current - delta * CARD_STEP)))
@@ -1256,6 +1271,42 @@ local function createWindow(parent)
         v:Hide()
         f.detailsKV[idx] = {key = k, val = v}
     end
+    f.editDescButton = button(f.detailsContent, 'Змінити', 206, -132, 70, function()
+        local g = selected and Finder.groups[selected]
+        if not g or g.owner ~= Finder.identity or g.closed then return end
+        editingDescriptionKey = selected
+        f.editDescBox:SetText(g.description or '')
+        refresh()
+        if type(f.editDescBox.SetFocus) == 'function' then f.editDescBox:SetFocus() end
+    end, 20, nil, {rounded = true})
+    local editLbl = type(f.editDescButton.GetFontString) == 'function' and f.editDescButton:GetFontString()
+    if type(editLbl) == 'table' and OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(editLbl, 11) end
+    f.editDescButton:Hide()
+
+    f.editDescBox = CreateFrame('EditBox', nil, f.detailsContent, 'InputBoxTemplate')
+    OldKraken.UIStyle.Input(f.editDescBox)
+    f.editDescBox:SetSize(132, 24); f.editDescBox:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 76, -130)
+    f.editDescBox:SetAutoFocus(false)
+    local function saveEditedDescription()
+        local g = selected and Finder.groups[selected]
+        if not g or g.owner ~= Finder.identity or g.closed then editingDescriptionKey = nil; refresh(); return end
+        local text = (f.editDescBox:GetText() or ''):match('^%s*(.-)%s*$')
+        if Finder:UpdateDescription(g.id, text) then
+            editingDescriptionKey = nil
+            Finder:Changed()
+            refresh()
+        else
+            print('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.')
+        end
+    end
+    f.editDescBox:SetScript('OnEnterPressed', saveEditedDescription)
+    f.editDescBox:SetScript('OnEscapePressed', function(self) self:ClearFocus(); editingDescriptionKey = nil; refresh() end)
+    f.editDescBox:Hide()
+
+    f.saveDescButton = button(f.detailsContent, 'Ок', 212, -130, 36, saveEditedDescription, 24, 'primary', {rounded = true})
+    f.saveDescButton:Hide()
+    f.cancelDescButton = button(f.detailsContent, '×', 250, -130, 26, function() editingDescriptionKey = nil; refresh() end, 24, nil, {rounded = true})
+    f.cancelDescButton:Hide()
     f.detailsDivider = f.detailsContent:CreateTexture(nil, 'ARTWORK')
     f.detailsDivider:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, -166)
     f.detailsDivider:SetSize(276, 1)
@@ -1462,7 +1513,10 @@ local function createWindow(parent)
         self.offset=math.max(0,math.min(maximum,value or 0))
         content:ClearAllPoints(); content:SetPoint('TOPLEFT',clip,'TOPLEFT',0,self.offset)
     end
-    local function scrollActivities(_,delta) picker:ScrollTo(picker.offset-delta*70) end
+    local function scrollActivities(_,delta)
+        if OldKraken.UIHub and OldKraken.UIHub.HandleScaleWheel and OldKraken.UIHub:HandleScaleWheel(delta) then return end
+        picker:ScrollTo(picker.offset-delta*70)
+    end
     picker:SetScript('OnMouseWheel',scrollActivities)
     clip:EnableMouseWheel(true); clip:SetScript('OnMouseWheel',scrollActivities)
     f.activityPicker=picker
@@ -1564,30 +1618,32 @@ local function createWindow(parent)
     end
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
+    local function announceGroupInGuildChat(activityName, currentCount, maxPlayers, minLv, maxLv, descText)
+        if type(IsInGuild) ~= 'function' or not IsInGuild() then return end
+        local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
+            or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
+        if not sendChat then
+            print('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.')
+            return
+        end
+        local metaParts = {(currentCount or 1) .. '/' .. (maxPlayers or 5)}
+        if minLv and maxLv and minLv > 0 and maxLv > 0 then
+            metaParts[#metaParts + 1] = 'рівні ' .. minLv .. '–' .. maxLv
+        end
+        local note = (descText or ''):match('^%s*(.-)%s*$')
+        local notePart = note ~= '' and (' · ' .. note) or ''
+        local msg = ('[Old Kraken] Збір групи: ' .. activityName .. ' (' .. table.concat(metaParts, ', ') .. ')' .. notePart .. ' — запис у вкладці «Групи» (/okr).'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+        local sent, err = pcall(sendChat, msg, 'GUILD')
+        if not sent then print('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ' .. tostring(err)) end
+    end
     f.announceGuildEnabled = true
     f.createButton = button(f, 'Створити', 550, -455, 150, function()
         local titleText = (f.titleBox:GetText() or ''):match('^%s*(.-)%s*$')
         local ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then
-            if f.announceGuildEnabled and type(IsInGuild) == 'function' and IsInGuild() then
-                local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
-                    or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
+            if f.announceGuildEnabled then
                 local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or 'Група')
-                local maxPlayers = tonumber(f.maxBox:GetText()) or 5
-                local minLv, maxLv = tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText())
-                local descText = (f.descriptionBox:GetText() or ''):match('^%s*(.-)%s*$')
-                local metaParts = {'1/' .. maxPlayers}
-                if minLv and maxLv and minLv > 0 and maxLv > 0 then
-                    metaParts[#metaParts + 1] = 'рівні ' .. minLv .. '–' .. maxLv
-                end
-                local notePart = descText ~= '' and (' · ' .. descText) or ''
-                local msg = ('[Old Kraken] Збір групи: ' .. activityName .. ' (' .. table.concat(metaParts, ', ') .. ')' .. notePart .. ' — запис у вкладці «Групи» (/okr).'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
-                if sendChat then
-                    local sent, err = pcall(sendChat, msg, 'GUILD')
-                    if not sent then print('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ' .. tostring(err)) end
-                else
-                    print('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.')
-                end
+                announceGroupInGuildChat(activityName, 1, tonumber(f.maxBox:GetText()) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
             end
             Finder:Changed(); tab='mine'; refresh()
         else print('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.') end
@@ -1621,15 +1677,15 @@ local function createWindow(parent)
         chipX = chipX + chipW + 4
     end
     f.descriptionBox:SetParent(footer); f.descriptionBox:ClearAllPoints()
-    f.descriptionBox:SetPoint('TOPLEFT',footer,'TOPLEFT',364,-8); f.descriptionBox:SetSize(134,28)
+    f.descriptionBox:SetPoint('TOPLEFT',footer,'TOPLEFT',364,-8); f.descriptionBox:SetSize(124,28)
     f.commentHint=footer:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
     f.commentHint:SetPoint('LEFT',f.descriptionBox,'LEFT',8,0); f.commentHint:SetText('Коментар')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.commentHint, 12) end
     if muted then f.commentHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.descriptionBox:SetScript('OnTextChanged',function(self) f.commentHint:SetShown(self:GetText()=='') end)
     if OldKraken.UIStyle.Chip then
-        f.announceGuild = OldKraken.UIStyle.Chip(footer, 'У чат', {dot = 'success', active = true, width = 80, height = 28, rounded = true})
-        f.announceGuild:SetPoint('TOPLEFT', footer, 'TOPLEFT', 504, -8)
+        f.announceGuild = OldKraken.UIStyle.Chip(footer, 'У чат', {dot = 'success', active = true, width = 78, height = 28, rounded = true})
+        f.announceGuild:SetPoint('TOPLEFT', footer, 'TOPLEFT', 494, -8)
         f.announceGuild:SetScript('OnClick', function(self)
             f.announceGuildEnabled = not f.announceGuildEnabled
             self:SetActive(f.announceGuildEnabled)
@@ -1638,7 +1694,16 @@ local function createWindow(parent)
         f.announceGuild:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_TOP'); GameTooltip:SetText('Повідомити в гільд-чат про нову групу'); GameTooltip:Show() end end)
         f.announceGuild:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     end
-    f.creationOptionsButton=button(footer,'Деталі',590,-8,88,function() f.advancedCreation=not f.advancedCreation; refresh() end,28)
+    f.creationOptionsButton=button(footer,'Параметри ▲',578,-8,104,function() f.advancedCreation=not f.advancedCreation; refresh() end,28,nil,{rounded=true})
+    f.creationOptionsButton:SetScript('OnEnter',function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self,'ANCHOR_TOP')
+            GameTooltip:SetText('Параметри групи')
+            GameTooltip:AddLine('Назва, категорія (рейд, PvP, квести), кількість місць та рівні.',1,1,1,true)
+            GameTooltip:Show()
+        end
+    end)
+    f.creationOptionsButton:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
     f.createButton:SetParent(footer); f.createButton:ClearAllPoints()
     f.createButton:SetPoint('TOPLEFT',footer,'TOPLEFT',688,-8); f.createButton:SetSize(150,28)
     local options=CreateFrame('Frame',nil,f)
@@ -1679,7 +1744,10 @@ local function createWindow(parent)
         local group = selected and Finder.groups[selected]
         if not group or group.owner ~= Finder.identity or group.closed then return end
         local ok, reason, seconds = Finder:Reannounce(group.id)
-        if ok then print('Old Kraken: повторне оголошення додано до черги гільдії.')
+        if ok then
+            local activityName = (group.title and group.title ~= '' and group.title) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or 'Група'
+            announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description)
+            print('Old Kraken: повторне оголошення додано до черги гільдії.')
         elseif reason == 'cooldown' then print('Old Kraken: повторити оголошення можна через ' .. seconds .. ' с.')
         else print('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.') end
         UpdateReannounceButton(f.bumpButton)

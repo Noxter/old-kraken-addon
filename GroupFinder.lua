@@ -519,6 +519,22 @@ function Finder:Reopen(id)
     return true
 end
 
+function Finder:UpdateDescription(id, description)
+    local group = self.groups[self.identity .. '\001' .. id]
+    if not group or group.closed or group.hidden then return false end
+    description = type(description) == 'string' and description or ''
+    if not validText(description, 0, 500) then return false end
+    if group.description == description then return true end
+    local oldDescription, oldRevision = group.description, group.revision
+    group.description, group.revision = description, group.revision + 1
+    local payload = self:EncodeGroup(group)
+    if #payload > 2560 or not self.send('UPDATE', payload) then
+        group.description, group.revision = oldDescription, oldRevision
+        return false
+    end
+    return true
+end
+
 function Finder:Delete(id)
     local group = self.groups[self.identity .. '\001' .. id]
     if not group then return false end
