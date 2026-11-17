@@ -18,7 +18,7 @@ function CloseDropDownMenus() end
 function ChatFrame_SendTell(name) whispered=name end
 function UnitName() return 'Online Member' end
 OldKraken.Communication={RequestRosterPresence=function() end, HasRosterAddon=function(_,name) return name=='Online Member' end}
-function OldKraken.Communication:GetLocalVersion() return '0.4.0-alpha.3' end
+function OldKraken.Communication:GetLocalVersion() return '0.4.0' end
 function OldKraken.Communication:GetRosterVersion(name) if name=='Online Member' then return '0.4.0-alpha.2' end end
 function OldKraken.Communication:CompareVersions() return -1 end
 function OldKraken:InvitePlayer(name) C_PartyInfo.InviteUnit(name) end
@@ -73,7 +73,7 @@ assert(row.addonDot.texture:find('StatusOnline.tga', 1, true))
 assert(not row.versionBadge:IsShown() and row.cells[7].text == '?')
 assert(row.cells[7].textColor[1] == 0.25 and row.cells[7].textColor[2] == 1 and row.cells[7].textColor[3] == 0.25)
 -- State 3: version received with success / info / neutral comparisons.
-function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Member' then return '0.4.0-alpha.3' end end
+function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Member' then return '0.4.0' end end
 function OldKraken.Communication:CompareVersions() return 0 end
 OldKraken.GuildRoster:Render()
 assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'success' and row.cells[7].textColor[2] == 1)
@@ -100,11 +100,12 @@ function CreateFrame() return {RegisterEvent=function() end,SetScript=function()
 lua2.execute((p/'Communication.lua').read_text(encoding='utf-8'))
 lua2.execute('''
 local c=OldKraken.Communication
-OldKraken.version='0.4.0-alpha.3'
+OldKraken.version='0.4.0'
 c.ready=true
-assert(c:GetRosterVersion('Me')=='0.4.0-alpha.3')
-assert(c:CompareVersions('0.4.0-alpha.2','0.4.0-alpha.3')==-1)
-assert(c:CompareVersions('0.4.0-alpha.10','0.4.0-alpha.3')==1)
+assert(c:GetRosterVersion('Me')=='0.4.0')
+assert(c:CompareVersions('0.4.0-alpha.2','0.4.0')==-1)
+assert(c:CompareVersions('0.4.0-alpha.10','0.4.0')==-1)
+assert(c:CompareVersions('0.4.1','0.4.0')==1)
 assert(c:CompareVersions('0.4.0','0.4.0-rc.1')==1)
 assert(c:CompareVersions('0.4.0-beta.1','0.4.0-alpha.10')==1)
 assert(c:CompareVersions('0.4.0+build.2','0.4.0')==0)
