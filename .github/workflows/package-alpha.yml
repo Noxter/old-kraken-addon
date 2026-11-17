@@ -1,0 +1,60 @@
+name: Package OldKraken alpha
+
+on:
+  push:
+    branches: [alpha]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out alpha
+        uses: actions/checkout@v4
+
+      - name: Build installable ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package/OldKraken
+          mapfile -t addon_files < <(awk '
+            /^[[:space:]]*#/ { next }
+            /^[[:space:]]*$/ { next }
+            /\.lua[[:space:]]*$/ { print $1 }
+          ' OldKraken.toc)
+
+          if [ "${#addon_files[@]}" -eq 0 ]; then
+            echo "No Lua files found in OldKraken.toc"
+            exit 1
+          fi
+
+          for file in "${addon_files[@]}"; do
+            test -f "$file" || { echo "Missing TOC file: $file"; exit 1; }
+          done
+
+          cp OldKraken.toc "${addon_files[@]}" package/OldKraken/
+          test -f Media/OldKrakenKraken.tga || { echo "Missing addon emblem"; exit 1; }
+          test -f Media/OldKrakenEmblem.tga || { echo "Missing saved alternate emblem"; exit 1; }
+          mkdir -p package/OldKraken/Media
+          cp Media/OldKrakenKraken.tga Media/OldKrakenEmblem.tga package/OldKraken/Media/
+          cp Media/RoleSlot.tga Media/StatusOnline.tga Media/StatusOffline.tga Media/PillFill.tga Media/PillRing.tga Media/RoleIcons.tga Media/IconTrash.tga Media/Font.ttf package/OldKraken/Media/
+          mkdir -p package/OldKraken/Media/Raids
+          for raid in BarrowDeeps HyjalSummit Onyxia; do
+            test -f "Media/Raids/$raid.tga" || { echo "Missing raid image: $raid"; exit 1; }
+            cp "Media/Raids/$raid.tga" package/OldKraken/Media/Raids/
+          done
+          cp Media/Raids/CREDITS.txt package/OldKraken/Media/Raids/
+          cd package
+          zip -r ../OldKraken-alpha.zip OldKraken
+          unzip -l ../OldKraken-alpha.zip
+
+      - name: Upload installable alpha ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: OldKraken-alpha-${{ github.sha }}
+          path: OldKraken-alpha.zip
+          if-no-files-found: error
+          retention-days: 14

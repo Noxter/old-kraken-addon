@@ -3,12 +3,14 @@ local ADDON_NAME = ...
 local Roster = {}
 OldKraken.GuildRoster = Roster
 
-local ROW_HEIGHT = 22
-local CONTENT_WIDTH = 840
+local ROW_HEIGHT = 40
+local CONTENT_WIDTH = 874
 local rosterFrame
 local rowFrames = {}
 local rosterData = {}
 local filteredData = {}
+local pendingLoad, pendingRender, refreshElapsed = false, false, 0
+local drawing = false
 
 local CLASS_ORDER = {
     "DRUID", "HUNTER", "MAGE", "PALADIN", "PRIEST",
@@ -16,9 +18,15 @@ local CLASS_ORDER = {
 }
 
 local STATUS_LABELS = {
-    all = "Усі",
-    online = "Онлайн",
-    offline = "Офлайн",
+    all = "усі",
+    online = "онлайн",
+    offline = "офлайн",
+}
+
+local ADDON_LABELS = {
+    all = "Аддон: усі",
+    yes = "Аддон: є",
+    unknown = "Аддон: не виявлено",
 }
 
 local SORT_LABELS = {
@@ -30,6 +38,70 @@ local SORT_LABELS = {
 }
 
 local settings
+local addonFilter = 'all'
+
+local function HasAddon(name)
+    local comm = OldKraken.Communication
+    return comm and comm.HasRosterAddon and comm:HasRosterAddon(name)
+end
+
+local copyFrame, memberMenu
+local function CopyName(name)
+    if not copyFrame then
+        copyFrame = CreateFrame('Frame', 'OldKrakenCopyNameFrame', UIParent, 'BasicFrameTemplateWithInset')
+        copyFrame:SetSize(400, 138); copyFrame:SetPoint('CENTER')
+        OldKraken.UIStyle.Window(copyFrame)
+        copyFrame:SetFrameStrata('FULLSCREEN_DIALOG'); copyFrame:SetFrameLevel(100)
+        copyFrame:EnableMouse(true)
+        table.insert(UISpecialFrames, 'OldKrakenCopyNameFrame')
+        if copyFrame.TitleText then copyFrame.TitleText:SetText("Скопіювати ім'я — Ctrl+C") end
+        local edit = CreateFrame('EditBox', nil, copyFrame, 'InputBoxTemplate')
+        OldKraken.UIStyle.Input(edit)
+        edit:SetSize(350, 28); edit:SetPoint('TOPLEFT',copyFrame,'TOPLEFT',24,-67); edit:SetAutoFocus(false)
+        edit:SetTextInsets(6,6,0,0)
+        local hint=copyFrame:CreateFontString(nil,'OVERLAY','GameFontHighlight')
+        hint:SetPoint('TOPLEFT',copyFrame,'TOPLEFT',20,-38)
+        hint:SetText('Ім’я виділено: Ctrl+C — скопіювати, Esc — закрити')
+        edit:SetScript('OnEscapePressed', function() copyFrame:Hide() end)
+        edit:SetScript('OnEnterPressed', function() copyFrame:Hide() end)
+        edit:SetScript('OnEditFocusGained',function(self) self:HighlightText() end)
+        edit:SetScript('OnMouseUp',function(self) self:SetFocus(); self:HighlightText() end)
+        copyFrame:SetScript('OnHide',function() edit:ClearFocus() end)
+        copyFrame.edit = edit
+    end
+    copyFrame:SetFrameStrata('FULLSCREEN_DIALOG')
+    copyFrame:Show(); copyFrame.edit:SetText(name); copyFrame.edit:SetFocus(); copyFrame.edit:HighlightText()
+    -- Dropdown cleanup may change focus after its action callback returns.
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0,function()
+            if copyFrame:IsShown() and copyFrame.edit:GetText()==name then
+                copyFrame.edit:SetFocus(); copyFrame.edit:HighlightText()
+            end
+        end)
+    end
+end
+
+local function ShowMemberMenu(row)
+    local member = row.member
+    if not member then return end
+    if GameTooltip then GameTooltip:Hide() end
+    if not memberMenu then memberMenu = CreateFrame('Frame', 'OldKrakenRosterMemberMenu', UIParent, 'UIDropDownMenuTemplate') end
+    UIDropDownMenu_Initialize(memberMenu, function(_, level)
+        local title = UIDropDownMenu_CreateInfo()
+        title.text = member.name; title.isTitle = true; title.notCheckable = true
+        UIDropDownMenu_AddButton(title, level)
+        local function Action(text, callback, disabled)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = text; info.notCheckable = true; info.disabled = disabled
+            info.func = function() CloseDropDownMenus(); callback() end
+            UIDropDownMenu_AddButton(info, level)
+        end
+        Action('Запросити в групу', function() OldKraken:InvitePlayer(member.name) end, not member.isOnline)
+        Action('Шепнути', function() ChatFrame_SendTell(member.name) end, not member.isOnline)
+        Action("Скопіювати ім'я", function() CopyName(member.name) end)
+    end, 'MENU')
+    ToggleDropDownMenu(1, nil, memberMenu, 'cursor', 0, 0)
+end
 
 local function GetSettings()
     if not OldKraken.DB then
@@ -66,11 +138,15 @@ local function UpdateFilterButtonLabels()
         return
     end
 
-    rosterFrame.statusButton:SetText("Статус: " .. (STATUS_LABELS[settings.status] or "Усі"))
+    UIDropDownMenu_SetText(rosterFrame.statusDropdown, "Статус: " .. (STATUS_LABELS[settings.status] or "усі"))
     UIDropDownMenu_SetText(
         rosterFrame.classDropdown,
-        settings.class == "ALL" and "Усі класи" or ClassLabel(settings.class)
+        settings.class == "ALL" and "Клас: усі" or ("Клас: " .. ClassLabel(settings.class))
     )
+    UIDropDownMenu_SetText(rosterFrame.addonFilter, ADDON_LABELS[addonFilter] or ADDON_LABELS.all)
+    if rosterFrame.searchHint then
+        rosterFrame.searchHint:SetShown((settings.search or "") == "")
+    end
 end
 
 local function MatchesFilters(member)
@@ -89,6 +165,11 @@ local function MatchesFilters(member)
         return false
     end
 
+    if addonFilter ~= 'all' then
+        local installed = HasAddon(member.name)
+        if addonFilter == 'yes' and not installed then return false end
+        if addonFilter == 'unknown' and installed then return false end
+    end
     return true
 end
 
@@ -128,94 +209,142 @@ local function SortMembers(a, b)
 end
 
 local function CreateColumnHeader(parent, label, key, x, width)
-    if not key then
-        local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        header:SetPoint("LEFT", parent, "TOPLEFT", x + 6, -116)
-        header:SetWidth(width - 8)
-        header:SetHeight(22)
-        header:SetJustifyH("LEFT")
-        header:SetText(label)
-        return header
+    local colors = OldKraken.UIStyle.Colors or {}
+    local muted = colors.mutedText or {0.63, 0.67, 0.73}
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(width, 32)
+    button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -123)
+    local text = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    text:SetPoint("LEFT", button, "LEFT", 0, 0)
+    text:SetWidth(width - 4)
+    text:SetJustifyH("LEFT")
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(text, 12, false) end
+    text:SetTextColor(muted[1], muted[2], muted[3])
+    text:SetText(label)
+    button.label = text
+    if key then
+        button:SetScript("OnClick", function()
+            if settings.sort == key then
+                settings.ascending = not settings.ascending
+            else
+                settings.sort = key
+                settings.ascending = true
+            end
+            Roster:Render()
+        end)
+    else
+        button:EnableMouse(false)
     end
-
-    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    button:SetSize(width, 22)
-    button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, -105)
-    button:SetText(label)
-    button:SetScript("OnClick", function()
-        if settings.sort == key then
-            settings.ascending = not settings.ascending
-        else
-            settings.sort = key
-            settings.ascending = true
-        end
-        Roster:Render()
-    end)
     return button
 end
 
-local function CreateRosterWindow()
+local function CreateStatChip(parent, x, width)
+    if OldKraken.UIStyle.Chip then
+        local chip = OldKraken.UIStyle.Chip(parent, "", {width = width, height = 30, center = true, rounded = true})
+        chip:SetPoint("TOPLEFT", parent, "TOPLEFT", x, 0)
+        chip:EnableMouse(false)
+        return chip
+    end
+    local chip = CreateFrame("Frame", nil, parent)
+    chip:SetSize(width, 30)
+    chip:SetPoint("TOPLEFT", parent, "TOPLEFT", x, 0)
+    chip.label = chip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    chip.label:SetPoint("CENTER", chip, "CENTER", 0, 0)
+    function chip:SetLabel(value) self.label:SetText(value or "") end
+    return chip
+end
+
+local function CreateRosterWindow(parent)
     if rosterFrame then
         return rosterFrame
     end
 
-    local frame = CreateFrame("Frame", "OldKrakenRosterFrame", UIParent, "BasicFrameTemplateWithInset")
-    frame:SetSize(900, 590)
-    frame:SetPoint("CENTER")
-    frame:SetMovable(true)
+    local frame
+    if parent then
+        frame = CreateFrame("Frame", "OldKrakenRosterFrame", parent)
+    else
+        frame = CreateFrame("Frame", "OldKrakenRosterFrame", UIParent, "BasicFrameTemplateWithInset")
+    end
+    if not parent then table.insert(UISpecialFrames, "OldKrakenRosterFrame") end
+    frame:SetSize(900, 607)
+    frame:SetPoint("CENTER", parent or UIParent, "CENTER")
+    frame:SetMovable(not parent)
     frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    if not parent then
+        frame:RegisterForDrag("LeftButton")
+        frame:SetScript("OnDragStart", frame.StartMoving)
+        frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    end
     frame:SetClampedToScreen(true)
+    if not parent then OldKraken.UIStyle.Window(frame) end
+    -- Filter bar panel (height 60) and table panel (height 485)
+    OldKraken.UIStyle.Panel(frame, 0, -46, 900, 60)
+    OldKraken.UIStyle.Panel(frame, 0, -122, 900, 485)
     frame:Hide()
 
     if frame.TitleText then
         frame.TitleText:SetText("Old Kraken — Guild Roster")
     end
 
-    local refreshButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    refreshButton:SetSize(92, 24)
-    refreshButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -38, -30)
-    refreshButton:SetText("Оновити")
-    refreshButton:SetScript("OnClick", function()
-        Roster:RequestUpdate()
-    end)
+    frame.shownChip = CreateStatChip(frame, 0, 94)
+    frame.shownChip:ClearAllPoints()
+    frame.shownChip:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -2)
+
+    frame.onlineChip = CreateStatChip(frame, 0, 90)
+    frame.onlineChip:ClearAllPoints()
+    frame.onlineChip:SetPoint("TOPRIGHT", frame.shownChip, "TOPLEFT", -8, 0)
+
+    frame.totalChip = CreateStatChip(frame, 0, 111)
+    frame.totalChip:ClearAllPoints()
+    frame.totalChip:SetPoint("TOPRIGHT", frame.onlineChip, "TOPLEFT", -8, 0)
 
     local searchBox = CreateFrame("EditBox", "OldKrakenRosterSearchBox", frame, "InputBoxTemplate")
-    searchBox:SetSize(190, 24)
-    searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -38)
+    OldKraken.UIStyle.Input(searchBox, {rounded = true})
+    searchBox:SetSize(248, 34)
+    searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 13, -59)
     searchBox:SetAutoFocus(false)
-    searchBox:SetTextInsets(6, 6, 0, 0)
+    searchBox:SetTextInsets(10, 10, 0, 0)
     searchBox:SetText(settings.search or "")
+    local searchHint = searchBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    searchHint:SetPoint("LEFT", searchBox, "LEFT", 12, 0)
+    searchHint:SetText("Пошук гравця за ім’ям")
+    local muted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+    if muted then searchHint:SetTextColor(muted[1], muted[2], muted[3]) end
+    searchHint:SetShown((settings.search or "") == "")
+    frame.searchHint = searchHint
     searchBox:SetScript("OnTextChanged", function(self)
         settings.search = self:GetText() or ""
+        if frame.searchHint then frame.searchHint:SetShown(settings.search == "") end
         Roster:Render()
     end)
+    searchBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     frame.searchBox = searchBox
 
-    local statusButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    statusButton:SetSize(125, 24)
-    statusButton:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
-    statusButton:SetScript("OnClick", function()
-        if settings.status == "all" then
-            settings.status = "online"
-        elseif settings.status == "online" then
-            settings.status = "offline"
-        else
-            settings.status = "all"
+    local statusDropdown = CreateFrame("Frame", "OldKrakenRosterStatusDropdown", frame, "UIDropDownMenuTemplate")
+    OldKraken.UIStyle.Dropdown(statusDropdown, {rounded = true})
+    statusDropdown:SetPoint("TOPLEFT", frame, "TOPLEFT", 271 - 16, -57)
+    UIDropDownMenu_SetWidth(statusDropdown, 142)
+    UIDropDownMenu_JustifyText(statusDropdown, "LEFT")
+    UIDropDownMenu_Initialize(statusDropdown, function(_, level)
+        for _, value in ipairs({"all", "online", "offline"}) do
+            local status = value
+            local info = UIDropDownMenu_CreateInfo()
+            info.text, info.value = "Статус: " .. STATUS_LABELS[status], status
+            info.checked = settings.status == status
+            info.func = function() settings.status = status; Roster:Render() end
+            UIDropDownMenu_AddButton(info, level)
         end
-        Roster:Render()
     end)
-    frame.statusButton = statusButton
+    frame.statusDropdown = statusDropdown
 
     local classDropdown = CreateFrame("Frame", "OldKrakenClassDropdown", frame, "UIDropDownMenuTemplate")
-    classDropdown:SetPoint("LEFT", statusButton, "RIGHT", -8, -2)
-    UIDropDownMenu_SetWidth(classDropdown, 150)
+    OldKraken.UIStyle.Dropdown(classDropdown, {rounded = true})
+    classDropdown:SetPoint("TOPLEFT", frame, "TOPLEFT", 459 - 16, -57)
+    UIDropDownMenu_SetWidth(classDropdown, 132)
     UIDropDownMenu_JustifyText(classDropdown, "LEFT")
-    UIDropDownMenu_Initialize(classDropdown, function(self, level)
+    UIDropDownMenu_Initialize(classDropdown, function(_, level)
         local info = UIDropDownMenu_CreateInfo()
-        info.text = "Усі класи"
+        info.text = "Клас: усі"
         info.value = "ALL"
         info.checked = settings.class == "ALL"
         info.func = function()
@@ -239,22 +368,75 @@ local function CreateRosterWindow()
     end)
     frame.classDropdown = classDropdown
 
-    local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -72)
-    summary:SetJustifyH("LEFT")
-    frame.summaryText = summary
+    local filter = CreateFrame('Frame', 'OldKrakenRosterAddonFilter', frame, 'UIDropDownMenuTemplate')
+    OldKraken.UIStyle.Dropdown(filter, {rounded = true})
+    filter:SetPoint('TOPLEFT', frame, 'TOPLEFT', 637 - 16, -57)
+    UIDropDownMenu_SetWidth(filter, 152)
+    UIDropDownMenu_JustifyText(filter, 'LEFT')
+    UIDropDownMenu_Initialize(filter, function(_, level)
+        for _, entry in ipairs({{'all', ADDON_LABELS.all}, {'yes', ADDON_LABELS.yes}, {'unknown', ADDON_LABELS.unknown}}) do
+            local value, label = entry[1], entry[2]
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label; info.checked = addonFilter == value
+            info.func = function() addonFilter = value; UIDropDownMenu_SetText(filter, label); Roster:Render() end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    UIDropDownMenu_SetText(filter, ADDON_LABELS.all); frame.addonFilter = filter
 
-    CreateColumnHeader(frame, "ІМ'Я", "name", 18, 190)
-    CreateColumnHeader(frame, "РАНГ", "rank", 210, 150)
-    CreateColumnHeader(frame, "РІВ.", "level", 366, 52)
-    CreateColumnHeader(frame, "КЛАС", "class", 422, 112)
-    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 538, 220)
-    CreateColumnHeader(frame, "СТАТУС", nil, 764, 100)
+    local resetButton = CreateFrame("Button", "OldKrakenRosterResetButton", frame, "UIPanelButtonTemplate")
+    OldKraken.UIStyle.Button(resetButton, nil, {rounded = true})
+    resetButton:SetSize(74, 34)
+    resetButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 813, -59)
+    resetButton:SetText("Скинути")
+    local gold = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.brandGold
+    local resetLabel = resetButton:GetFontString()
+    if resetLabel and gold then resetLabel:SetTextColor(gold[1], gold[2], gold[3]) end
+    resetButton:SetScript("OnClick", function()
+        settings.search = ""
+        settings.status = "all"
+        settings.class = "ALL"
+        addonFilter = "all"
+        searchBox:SetText("")
+        if frame.searchHint then frame.searchHint:Show() end
+        Roster:Render()
+    end)
+    frame.resetButton = resetButton
+
+    local summary = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    summary:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -582)
+    summary:SetJustifyH("LEFT")
+    if OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText then
+        local m = OldKraken.UIStyle.Colors.mutedText
+        summary:SetTextColor(m[1], m[2], m[3])
+    end
+    frame.summaryText = summary
+    frame.footerText = summary
+
+    CreateColumnHeader(frame, "ІМ'Я", "name", 40, 190)
+    CreateColumnHeader(frame, "РАНГ", "rank", 240, 70)
+    CreateColumnHeader(frame, "РІВ.", "level", 320, 44)
+    CreateColumnHeader(frame, "КЛАС", "class", 374, 80)
+    CreateColumnHeader(frame, "ЛОКАЦІЯ", "zone", 464, 160)
+    CreateColumnHeader(frame, "ПРОФЕСІЇ", nil, 634, 110)
+    frame.addonHeader = CreateColumnHeader(frame, "АДДОН", nil, 754, 130)
+
+    local headerDivider = frame:CreateTexture(nil, "ARTWORK")
+    headerDivider:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -155)
+    headerDivider:SetSize(898, 1)
+    local divColor = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.divider or {0.20, 0.23, 0.29, 0.85}
+    headerDivider:SetColorTexture(unpack(divColor))
+
+    local footerDivider = frame:CreateTexture(nil, "ARTWORK")
+    footerDivider:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -572)
+    footerDivider:SetSize(898, 1)
+    footerDivider:SetColorTexture(unpack(divColor))
 
     local scroll = CreateFrame("ScrollFrame", "OldKrakenRosterScrollFrame", frame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -132)
-    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 14)
+    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -155)
+    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -24, 42)
     scroll:EnableMouseWheel(true)
+    if scroll.SetClipsChildren then pcall(scroll.SetClipsChildren, scroll, true) end
 
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(CONTENT_WIDTH, 1)
@@ -267,6 +449,17 @@ local function CreateRosterWindow()
         self:SetVerticalScroll(nextValue)
     end)
 
+    local previousScroll = scroll:GetScript('OnVerticalScroll')
+    scroll:SetScript('OnVerticalScroll', function(self, offset)
+        if previousScroll then previousScroll(self, offset) end
+        if not drawing then Roster:RenderVisible() end
+    end)
+    local previousResize = scroll:GetScript('OnSizeChanged')
+    scroll:SetScript('OnSizeChanged', function(self, width, height)
+        if previousResize then previousResize(self, width, height) end
+        if not drawing then Roster:RenderVisible() end
+    end)
+    frame:SetScript('OnShow', function() Roster:ScheduleRefresh(true) end)
     frame.scrollFrame = scroll
     frame.contentFrame = content
     rosterFrame = frame
@@ -276,32 +469,118 @@ local function CreateRosterWindow()
 end
 
 local function CreateRow(index, parent)
-    local row = CreateFrame("Frame", nil, parent)
+    local row = CreateFrame("Button", nil, parent)
+    row:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+    row:SetScript('OnClick', ShowMemberMenu)
     row:SetSize(CONTENT_WIDTH, ROW_HEIGHT)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
+    local zebra = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.zebra or {1, 1, 1, 0.035}
+    local stripe = row:CreateTexture(nil, "BACKGROUND")
+    stripe:SetAllPoints(row)
+    stripe:SetColorTexture(unpack(zebra))
+    stripe:SetShown(index % 2 == 0)
+    row.stripe = stripe
 
     local columns = {
-        { x = 6, width = 190 },
-        { x = 198, width = 150 },
-        { x = 354, width = 52 },
-        { x = 410, width = 112 },
-        { x = 526, width = 220 },
-        { x = 752, width = 82 },
+        { x = 40, width = 190 },
+        { x = 240, width = 70 },
+        { x = 320, width = 44 },
+        { x = 374, width = 80 },
+        { x = 464, width = 160 },
+        { x = 634, width = 110 },
+        { x = 766, width = 104 },
     }
 
     row.cells = {}
     for cellIndex, column in ipairs(columns) do
-        local cell = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        local cell = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         cell:SetPoint("LEFT", row, "LEFT", column.x, 0)
         cell:SetWidth(column.width)
         cell:SetHeight(ROW_HEIGHT)
         cell:SetJustifyH("LEFT")
         cell:SetWordWrap(false)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(cell, 13, column.bold) end
         row.cells[cellIndex] = cell
+    end
+    row.onlineDot = row:CreateTexture(nil, 'OVERLAY')
+    row.onlineDot:SetPoint('LEFT', row, 'LEFT', 14, 0)
+    row.onlineDot:SetWidth(8)
+    row.onlineDot:SetHeight(8)
+    row.addonDot = row:CreateTexture(nil, 'OVERLAY')
+    row.addonDot:SetSize(8, 8); row.addonDot:SetPoint('LEFT', row, 'LEFT', 754, 0)
+    if OldKraken.UIStyle.PillBadge then
+        row.versionBadge = OldKraken.UIStyle.PillBadge(row, '', 'neutral', {
+            width = 90, height = 19, fontSize = 11, rounded = true,
+            customColors = {success = {0.349, 0.902, 0.502, 1}}
+        })
+        row.versionBadge:SetPoint('LEFT', row, 'LEFT', 754, 0)
+        row.versionBadge:Hide()
+    end
+    row.cellHovers = {}
+    for _, cellIndex in ipairs({1, 2, 4, 5, 7}) do
+        local hover = CreateFrame('Button', nil, row)
+        hover:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+        hover:SetScript('OnClick', function() ShowMemberMenu(row) end)
+        hover:SetAllPoints(row.cells[cellIndex]); hover:EnableMouse(true)
+        hover:SetScript('OnEnter', function(self)
+            if GameTooltip and self.fullText and self.fullText ~= '' then
+                GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(self.fullText); GameTooltip:Show()
+            end
+        end)
+        hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+        row.cellHovers[cellIndex] = hover
+    end
+
+    row.professions = {}
+    for i=1,5 do
+        local icon=CreateFrame('Button',nil,row)
+        icon:SetSize(18,18); icon:SetPoint('LEFT',row,'LEFT',634+(i-1)*22,0)
+        icon.texture=icon:CreateTexture(nil,'ARTWORK'); icon.texture:SetAllPoints(icon)
+        icon:SetScript('OnClick',function(self)
+            if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
+                OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName,self.professionID)
+            end
+        end)
+        icon:SetScript('OnEnter',function(self)
+            if not GameTooltip or not self.professionID or not OldKraken.Workshop then return end
+            local name=OldKraken.Workshop:ProfessionInfo(self.professionID)
+            GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(name)
+            if self.native then GameTooltip:AddLine('Професія з ігрового ростера; рівень і рецепти невідомі.',1,1,1,true)
+            elseif self.rank then
+                GameTooltip:AddLine('Рівень: '..tostring(self.rank)..'/'..tostring(self.maximum or '?'),1,1,1)
+                if self.relayed then GameTooltip:AddLine('Отримано через гільдію',1,1,1) end
+                if type(self.updated)=='number' and type(GetServerTime)=='function' and GetServerTime()-self.updated>604800 then GameTooltip:AddLine('Дані застарілі',1,0.7,0.25) end
+            end
+            GameTooltip:AddLine('Натисніть, щоб переглянути збережені рецепти.',0.6,0.9,1,true); GameTooltip:Show()
+        end)
+        icon:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        icon:Hide(); row.professions[i]=icon
     end
 
     rowFrames[index] = row
     return row
+end
+
+local function ActiveFilterDescription()
+    local parts = {}
+    if (settings.search or "") ~= "" then
+        parts[#parts + 1] = "пошук: " .. settings.search
+    end
+    if settings.status and settings.status ~= "all" then
+        parts[#parts + 1] = STATUS_LABELS[settings.status] or settings.status
+    end
+    if settings.class and settings.class ~= "ALL" then
+        parts[#parts + 1] = ClassLabel(settings.class)
+    end
+    if addonFilter == "yes" then
+        parts[#parts + 1] = "аддон: є"
+    elseif addonFilter == "unknown" then
+        parts[#parts + 1] = "аддон: не виявлено"
+    end
+    if #parts == 0 then
+        return nil
+    end
+    return table.concat(parts, ", ")
 end
 
 local function UpdateSummary()
@@ -313,17 +592,28 @@ local function UpdateSummary()
         end
     end
 
-    local visibleOnline = 0
-    for _, member in ipairs(filteredData) do
-        if member.isOnline then
-            visibleOnline = visibleOnline + 1
-        end
+    if rosterFrame.totalChip then
+        rosterFrame.totalChip:SetLabel(string.format("Учасників %d", total))
+    end
+    if rosterFrame.onlineChip then
+        rosterFrame.onlineChip:SetLabel(string.format("Онлайн |cff69dc8c%d|r", online))
+    end
+    if rosterFrame.shownChip then
+        rosterFrame.shownChip:SetLabel(string.format("Показано %d", #filteredData))
     end
 
-    rosterFrame.summaryText:SetText(string.format(
-        "Учасників: %d | Онлайн: %d | Показано: %d (онлайн: %d)",
-        total, online, #filteredData, visibleOnline
-    ))
+    local activeFilter = ActiveFilterDescription()
+    if activeFilter then
+        rosterFrame.summaryText:SetText(string.format(
+            "Показано %d з %d · фільтр «%s» увімкнено",
+            #filteredData, total, activeFilter
+        ))
+    else
+        rosterFrame.summaryText:SetText(string.format(
+            "Показано %d з %d",
+            #filteredData, total
+        ))
+    end
 end
 
 function Roster:Render()
@@ -346,19 +636,85 @@ function Roster:Render()
     UpdateSummary()
     UpdateFilterButtonLabels()
 
-    local content = rosterFrame.contentFrame
-    content:SetHeight(math.max(1, #filteredData * ROW_HEIGHT))
+    self:RenderVisible()
+end
 
-    for index, member in ipairs(filteredData) do
+function Roster:RenderVisible()
+    if not rosterFrame or drawing then return end
+    drawing = true
+    local content = rosterFrame.contentFrame
+    local scroll = rosterFrame.scrollFrame
+    local viewport = tonumber((scroll:GetHeight())) or 440
+    if viewport <= 0 then viewport = 440 end
+    content:SetHeight(math.max(1, #filteredData * ROW_HEIGHT))
+    local offset = math.max(0, math.min(tonumber((scroll:GetVerticalScroll())) or 0, math.max(0, #filteredData * ROW_HEIGHT - viewport)))
+    if offset ~= (tonumber((scroll:GetVerticalScroll())) or 0) then scroll:SetVerticalScroll(offset) end
+    local first = math.floor(offset / ROW_HEIGHT) + 1
+    local count = math.max(0, math.min(math.ceil(viewport / ROW_HEIGHT) + 1, #filteredData - first + 1))
+    local comm = OldKraken.Communication
+    local localVersion = comm and comm.GetLocalVersion and comm:GetLocalVersion()
+    for index = 1, count do
+        local dataIndex = first + index - 1
+        local member = filteredData[dataIndex]
         local row = rowFrames[index] or CreateRow(index, content)
+        row:ClearAllPoints()
+        row:SetPoint('TOPLEFT', content, 'TOPLEFT', 0, -((dataIndex - 1) * ROW_HEIGHT))
+        if row.stripe then row.stripe:SetShown(dataIndex % 2 == 0) end
+        row.member = member
         local cells = row.cells
 
+        cells[7]:Show()
+        row.cellHovers[7]:Show()
+
+        if HasAddon(member.name) then cells[7]:SetTextColor(0.25, 1, 0.25) else cells[7]:SetTextColor(0.7, 0.7, 0.7) end
+        local version = comm and comm.GetRosterVersion and comm:GetRosterVersion(member.name)
+        local comparison = version and comm.CompareVersions and comm:CompareVersions(version, localVersion)
+        row.addonDot:SetTexture(HasAddon(member.name) and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
+        local badgeKind = 'neutral'
+        local versionStatus = 'Версію не передано; оновіть аддон учасника та натисніть «Оновити».'
+        if comparison == -1 then
+            cells[7]:SetTextColor(1, 0.55, 0.15); versionStatus = 'Застаріла: версія старіша за вашу.'; badgeKind = 'warning'
+        elseif comparison == 1 then
+            cells[7]:SetTextColor(0.3, 0.8, 1); versionStatus = 'Новіша за вашу версію.'; badgeKind = 'info'
+        elseif comparison == 0 then
+            cells[7]:SetTextColor(0.25, 1, 0.25); versionStatus = 'Така сама версія, як у вас.'; badgeKind = 'success'
+        elseif version then
+            cells[7]:SetTextColor(0.7, 0.7, 0.7)
+            versionStatus = 'Не вдалося порівняти номер версії.'
+        end
+        cells[7]:SetText(version or '?')
+        if row.versionBadge then
+            if version then
+                row.addonDot:Hide()
+                row.versionBadge:SetKind(badgeKind)
+                row.versionBadge:Show()
+                cells[7]:ClearAllPoints()
+                cells[7]:SetPoint('CENTER', row.versionBadge, 'CENTER', 0, 0)
+                cells[7]:SetWidth(84)
+                cells[7]:SetJustifyH('CENTER')
+                if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(cells[7], 11, false) end
+            else
+                row.addonDot:Show()
+                row.versionBadge:Hide()
+                cells[7]:ClearAllPoints()
+                cells[7]:SetPoint('LEFT', row, 'LEFT', 768, 0)
+                cells[7]:SetWidth(84)
+                cells[7]:SetJustifyH('LEFT')
+                if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(cells[7], 13, false) end
+            end
+        end
+        row.cellHovers[7].fullText = (version or 'Невідомо') .. '\n' .. versionStatus
         cells[1]:SetText(SafeText(member.name))
         cells[2]:SetText(SafeText(member.rank))
         cells[3]:SetText(SafeText(member.level))
         cells[4]:SetText(SafeText(member.class))
         cells[5]:SetText(SafeText(member.zone))
-        cells[6]:SetText(member.isOnline and "Онлайн" or "Офлайн")
+        cells[6]:Hide()
+        row.onlineDot:SetTexture(member.isOnline and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
+        row.cellHovers[1].fullText = SafeText(member.name)
+        row.cellHovers[2].fullText = SafeText(member.rank)
+        row.cellHovers[4].fullText = SafeText(member.class)
+        row.cellHovers[5].fullText = SafeText(member.zone)
 
         local classColor = member.classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.classFile]
         if classColor then
@@ -376,14 +732,34 @@ function Roster:Render()
         end
 
         row:Show()
+        if row.versionBadge then
+            if version then
+                row.versionBadge:Show()
+            else
+                row.versionBadge:Hide()
+            end
+        end
+        local professions=OldKraken.Workshop and OldKraken.Workshop:GetMemberProfessions(member.name) or {}
+        for i,icon in ipairs(row.professions) do
+            local profession=professions[i]
+            if profession then
+                local _,texture=OldKraken.Workshop:ProfessionInfo(profession.id)
+                icon.professionID,icon.memberName,icon.native,icon.rank,icon.maximum,icon.updated,icon.relayed=profession.id,member.name,profession.native,profession.rank,profession.maximum,profession.timestamp,profession.relayed
+                icon.texture:SetTexture(texture); icon.texture:SetAlpha(profession.native and 0.55 or 1); icon:Show()
+            else icon.professionID=nil; icon:Hide() end
+        end
     end
 
-    for index = #filteredData + 1, #rowFrames do
+    for index = count + 1, #rowFrames do
+        rowFrames[index].member = nil
         rowFrames[index]:Hide()
     end
+    drawing = false
 end
 
 function Roster:Load()
+    pendingLoad, pendingRender = false, false
+    if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     local total = GetNumGuildMembers()
     total = tonumber(total) or 0
 
@@ -417,6 +793,7 @@ function Roster:RequestUpdate()
         return
     end
 
+    if OldKraken.Communication.RequestRosterPresence then OldKraken.Communication:RequestRosterPresence() end
     if C_GuildInfo and C_GuildInfo.GuildRoster then
         C_GuildInfo.GuildRoster()
     elseif GuildRoster then
@@ -432,19 +809,54 @@ function Roster:Show()
         return
     end
 
-    local frame = CreateRosterWindow()
-    frame:Show()
+    if OldKraken.UIHub then
+        OldKraken.UIHub:ShowPage("roster")
+    else
+        local frame = CreateRosterWindow()
+        frame:Show()
+    end
     self:Load()
     self:RequestUpdate()
 end
 
+function Roster:Toggle()
+    if OldKraken.UIHub and OldKraken.UIHub.frame and OldKraken.UIHub.frame:IsShown()
+        and OldKraken.UIHub.currentPage == "roster" then
+        OldKraken.UIHub.frame:Hide()
+    elseif rosterFrame and rosterFrame:IsShown() and not OldKraken.UIHub then
+        rosterFrame:Hide()
+    else
+        self:Show()
+    end
+end
+
+if OldKraken.UIHub then
+    OldKraken.UIHub:RegisterPage("roster", "Ростер", "01", function(parent)
+        return CreateRosterWindow(parent)
+    end)
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
-eventFrame:SetScript("OnEvent", function()
-    if rosterFrame and rosterFrame:IsShown() then
-        Roster:Load()
-    end
+function Roster:ScheduleRefresh(reload)
+    pendingLoad = pendingLoad or reload == true
+    pendingRender = true
+end
+eventFrame:SetScript('OnUpdate', function(_, elapsed)
+    if not pendingRender then refreshElapsed = 0; return end
+    refreshElapsed = refreshElapsed + elapsed
+    if refreshElapsed < 0.15 then return end
+    refreshElapsed = 0
+    if not rosterFrame or not rosterFrame:IsShown() then return end
+    local reload = pendingLoad
+    pendingLoad, pendingRender = false, false
+    if reload then Roster:Load() else Roster:Render() end
 end)
+eventFrame:SetScript('OnEvent', function() Roster:ScheduleRefresh(true) end)
+if type(OldKraken.On)=='function' then
+    OldKraken:On('ROSTER_ADDON_CHANGED',function() Roster:ScheduleRefresh(false) end)
+    OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function() Roster:ScheduleRefresh(false) end)
+end
 
 SLASH_OLDKRAKEN1 = "/okr"
 SLASH_OLDKRAKEN2 = "/oldkraken"
@@ -455,10 +867,41 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     end
 
+    if OldKraken.GroupFinderAPI and OldKraken.GroupFinderAPI:HandleCommand(command) then
+        return
+    end
+
+    if command == 'recipes' then
+        if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end
+        return
+    elseif command == 'orders' then
+        if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+        return
+    elseif command == 'workshop' or command == 'craft' then
+        if OldKraken.Workshop then OldKraken.Workshop:Show() end
+        return
+    elseif command == 'events' or command == 'calendar' then
+        if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
+        return
+    elseif command == 'alerts group' or command == 'alerts request' or command == 'alerts event' or command == 'alerts workshop' then
+        if OldKraken.GroupFinder and OldKraken.GroupFinder.PreviewAlert then
+            OldKraken.GroupFinder:PreviewAlert(command == 'alerts group' and 'group' or (command == 'alerts event' and 'event' or (command == 'alerts workshop' and 'workshop' or 'request')))
+        end
+        return
+    elseif command == 'group status' then
+        if OldKraken.GroupFinder then OldKraken.GroupFinder:PrintSyncStatus() end
+        return
+    elseif command == 'group sync' then
+        if OldKraken.GroupFinder then OldKraken.GroupFinder:RequestSyncNow() end
+        return
+    elseif command == 'group' or command == 'groups' then
+        if OldKraken.GroupFinder then OldKraken.GroupFinder:Show() end
+        return
+    end
+
     if command == "refresh" then
         Roster:RequestUpdate()
     else
         Roster:Show()
     end
 end
-
