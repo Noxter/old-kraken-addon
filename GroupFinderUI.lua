@@ -991,7 +991,7 @@ refresh=function()
         if own and not own.closed and not own.hidden then for _ in pairs(applicants) do requestCount = requestCount + 1 end end
     end
     local hasNewRequests = not showingRequests and requestCount > 0
-    window.requestsButton:SetText(showingRequests and 'До деталей' or (hasNewRequests and ('|cff69dc8c●|r  Вхідні заявки: ' .. requestCount) or ('Заявки: ' .. requestCount)))
+    window.requestsButton:SetText(showingRequests and 'До деталей' or (hasNewRequests and ('|cff69dc8c•|r  Вхідні заявки: ' .. requestCount) or ('Заявки: ' .. requestCount)))
     local colors = OldKraken.UIStyle.Colors
     if colors and type(window.requestsButton.fillParts) == 'table' then
         local fill = hasNewRequests and colors.primaryButton or colors.button
@@ -1047,7 +1047,7 @@ refresh=function()
             label:SetAlpha(allowed and 1 or 0.4)
         end
     end
-    window.creationOptionsButton:SetText(window.advancedCreation and 'Параметри ▼' or 'Параметри ▲')
+    window.creationOptionsButton:SetText(window.advancedCreation and 'Параметри -' or 'Параметри +')
     local selectedActivity=dungeon~='' and dungeonLabels[dungeon] or nil
     window.dungeonSelection:SetText(selectedActivity or ((category=='dungeon' or category=='raid') and 'Оберіть картку вище' or categoryLabels[category]))
     catalog.SetArtwork(window.creationArt,dungeon)
@@ -1694,7 +1694,7 @@ local function createWindow(parent)
         f.announceGuild:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_TOP'); GameTooltip:SetText('Повідомити в гільд-чат про нову групу'); GameTooltip:Show() end end)
         f.announceGuild:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     end
-    f.creationOptionsButton=button(footer,'Параметри ▲',578,-8,104,function() f.advancedCreation=not f.advancedCreation; refresh() end,28,nil,{rounded=true})
+    f.creationOptionsButton=button(footer,'Параметри +',578,-8,104,function() f.advancedCreation=not f.advancedCreation; refresh() end,28,nil,{rounded=true})
     f.creationOptionsButton:SetScript('OnEnter',function(self)
         if GameTooltip then
             GameTooltip:SetOwner(self,'ANCHOR_TOP')
