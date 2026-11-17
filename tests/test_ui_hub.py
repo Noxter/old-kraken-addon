@@ -144,7 +144,7 @@ OldKraken.Workshop:Show()
 local workshopFrame = OldKraken.UIHub.pages.workshop.frame
 assert(workshopFrame.width == 900 and workshopFrame.height == 608)
 assert(rawget(workshopFrame, 'page') == nil and rawget(workshopFrame, 'previousPage') == nil and rawget(workshopFrame, 'nextPage') == nil)
-assert(#workshopFrame.professionCards == 9)
+assert(#workshopFrame.professionCards == 6)
 local alchemy = workshopFrame.professionCards[1]
 assert(alchemy.profession == 171 and alchemy.detail.text == '3 рецепти · 2 майстри')
 alchemy.scripts.OnClick(alchemy)
@@ -152,8 +152,8 @@ assert(selectedProfession == 171, 'profession card did not open its profession')
 
 for i=2,13 do scope.records['Tester Realm'].list[i] = {id=171,rank=i,maximum=75} end
 OldKraken.Workshop:Show()
-assert(#workshopFrame.professionCards == 9 and rawget(workshopFrame, 'page') == nil)
-local fishing = workshopFrame.professionCards[9]
-fishing.scripts.OnClick(fishing)
-assert(selectedProfession == 356, 'profession cards changed when saved records increased')
+assert(#workshopFrame.professionCards == 6 and rawget(workshopFrame, 'page') == nil)
+local enchanting = workshopFrame.professionCards[6]
+enchanting.scripts.OnClick(enchanting)
+assert(selectedProfession == 333, 'profession cards changed when saved records increased')
 ''')
