@@ -869,7 +869,17 @@ local function reagentEntries(r)
             if integer(id,1,100000000) then
                 local amount=integer(slot.quantityRequired,1,10000) and slot.quantityRequired or 1
                 local getCount=type(C_Item)=='table' and C_Item.GetItemCount or GetItemCount
-                local countText=''; if type(getCount)=='function' then local got,value=pcall(getCount,id); if got and integer(value,0,10000000) then countText=' · у сумках: '..value end end
+                local countText=''
+                if type(getCount)=='function' then
+                    local gotBags,bags=pcall(getCount,id)
+                    if gotBags and integer(bags,0,10000000) then
+                        local gotTotal,total=pcall(getCount,id,true)
+                        local totalCount=(gotTotal and integer(total,0,10000000)) and total or bags
+                        local bank=math.max(0,totalCount-bags)
+                        local color=totalCount>=amount and '|cff69dc8c' or (totalCount>0 and '|cffffd36b' or '|cff9aa5b1')
+                        countText=bank>0 and (' · '..color..'є: '..bags..' (+'..bank..' банк)|r') or (' · '..color..'у сумках: '..bags..'|r')
+                    end
+                end
                 items[#items+1]={id=id,text=Recipes:ItemLabel(id)..' |cffffd36b×'..amount..'|r'..countText}
             end
         end
@@ -1057,15 +1067,28 @@ render=function()
         else row.entry=nil; row:UnlockHighlight(); row:Hide() end
     end
     local entry=selectedEntry; local r=entry and entry.record
-    frame.detailIcon:SetShown(r~=nil); frame.whisper:SetShown(r~=nil and entry.owner~=identity)
-    frame.order:SetShown(r~=nil and entry.owner~=identity and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false)
+    frame.detailIcon:SetShown(r~=nil)
     if r then
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(displayRecipeName(r))
         local masters=Recipes:FindMasters(r.item,r.recipe); local names={}
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
-        for i=1,math.min(#masters,8) do local m=masters[i]; names[#names+1]=playerLabel(m.name,classes)..' · '..statusLabel(m.name,online)..(GetServerTime()-m.seen>604800 and ' · |cffffb347застаріло|r' or '') end
-        frame.detailInfo:SetText(professionNames[r.profession]..'\nЗбережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..'\n'..(#names>0 and table.concat(names,'\n') or 'Немає даних')..(#masters>8 and '\n…' or '')..(entry.owner==identity and '\n\nЦе ваш рецепт. Оберіть рецепт іншого майстра, щоб створити замовлення.' or ''))
+        local showWhisper=entry.owner~=identity and (viewOwner~=nil or #masters<=1)
+        local showOrder=entry.owner~=identity and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false
+        frame.whisper:SetShown(showWhisper)
+        frame.order:SetShown(showOrder)
+        if showOrder then
+            frame.order:ClearAllPoints()
+            if frame.embedded then
+                frame.order:SetPoint('TOPLEFT',frame,'TOPLEFT',showWhisper and 658 or 514,-474)
+                frame.order:SetWidth(showWhisper and 226 or 370)
+            else
+                frame.order:SetPoint('TOPLEFT',frame,'TOPLEFT',showWhisper and 570 or 450,-410)
+                frame.order:SetWidth(showWhisper and 120 or 240)
+            end
+        end
+        for i=1,math.min(#masters,5) do local m=masters[i]; names[#names+1]=playerLabel(m.name,classes)..' · '..statusLabel(m.name,online)..(GetServerTime()-m.seen>604800 and ' · |cffffb347застаріло|r' or '') end
+        frame.detailInfo:SetText(professionNames[r.profession]..' · Збережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..'\n'..(#names>0 and table.concat(names,'\n') or 'Немає даних')..(#masters>5 and ('\n… та ще '..(#masters-5)) or '')..(entry.owner==identity and '\n\nЦе ваш рецепт. Оберіть рецепт іншого майстра, щоб створити замовлення.' or ''))
         local header,items=reagentEntries(r)
         frame.detailReagents:SetText(header)
         for i,row in ipairs(frame.reagentRows or {}) do
@@ -1074,6 +1097,7 @@ render=function()
             else row.itemID=nil; row:Hide() end
         end
     else
+        frame.whisper:Hide(); frame.order:Hide()
         if #list==0 and viewOwner then
             if countCachedMasterRecipes(viewOwner,professionContext)==0 then
                 frame.detailTitle:SetText('Рецепти не синхронізовані')
@@ -1303,6 +1327,10 @@ local function createWindow(parent)
         rows[i].icon=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].icon:SetSize(21,21); rows[i].icon:SetPoint('LEFT',rows[i],'LEFT',3,0)
         rows[i].name=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].name:SetPoint('TOPLEFT',rows[i],'TOPLEFT',29,-1); rows[i].name:SetWidth(370); rows[i].name:SetJustifyH('LEFT'); rows[i].name:SetWordWrap(false)
         rows[i].meta=rows[i]:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); rows[i].meta:SetPoint('BOTTOMLEFT',rows[i],'BOTTOMLEFT',29,1); rows[i].meta:SetWidth(370); rows[i].meta:SetJustifyH('LEFT'); rows[i].meta:SetWordWrap(false)
+        rows[i]:SetScript('OnEnter',function(self)
+            if tab~='masters' and self.entry and self.entry.record then showItemTooltip(self,self.entry.record.item,self.entry.record.recipe) end
+        end)
+        rows[i]:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
     end
     f.detailIcon=f:CreateTexture(nil,'ARTWORK'); f.detailIcon:SetSize(46,46); f.detailIcon:SetPoint('TOPLEFT',f,'TOPLEFT',450,-128)
     f.detailTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.detailTitle:SetPoint('TOPLEFT',f,'TOPLEFT',505,-131); f.detailTitle:SetWidth(220); f.detailTitle:SetJustifyH('LEFT'); f.detailTitle:SetWordWrap(true)
@@ -1331,6 +1359,15 @@ local function createWindow(parent)
         local name=tab=='masters' and selectedMaster and selectedMaster.name or (selectedEntry and selectedEntry.owner)
         if name and name~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(name) end
     end,nil,{rounded=true,height=34})
+    f.whisper:SetScript('OnEnter',function(self)
+        local name=tab=='masters' and selectedMaster and selectedMaster.name or (selectedEntry and selectedEntry.owner)
+        if GameTooltip and name and name~=identity then
+            GameTooltip:SetOwner(self,'ANCHOR_TOP')
+            GameTooltip:SetText('Шепнути: '..name)
+            GameTooltip:Show()
+        end
+    end)
+    f.whisper:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
     f.order=button(f,'Замовити',570,-410,120,function() if selectedEntry and OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:ShowRecipe(selectedEntry.record,selectedEntry.owner) end end,'primary',{rounded=true,height=34})
     f.masterRecipes=button(f,'Рецепти майстра',570,-410,160,function()
         if not selectedMaster then return end
