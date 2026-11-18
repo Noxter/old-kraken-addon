@@ -400,6 +400,8 @@ f.pending[offlineKey] = 'pending'
 f.pendingVersions[offlineKey] = 1001
 f.pendingRoles[offlineKey] = 'dps'
 f.pending[partyKey] = 'pending'
+local origClassColors = RAID_CLASS_COLORS
+RAID_CLASS_COLORS = {MAGE = {r = 0.2, g = 0.4, b = 0.8}}
 local crossKey = 'Cross Realm\\001cross-1'
 f.groups[crossKey] = {
     id='cross-1', owner='Cross Realm', title='Uldaman', category='dungeon', dungeon='uld',
@@ -414,11 +416,14 @@ local sawOffline, sawPending, sawCrossLabel = false, false, false
 for i = 1, 3 do
     if ui.visible[i].key == offlineKey then sawOffline = ui.rows[i].status.text == 'ОФЛАЙН' end
     if ui.visible[i].key == partyKey then sawPending = ui.rows[i].status.text == 'ОЧІКУЄ' end
-    if ui.visible[i].key == crossKey then sawCrossLabel = ui.rows[i].meta.text:find('(42)', 1, true) ~= nil end
+    if ui.visible[i].key == crossKey then
+        sawCrossLabel = ui.rows[i].meta.text:find('|cff3366ccCross Realm|r (42)', 1, true) ~= nil
+    end
 end
+RAID_CLASS_COLORS = origClassColors
 assert(sawOffline, 'offline owner application should show ОФЛАЙН')
 assert(sawPending, 'party owner in guild roster must remain online and show ОЧІКУЄ')
-assert(sawCrossLabel, 'playerLabel should resolve class/level across Name-Realm and Name Realm')
+assert(sawCrossLabel, 'playerLabel should resolve class color and level across Name-Realm and Name Realm')
 assert(ui.deleteButtons[1]:IsShown(), 'delete button should be shown on applications tab')
 assert(#scheduledTimers >= 1, 'offline prune timer should be scheduled')
 offlineNow = offlineNow + 301
