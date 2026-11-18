@@ -438,7 +438,7 @@ end
 local function addCached(query,filter,professionFilter)
     resultQuery=query
     resultSet={}
-    local limit=query:match('^prof:%d+$') and 5000 or 500
+    local limit=(query=='' or query:match('^prof:%d+$')) and 5000 or 500
     local found=0
     local job={}; searchJob=job
     scanCachedRecords(function(name,r)
@@ -1194,7 +1194,9 @@ local function createWindow(parent)
         if level==1 then
             for _,typeKey in ipairs(types) do
                 local value=typeKey; local info=UIDropDownMenu_CreateInfo()
-                info.text=RECIPE_TYPE_LABELS[value] or value; info.value=value; info.checked=selectedType==value; info.minWidth=menuWidth
+                info.text=RECIPE_TYPE_LABELS[value] or value; info.value=value
+                info.checked=selectedType==value or (value=='armor' and selectedType:sub(1,6)=='armor:')
+                info.minWidth=menuWidth
                 if value=='armor' then
                     local hasSlots=false
                     for _,slot in ipairs(ARMOR_SLOT_ORDER) do if presentSet[slot] then hasSlots=true; break end end
@@ -1219,6 +1221,30 @@ local function createWindow(parent)
         end
     end)
     UIDropDownMenu_SetText(f.typeFilter,typeFilterLabel('all'))
+    local typeToggle=_G['OldKrakenRecipeTypeFilterButton']
+    if typeToggle then
+        if type(typeToggle.RegisterForClicks)=='function' then typeToggle:RegisterForClicks('LeftButtonUp','RightButtonUp') end
+        local origTypeClick=type(typeToggle.GetScript)=='function' and typeToggle:GetScript('OnClick')
+        typeToggle:SetScript('OnClick',function(self,mouseButton,down)
+            if mouseButton=='RightButton' and selectedType~='all' then
+                selectedType='all'; offset=0; selectedEntry=nil
+                updateTypeFilterText()
+                if type(CloseDropDownMenus)=='function' then CloseDropDownMenus() end
+                render()
+                return
+            end
+            if type(origTypeClick)=='function' then origTypeClick(self,mouseButton,down) end
+        end)
+        typeToggle:SetScript('OnEnter',function(self)
+            if GameTooltip and selectedType~='all' then
+                GameTooltip:SetOwner(self,'ANCHOR_BOTTOMRIGHT')
+                GameTooltip:SetText('Активний фільтр: '..(RECIPE_TYPE_LABELS[selectedType] or selectedType))
+                GameTooltip:AddLine('Правий клік — скинути фільтр',0.85,0.85,0.85,true)
+                GameTooltip:Show()
+            end
+        end)
+        typeToggle:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+    end
     f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-104)
     for i=1,PAGE_SIZE do
         rows[i]=button(f,'',20,-125-(i-1)*26,410,function(self)
@@ -1240,6 +1266,12 @@ local function createWindow(parent)
     f.detailTitle=f:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.detailTitle:SetPoint('TOPLEFT',f,'TOPLEFT',505,-131); f.detailTitle:SetWidth(220); f.detailTitle:SetJustifyH('LEFT'); f.detailTitle:SetWordWrap(true)
     f.infoScroll=CreateFrame('ScrollFrame','OldKrakenWorkshopRecipesInfoScroll',f,'UIPanelScrollFrameTemplate'); f.infoScroll:SetPoint('TOPLEFT',f,'TOPLEFT',450,-184); f.infoScroll:SetSize(255,110)
     if OldKraken.UIStyle.ScrollBar then OldKraken.UIStyle.ScrollBar(f.infoScroll) end
+    local origInfoWheel=type(f.infoScroll.GetScript)=='function' and f.infoScroll:GetScript('OnMouseWheel')
+    f.infoScroll:SetScript('OnMouseWheel',function(self,delta)
+        if OldKraken.UIHub and OldKraken.UIHub.HandleScaleWheel and OldKraken.UIHub:HandleScaleWheel(delta) then return end
+        if type(origInfoWheel)=='function' then origInfoWheel(self,delta)
+        elseif type(ScrollFrameTemplate_OnMouseWheel)=='function' then ScrollFrameTemplate_OnMouseWheel(self,delta) end
+    end)
     f.infoContent=CreateFrame('Frame',nil,f.infoScroll); f.infoContent:SetSize(245,110); f.infoScroll:SetScrollChild(f.infoContent)
     f.detailInfo=f.infoContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.detailInfo:SetPoint('TOPLEFT'); f.detailInfo:SetWidth(245); f.detailInfo:SetJustifyH('LEFT'); f.detailInfo:SetJustifyV('TOP')
     f.detailReagents=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailReagents:SetPoint('TOPLEFT',f,'TOPLEFT',450,-302); f.detailReagents:SetWidth(275); f.detailReagents:SetJustifyH('LEFT'); f.detailReagents:SetJustifyV('TOP')

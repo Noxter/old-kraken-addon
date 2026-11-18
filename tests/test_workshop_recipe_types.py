@@ -68,6 +68,7 @@ def test_recipe_type_filter():
             end
         end
 
+        _G.OldKrakenRecipeTypeFilterButton = CreateFrame('Button')
         OldKraken.Workshop:Show()
         OldKraken.WorkshopRecipes:ShowProfession(171)
         drainTimers()
@@ -243,6 +244,7 @@ def test_armor_slots_and_submenu():
             end
         end
 
+        _G.OldKrakenRecipeTypeFilterButton = CreateFrame('Button')
         OldKraken.Workshop:Show()
         OldKraken.WorkshopRecipes:ShowProfession(164)
         drainTimers()
@@ -299,10 +301,23 @@ def test_armor_slots_and_submenu():
         assert(recipesView.count.text:find('Знайдено: 1 ', 1, true), 'armor:legs must match only pants')
 
         choices = {}
+        dd.dropdown(dd, 1)
+        for _, o in ipairs(choices) do
+            if o.value == 'armor' then assert(o.checked, 'level 1 Броня must be checked when an armor slot is active') else assert(not o.checked) end
+        end
+
+        choices = {}
         dd.dropdown(dd, 2, 'armor')
         for _, o in ipairs(choices) do
             if o.value == 'armor:legs' then assert(o.checked) else assert(not o.checked) end
         end
+
+        -- Right-clicking the dropdown button resets active filter back to all in one click.
+        local typeBtn = _G.OldKrakenRecipeTypeFilterButton
+        assert(typeBtn and typeBtn.scripts and typeBtn.scripts.OnClick)
+        typeBtn.scripts.OnClick(typeBtn, 'RightButton')
+        assert(dd.text == 'Усі типи', 'right-click must reset type filter to Усі типи')
+        assert(recipesView.count.text:find('Знайдено: 13 ', 1, true), 'right-click reset must restore full recipe count')
 
         -- Switching to MasterB Mon (who only has armor:head) must show only 'Уся броня' + 'Голова' in level 2 and reset filter.
         OldKraken.WorkshopRecipes:ShowMemberProfession('MasterB Mon', 164)
@@ -344,6 +359,7 @@ def test_global_getiteminfo_fallback():
             [8020] = {recipe = 8020, item = 5002, profession = 171, seen = GetServerTime(), name = 'Elixir A', product = 'Elixir A'},
             [8101] = {recipe = 8101, item = 5003, profession = 171, seen = GetServerTime(), name = 'Chest A', product = 'Chest A'},
         }
+        _G.OldKrakenRecipeTypeFilterButton = CreateFrame('Button')
         OldKraken.Workshop:Show()
         OldKraken.WorkshopRecipes:ShowProfession(171)
         while #timers > 0 do
@@ -385,6 +401,7 @@ def test_type_cache_invalidates_on_item_change():
             end
         end
 
+        _G.OldKrakenRecipeTypeFilterButton = CreateFrame('Button')
         OldKraken.Workshop:Show()
         OldKraken.WorkshopRecipes:ShowProfession(171)
         drainTimers()
@@ -461,6 +478,7 @@ def test_stale_cache_during_context_switch():
         end
 
         -- Test A: Master switch before scan completes must not expose previous master's armor slots.
+        _G.OldKrakenRecipeTypeFilterButton = CreateFrame('Button')
         OldKraken.Workshop:Show()
         OldKraken.WorkshopRecipes:ShowMemberProfession('Master1 Mon', 164)
         local dd = OldKrakenRecipeTypeFilter
