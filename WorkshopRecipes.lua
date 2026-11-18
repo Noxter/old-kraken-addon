@@ -14,6 +14,9 @@ local PAGE_SIZE=10
 local selectRecipe,selectedEntry,viewOwner
 local pickerProfession=0
 local professionContext, selectedMaster, tab, mastersOnline = nil, nil, 'recipes', false
+local selectedType, lastTypeContextKey = 'all', ''
+local typeCache, itemDataRevision, typeScanJob = {}, 0, nil
+local availableTypeCache = { rev = -1, itemRev = -1, key = '', list = {'all'}, set = {all = true} }
 local restoringView=false
 local resultQuery
 local tabStates={}
@@ -325,14 +328,18 @@ local function scan()
     if frame and frame:IsShown() then frame.status:SetText(scanStatus) end
     return true
 end
+local function getItemInfo(id)
+    if not id or id<=0 then return false end
+    local fn=(C_Item and type(C_Item.GetItemInfo)=='function' and C_Item.GetItemInfo) or (type(GetItemInfo)=='function' and GetItemInfo)
+    if not fn then return false end
+    return pcall(fn,id)
+end
 local function clientItemName(id)
     if not id or id<=0 then return nil end
     if C_Item and type(C_Item.GetItemNameByID)=='function' then
         local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and safeText(value,1,120) then return value end
     end
-    if type(GetItemInfo)=='function' then
-        local ok,value=pcall(GetItemInfo,id); if ok and safeText(value,1,120) then return value end
-    end
+    local ok,value=getItemInfo(id); if ok and safeText(value,1,120) then return value end
     return nil
 end
 local function clientSpellName(id)
@@ -367,8 +374,8 @@ matches=function(r,query)
     return lower(r.name):find(query,1,true)~=nil or lower(r.product):find(query,1,true)~=nil or lower(displayRecipeName(r)):find(query,1,true)~=nil
 end
 local function resolveProduct(r)
-    if validRecord(r) and r.product=='' and r.item>0 and type(GetItemInfo)=='function' then
-        local ok,name=pcall(GetItemInfo,r.item)
+    if validRecord(r) and r.product=='' and r.item>0 then
+        local ok,name=getItemInfo(r.item)
         if ok and safeText(name,1,120) then r.product=name end
     end
 end
@@ -670,16 +677,103 @@ local function isBindOnPickup(r)
     if id<=0 then return false end
     local cached=bopCache[id]
     if cached~=nil then return cached end
-    if type(GetItemInfo)=='function' then
-        local ok,_,_,_,_,_,_,_,_,_,_,_,_,_,bindType=pcall(GetItemInfo,id)
-        if ok and type(bindType)=='number' then
-            cached=bindType==1
-            bopCache[id]=cached
-            return cached
-        end
+    local ok,_,_,_,_,_,_,_,_,_,_,_,_,_,bindType=getItemInfo(id)
+    if ok and type(bindType)=='number' then
+        cached=bindType==1
+        bopCache[id]=cached
+        return cached
     end
     requestItemData(id)
     return false
+end
+local RECIPE_TYPE_LABELS={
+    all='Усі типи', armor='Броня', weapon='Зброя', bag='Сумки', trinket='Аксесуари',
+    potion='Зілля', elixir='Еліксири', flask='Фляги', enhancement='Покращення',
+    explosive='Вибухівка', device='Пристрої', reagent='Реагенти', other='Інше',
+}
+local RECIPE_TYPE_ORDER={'armor','weapon','bag','trinket','potion','elixir','flask','enhancement','explosive','device','reagent','other'}
+local EQUIP_LOC_TYPES={
+    INVTYPE_BAG='bag', INVTYPE_QUIVER='bag',
+    INVTYPE_TRINKET='trinket', INVTYPE_NECK='trinket', INVTYPE_FINGER='trinket',
+    INVTYPE_WEAPON='weapon', INVTYPE_2HWEAPON='weapon', INVTYPE_WEAPONMAINHAND='weapon',
+    INVTYPE_WEAPONOFFHAND='weapon', INVTYPE_RANGED='weapon', INVTYPE_THROWN='weapon',
+    INVTYPE_RANGEDRIGHT='weapon', INVTYPE_HOLDABLE='other',
+    INVTYPE_SHIELD='armor', INVTYPE_HEAD='armor', INVTYPE_SHOULDER='armor', INVTYPE_BODY='armor',
+    INVTYPE_CHEST='armor', INVTYPE_ROBE='armor', INVTYPE_WAIST='armor', INVTYPE_LEGS='armor',
+    INVTYPE_FEET='armor', INVTYPE_WRIST='armor', INVTYPE_HAND='armor', INVTYPE_CLOAK='armor',
+}
+local function classifyItemBySubType(itemType, itemSubType, classID)
+    local sub=lower((itemSubType or '')..' '..(itemType or ''))
+    if sub:find('flask',1,true) or sub:find('насто',1,true) or sub:find('фляг',1,true) then return 'flask' end
+    if sub:find('elixir',1,true) or sub:find('эликсир',1,true) or sub:find('еліксир',1,true) then return 'elixir' end
+    if sub:find('potion',1,true) or sub:find('зель',1,true) or sub:find('зілл',1,true) then return 'potion' end
+    if sub:find('enhancement',1,true) or sub:find('улучшен',1,true) or sub:find('покращ',1,true) then return 'enhancement' end
+    if sub:find('explosive',1,true) or sub:find('взрывчат',1,true) or sub:find('вибухів',1,true) then return 'explosive' end
+    if sub:find('device',1,true) or sub:find('устройств',1,true) or sub:find('пристро',1,true) then return 'device' end
+    if sub:find('bag',1,true) or sub:find('сумк',1,true) then return 'bag' end
+    if sub:find('projectile',1,true) or sub:find('боеприпас',1,true) or sub:find('weapon',1,true) or sub:find('оружи',1,true) or sub:find('збро',1,true) then return 'weapon' end
+    if sub:find('armor',1,true) or sub:find('доспех',1,true) or sub:find('брон',1,true) then return 'armor' end
+    if classID==7 or sub:find('tradeskill',1,true) or sub:find('trade goods',1,true) or sub:find('хозяйственные',1,true)
+        or sub:find('реагент',1,true) or sub:find('ремеслен',1,true)
+        or sub:find('parts',1,true) or sub:find('детал',1,true) or sub:find('elemental',1,true) or sub:find('стихи',1,true)
+        or sub:find('metal',1,true) or sub:find('метал',1,true) or sub:find('cloth',1,true) or sub:find('ткан',1,true)
+        or sub:find('leather',1,true) or sub:find('кож',1,true) or sub:find('herb',1,true) or sub:find('трав',1,true) then return 'reagent' end
+    return 'other'
+end
+local function classifyRecipe(r)
+    if type(r)~='table' then return 'other' end
+    local cacheKey=(r.profession or 0)..'\001'..(r.recipe or 0)..'\001'..(r.item or 0)
+    local cached=typeCache[cacheKey]
+    if cached then return cached end
+    if (r.item or 0)<=0 then
+        typeCache[cacheKey]='other'
+        return 'other'
+    end
+    local ok,itemName,_,_,_,_,itemType,itemSubType,_,equipLoc,_,_,classID=getItemInfo(r.item)
+    if ok and safeText(itemName,1,160) then
+        local cat=(equipLoc and EQUIP_LOC_TYPES[equipLoc]) or classifyItemBySubType(itemType,itemSubType,classID)
+        typeCache[cacheKey]=cat
+        return cat
+    end
+    requestItemData(r.item)
+    return 'other'
+end
+local function typeContextKey()
+    return (professionContext or 0)..'\001'..(viewOwner or '')..'\001'..(selectRecipe and pickerProfession or -1)
+end
+local function ensureAvailableTypes()
+    local contextKey=typeContextKey()
+    if availableTypeCache.rev==indexRevision and availableTypeCache.itemRev==itemDataRevision and availableTypeCache.key==contextKey then
+        return availableTypeCache.list, availableTypeCache.set
+    end
+    if typeScanJob and typeScanJob.rev==indexRevision and typeScanJob.itemRev==itemDataRevision and typeScanJob.key==contextKey then
+        return availableTypeCache.list, availableTypeCache.set
+    end
+    local job={rev=indexRevision,itemRev=itemDataRevision,key=contextKey}
+    typeScanJob=job
+    local present,workshop={},OldKraken.Workshop
+    local targetOwner,targetProf,targetSelect,targetPicker=viewOwner,professionContext,selectRecipe,pickerProfession
+    scanCachedRecords(function(owner,r)
+        if not targetOwner or owner==targetOwner then
+            local isSecondary=workshop and workshop.IsSecondaryProfession and workshop:IsSecondaryProfession(r and r.profession)
+            if validRecord(r) and (not targetProf or r.profession==targetProf)
+                and (targetProf or targetOwner or not isSecondary)
+                and (not targetSelect or ((targetPicker==0 or r.profession==targetPicker) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession)))
+                and not isBindOnPickup(r) then
+                present[classifyRecipe(r)]=true
+            end
+        end
+    end,function()
+        if typeScanJob~=job then return end
+        typeScanJob=nil
+        local list,set={'all'},{all=true}
+        for _,key in ipairs(RECIPE_TYPE_ORDER) do
+            if present[key] then list[#list+1]=key; set[key]=true end
+        end
+        availableTypeCache={rev=job.rev,itemRev=job.itemRev,key=job.key,list=list,set=set}
+        changed()
+    end,function() return typeScanJob==job end)
+    return availableTypeCache.list, availableTypeCache.set
 end
 local function recipeIcon(r)
     local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
@@ -696,8 +790,8 @@ function Recipes:ItemLabel(id)
     if C_Item and type(C_Item.GetItemNameByID)=='function' then
         local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and safeText(value,1,160) then name=value end
     end
-    if not name and type(GetItemInfo)=='function' then
-        local ok,value=pcall(GetItemInfo,id); if ok and safeText(value,1,160) then name=value end
+    if not name then
+        local ok,value=getItemInfo(id); if ok and safeText(value,1,160) then name=value end
     end
     local getIcon=C_Item and C_Item.GetItemIconByID or GetItemIcon
     if type(getIcon)=='function' then local ok,value=pcall(getIcon,id); if ok and (usable(value,'number') or usable(value,'string')) then icon=value end end
@@ -708,7 +802,9 @@ local itemEvents=CreateFrame('Frame')
 for _,event in ipairs({'GET_ITEM_INFO_RECEIVED','ITEM_DATA_LOAD_RESULT'}) do pcall(itemEvents.RegisterEvent,itemEvents,event) end
 itemEvents:SetScript('OnEvent',function(_,_,id,success)
     if pendingItems[id] and success~=false then
-        pendingItems[id]=nil; changed()
+        pendingItems[id]=nil
+        itemDataRevision=itemDataRevision+1
+        changed()
         OldKraken:Fire('WORKSHOP_ITEM_DATA_CHANGED')
     end
 end)
@@ -780,6 +876,26 @@ render=function()
     frame.masterRecipes:SetShown(mastersView and selectedMaster~=nil)
     frame.cancelPick:SetShown(selectRecipe~=nil)
     frame.pickProfession:SetShown(selectRecipe~=nil)
+    local showTypeFilter=not mastersView and (frame.embedded or not selectRecipe)
+    local ctxKey=typeContextKey()
+    if ctxKey~=lastTypeContextKey then
+        lastTypeContextKey=ctxKey
+        selectedType='all'
+    end
+    if frame.typeFilter then
+        frame.typeFilter:ClearAllPoints()
+        if frame.embedded then
+            frame.typeFilter:SetPoint('TOPLEFT',frame,'TOPLEFT',selectRecipe and 612 or 446,-61)
+        else
+            frame.typeFilter:SetPoint('TOPLEFT',frame,'TOPLEFT',439,-71)
+        end
+        frame.typeFilter:SetShown(showTypeFilter)
+        if showTypeFilter then
+            local _,presentTypes=ensureAvailableTypes()
+            if availableTypeCache.key==ctxKey and selectedType~='all' and not presentTypes[selectedType] then selectedType='all' end
+            UIDropDownMenu_SetText(frame.typeFilter,RECIPE_TYPE_LABELS[selectedType] or 'Усі типи')
+        end
+    end
     frame.onlineOnly:SetShown(mastersView and true or false)
     if mastersView then
         if frame.onlineOnly.SetActive then
@@ -855,6 +971,7 @@ render=function()
             and (professionContext or viewOwner or not isSecondary)
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
+            and (not showTypeFilter or selectedType=='all' or classifyRecipe(entry.record)==selectedType)
             and matchesFilter(entry.record,filter) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
@@ -1016,11 +1133,23 @@ local function createWindow(parent)
         table.sort(ids,function(a,b) if a==b then return false elseif a==0 then return true elseif b==0 then return false end; return professionNames[a]<professionNames[b] end)
         for _,id in ipairs(ids) do
             local value=id; local info=UIDropDownMenu_CreateInfo(); info.text=value==0 and 'Усі професії' or professionNames[value]; info.value=value; info.checked=pickerProfession==value
-            info.func=function() pickerProfession=value; offset=0; UIDropDownMenu_SetText(f.pickProfession,info.text); addCached('',textFilter(f.query:GetText()),pickerProfession); render() end
+            info.func=function() pickerProfession=value; selectedType='all'; offset=0; UIDropDownMenu_SetText(f.pickProfession,info.text); addCached('',textFilter(f.query:GetText()),pickerProfession); render() end
             UIDropDownMenu_AddButton(info,level)
         end
     end)
     f.pickProfession:Hide()
+    f.typeFilter=CreateFrame('Frame','OldKrakenRecipeTypeFilter',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f.typeFilter,{rounded=true})
+    f.typeFilter:SetPoint('TOPLEFT',f,'TOPLEFT',parent and 446 or 439,parent and -61 or -71); UIDropDownMenu_SetWidth(f.typeFilter,parent and 170 or 160)
+    UIDropDownMenu_Initialize(f.typeFilter,function(_,level)
+        local types=ensureAvailableTypes()
+        for _,typeKey in ipairs(types) do
+            local value=typeKey; local info=UIDropDownMenu_CreateInfo()
+            info.text=RECIPE_TYPE_LABELS[value] or value; info.value=value; info.checked=selectedType==value
+            info.func=function() selectedType=value; offset=0; selectedEntry=nil; UIDropDownMenu_SetText(f.typeFilter,info.text); render() end
+            UIDropDownMenu_AddButton(info,level)
+        end
+    end)
+    UIDropDownMenu_SetText(f.typeFilter,'Усі типи')
     f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-104)
     for i=1,PAGE_SIZE do
         rows[i]=button(f,'',20,-125-(i-1)*26,410,function(self)
@@ -1198,7 +1327,7 @@ function Recipes:Show(forceNavigation)
         self:CancelPicker()
         OldKraken.Workshop:Navigate('recipes',forceNavigation)
     elseif not frame then frame=createWindow() end
-    professionContext,selectedMaster,tab,viewOwner,selectRecipe=nil,nil,'recipes',nil,nil
+    professionContext,selectedMaster,tab,viewOwner,selectRecipe,selectedType=nil,nil,'recipes',nil,nil,'all'
     restoringView=true; frame.query:SetText(''); restoringView=false
     addCached('')
     frame:Show(); render()
@@ -1251,7 +1380,7 @@ function Recipes:ShowProfession(profession,forceNavigation)
         self:Show(); return
     end
     self:Show(true); if not active or not frame then return end
-    selectRecipe=nil; selectedEntry=nil; viewOwner=nil; professionContext=profession; selectedMaster=nil; tab='recipes'; mastersOnline=false
+    selectRecipe=nil; selectedEntry=nil; viewOwner=nil; professionContext=profession; selectedMaster=nil; tab='recipes'; mastersOnline=false; selectedType='all'
     if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     frame.query:SetText('')
     frame.status:SetText(professionNames[profession]..': збережені рецепти та відповіді онлайн-майстрів; список може бути неповним.')
@@ -1269,7 +1398,7 @@ end
 function Recipes:Choose(callback,profession)
     if type(callback)~='function' then return end
     self:Show(); if not active or not frame then return end
-    selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; resultQuery=nil; activeQuery=nil; offset=0
+    selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; resultQuery=nil; activeQuery=nil; offset=0; selectedType='all'
     pickerProfession=professionNames[profession] and profession or 0
     restoringView=true; frame.query:SetText(''); restoringView=false
     UIDropDownMenu_SetText(frame.pickProfession,pickerProfession==0 and 'Усі професії' or professionNames[pickerProfession])
