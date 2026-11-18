@@ -64,6 +64,18 @@ deactivateGroupFinder()
 assert(queued('WRPAGE') == 1, 'Group Finder teardown dropped queued Workshop Sync traffic')
 assert(queued('CEVENT') == 1, 'Group Finder teardown dropped queued Guild Events traffic')
 assert(queued('ANNOUNCE') == 0, 'Group Finder teardown must clear its own queued traffic')
+
+-- A cleared message must be sendable again: no stale deduplication entry may claim
+-- it is still in flight, and no pending transmission may outlive its queue entries.
+local deduplicated = comm.stats.deduplicated
+assert(comm:SendProtocol('ANNOUNCE', 'group announce'))
+assert(queued('ANNOUNCE') == 1, 'a cleared Group Finder message must not be blocked by deduplication')
+assert(comm.stats.deduplicated == deduplicated)
+for _, job in pairs(comm.pendingTransmissions) do
+    local present = false
+    for _, entry in ipairs(comm.queue) do if entry.job == job then present = true; break end end
+    assert(present, 'pending transmission left behind without queue entries')
+end
 ''')
 lua.execute(r'''
 local comm = OldKraken.Communication
