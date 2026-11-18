@@ -367,25 +367,58 @@ assert(guildEvents.opened == 'raid-key')
 assert(alertSoundCalls == 1)
 
 local offlineNow = 5000
+local origGetTime, origCTimer = GetTime, C_Timer
+local scheduledTimers = {}
+C_Timer = { After = function(delay, fn) scheduledTimers[#scheduledTimers + 1] = {delay=delay, fn=fn} end }
 function GetTime() return offlineNow end
-function GetNumGuildMembers() return 1 end
+function GetNumGuildMembers() return 2 end
 function GetGuildRosterInfo(i)
-    if i == 1 then return 'Offline Leader', 'Member', 1, 35, 'Warrior', 'Orgrimmar', '', '', false, false, 'WARRIOR' end
+    if i == 1 then return 'Offline Leader', 'Member', 1, 35, 'Warrior', 'Orgrimmar', '', '', false, false, 'WARRIOR'
+    elseif i == 2 then return 'Party Leader', 'Member', 1, 36, 'Priest', 'Orgrimmar', '', '', true, false, 'PRIEST' end
+end
+local origUnitName = UnitName
+function UnitName(unit)
+    if unit == 'party1' then return 'Party Leader' end
+    return origUnitName(unit)
 end
 local offlineKey = 'Offline Leader\\001off-1'
+local partyKey = 'Party Leader\\001party-1'
 f.groups[offlineKey] = {
     id='off-1', owner='Offline Leader', title='RFK', category='dungeon', dungeon='rfk',
     description='', role='tank', maxSize=5, minLevel=25, maxLevel=35,
     members={'Offline Leader'}, memberRoles={['Offline Leader']='tank'},
     revision=1, closed=false, seenAt=offlineNow,
 }
+f.groups[partyKey] = {
+    id='party-1', owner='Party Leader', title='SM', category='dungeon', dungeon='sm',
+    description='', role='healer', maxSize=5, minLevel=30, maxLevel=40,
+    members={'Party Leader'}, memberRoles={['Party Leader']='healer'},
+    revision=1, closed=false, seenAt=offlineNow,
+}
 f.pending[offlineKey] = 'pending'
+f.pendingVersions[offlineKey] = 1001
+f.pendingRoles[offlineKey] = 'dps'
+f.pending[partyKey] = 'pending'
 ui.tabBar.tabs.applications.scripts.OnClick()
-assert(#ui.visible == 1 and ui.rows[1].status.text == 'ОФЛАЙН', 'offline owner application should show ОФЛАЙН')
+assert(#ui.visible == 2)
+local sawOffline, sawPending = false, false
+for i = 1, 2 do
+    if ui.visible[i].key == offlineKey then sawOffline = ui.rows[i].status.text == 'ОФЛАЙН' end
+    if ui.visible[i].key == partyKey then sawPending = ui.rows[i].status.text == 'ОЧІКУЄ' end
+end
+assert(sawOffline, 'offline owner application should show ОФЛАЙН')
+assert(sawPending, 'party owner in guild roster must remain online and show ОЧІКУЄ')
 assert(ui.deleteButtons[1]:IsShown(), 'delete button should be shown on applications tab')
+assert(#scheduledTimers >= 1, 'offline prune timer should be scheduled')
 offlineNow = offlineNow + 301
-ui.tabBar.tabs.applications.scripts.OnClick()
-assert(f.pending[offlineKey] == nil and #ui.visible == 0, 'offline owner application should auto-prune after 300s')
+local pendingTimers = scheduledTimers; scheduledTimers = {}
+for _, t in ipairs(pendingTimers) do t.fn() end
+assert(f.pending[offlineKey] == nil and f.pendingVersions[offlineKey] == nil and f.pendingRoles[offlineKey] == nil,
+    'offline owner application and metadata should auto-prune via timer without manual UI click')
+assert(f.pending[partyKey] == 'pending', 'party owner application must not be pruned')
+UnitName = origUnitName
+GetTime = origGetTime
+C_Timer = origCTimer
 function GetNumGuildMembers() return 0 end
 function GetGuildRosterInfo() end
 ''')

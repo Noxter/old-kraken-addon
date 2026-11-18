@@ -71,7 +71,8 @@ local applicationBadges = {
 }
 
 local OFFLINE_APPLICATION_TTL = 300
-local people, guildRosterLoaded, ownerOfflineSince = {}, false, {}
+local people, guildRosterLoaded, ownerOfflineSince, offlinePruneTimerPending = {}, false, {}, false
+local refreshPeople
 local function isOwnerOnline(owner)
     if not guildRosterLoaded or not owner or owner == Finder.identity then return true end
     local rec = people[owner]
@@ -80,7 +81,7 @@ end
 local function pruneOfflineApplications()
     if not guildRosterLoaded then return end
     local now = type(GetTime) == 'function' and GetTime() or 0
-    local changed = false
+    local changed, nextDelay = false, nil
     for key in pairs(Finder.pending or {}) do
         local group = Finder.groups and Finder.groups[key]
         if group and group.owner ~= Finder.identity then
@@ -88,10 +89,15 @@ local function pruneOfflineApplications()
                 ownerOfflineSince[key] = nil
             else
                 ownerOfflineSince[key] = ownerOfflineSince[key] or now
-                if now - ownerOfflineSince[key] >= OFFLINE_APPLICATION_TTL then
+                local remaining = OFFLINE_APPLICATION_TTL - (now - ownerOfflineSince[key])
+                if remaining <= 0 then
                     Finder.pending[key] = nil
+                    if Finder.pendingVersions then Finder.pendingVersions[key] = nil end
+                    if Finder.pendingRoles then Finder.pendingRoles[key] = nil end
                     ownerOfflineSince[key] = nil
                     changed = true
+                elseif not nextDelay or remaining < nextDelay then
+                    nextDelay = remaining
                 end
             end
         else
@@ -101,9 +107,17 @@ local function pruneOfflineApplications()
     for key in pairs(ownerOfflineSince) do
         if not (Finder.pending and Finder.pending[key]) then ownerOfflineSince[key] = nil end
     end
+    if nextDelay and not offlinePruneTimerPending and C_Timer and type(C_Timer.After) == 'function' then
+        offlinePruneTimerPending = true
+        C_Timer.After(math.max(1, nextDelay), function()
+            offlinePruneTimerPending = false
+            refreshPeople()
+            pruneOfflineApplications()
+        end)
+    end
     if changed then Finder:Changed() end
 end
-local function refreshPeople()
+refreshPeople = function()
     local nextPeople, rosterCount = {}, 0
     if type(GetNumGuildMembers) == 'function' and type(GetGuildRosterInfo) == 'function' then
         local ok, count = pcall(GetNumGuildMembers)
@@ -135,7 +149,17 @@ local function refreshPeople()
                 if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(surname) or issecretvalue(class) or issecretvalue(level)) then return end
                 if type(name) ~= 'string' or name == '' then return end
                 if type(surname) == 'string' and surname ~= '' then name = name .. ' ' .. surname end
-                nextPeople[name] = {class=class, level=tonumber(level)}
+                local prev = nextPeople[name]
+                local isConnected = true
+                if type(UnitIsConnected) == 'function' then
+                    local ok, connected = pcall(UnitIsConnected, unit)
+                    if ok and connected ~= nil then isConnected = connected and true or false end
+                end
+                nextPeople[name] = {
+                    class = class or (prev and prev.class),
+                    level = tonumber(level) or (prev and prev.level),
+                    online = (prev and prev.online == true) or isConnected,
+                }
             end)
         end
     end
