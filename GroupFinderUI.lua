@@ -682,7 +682,9 @@ refresh=function()
     local pendingApplications = 0
     for key in pairs(Finder.pending or {}) do
         local group = Finder.groups and Finder.groups[key]
-        if group and isOwnerOnline(group.owner) then pendingApplications = pendingApplications + 1 end
+        -- Count every application except the ones whose owner is confirmed
+        -- offline; an unknown owner is not a reason to hide the application.
+        if group and not isOwnerOffline(group.owner) then pendingApplications = pendingApplications + 1 end
     end
     if window.tabBar and window.tabBar.SetBadge then
         window.tabBar:SetBadge('applications', pendingApplications)
@@ -752,7 +754,7 @@ refresh=function()
             b.meta:SetText(string.format('%s  ·  рівні %d–%d  ·  місць %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (' · резерв ' .. reserved) or ''))
             local badge = tab == 'applications' and applicationBadges[status]
             if badge then
-                local offline = not isOwnerOnline(g.owner)
+                local offline = isOwnerOffline(g.owner)
                 if b.statusPill and b.statusPill.SetKind then
                     local pillKind = offline and 'neutral' or (status == 'reject' and 'danger' or (status == 'closed' and 'neutral' or 'warning'))
                     b.statusPill:SetKind(pillKind)
