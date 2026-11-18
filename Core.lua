@@ -373,13 +373,92 @@ local function layoutDropdownText(dropdownFrame)
     if type(label.SetWordWrap) == 'function' then label:SetWordWrap(false) end
 end
 
-function OldKraken.UIStyle.StyleDropDownList(list)
+local function isOldKrakenMenuFrame(menu)
+    if type(menu) == 'string' then menu = _G[menu] end
+    return type(menu) == 'table' and menu.oldKrakenStyled == true
+end
+
+local function isOldKrakenDropdownOpen()
+    return isOldKrakenMenuFrame(UIDROPDOWNMENU_OPEN_MENU)
+end
+
+local function isOldKrakenButtonTarget()
+    if UIDROPDOWNMENU_OPEN_MENU ~= nil then
+        return isOldKrakenMenuFrame(UIDROPDOWNMENU_OPEN_MENU)
+    end
+    return isOldKrakenMenuFrame(UIDROPDOWNMENU_INIT_MENU)
+end
+
+local function restoreDropDownList(list)
     if not list or type(list) ~= 'table' then return end
+    if list.oldKrakenStrata and type(list.SetFrameStrata) == 'function' then
+        list:SetFrameStrata(list.oldKrakenStrata)
+        list.oldKrakenStrata = nil
+    end
+    if list.oldKrakenSavedAlphas then
+        local listName = type(list.GetName) == 'function' and list:GetName()
+        for _, suffix in ipairs({'Backdrop', 'MenuBackdrop'}) do
+            local saved = list.oldKrakenSavedAlphas[suffix]
+            if saved ~= nil then
+                local backdrop = list[suffix] or (listName and _G[listName .. suffix])
+                if backdrop and type(backdrop) == 'table' and type(backdrop.SetAlpha) == 'function' then
+                    backdrop:SetAlpha(saved)
+                end
+            end
+        end
+        list.oldKrakenSavedAlphas = nil
+    end
+    if list.oldKrakenSkinTextures then
+        for _, tex in ipairs(list.oldKrakenSkinTextures) do
+            if tex and tex.Hide then tex:Hide() end
+        end
+    end
+end
+
+local function attachDropDownListHooks(list)
+    if not list or type(list) ~= 'table' or type(list.HookScript) ~= 'function' then return end
+    if not list.oldKrakenShowHook then
+        list:HookScript('OnShow', function(self)
+            local pred = self.oldKrakenStylePredicate
+            if pred and not pred() then
+                restoreDropDownList(self)
+                return
+            end
+            if pred then
+                if not self.oldKrakenStrata and type(self.GetFrameStrata) == 'function' then
+                    self.oldKrakenStrata = self:GetFrameStrata()
+                end
+                if type(self.SetFrameStrata) == 'function' then self:SetFrameStrata('FULLSCREEN_DIALOG') end
+            end
+            OldKraken.UIStyle.StyleDropDownList(self, pred)
+        end)
+        list.oldKrakenShowHook = true
+    end
+    if not list.oldKrakenRestoreHook then
+        list:HookScript('OnHide', function(self)
+            restoreDropDownList(self)
+        end)
+        list.oldKrakenRestoreHook = true
+    end
+end
+
+function OldKraken.UIStyle.StyleDropDownList(list, predicate)
+    if not list or type(list) ~= 'table' then return end
+    if predicate ~= nil then list.oldKrakenStylePredicate = predicate end
+    local activePred = list.oldKrakenStylePredicate
+    if activePred and not activePred() then
+        restoreDropDownList(list)
+        return
+    end
     local colors = OldKraken.UIStyle.Colors
     local listName = type(list.GetName) == 'function' and list:GetName()
+    list.oldKrakenSavedAlphas = list.oldKrakenSavedAlphas or {}
     for _, suffix in ipairs({'Backdrop', 'MenuBackdrop'}) do
         local backdrop = list[suffix] or (listName and _G[listName .. suffix])
         if backdrop and type(backdrop) == 'table' and type(backdrop.SetAlpha) == 'function' then
+            if list.oldKrakenSavedAlphas[suffix] == nil and type(backdrop.GetAlpha) == 'function' then
+                list.oldKrakenSavedAlphas[suffix] = backdrop:GetAlpha()
+            end
             backdrop:SetAlpha(0)
         end
     end
@@ -413,43 +492,39 @@ function OldKraken.UIStyle.StyleDropDownList(list)
     for _, tex in ipairs(list.oldKrakenSkinTextures) do
         if tex and tex.Show then tex:Show() end
     end
-    local maxButtons = UIDROPDOWNMENU_MAXBUTTONS or 32
-    for i = 1, maxButtons do
-        local btnName = listName and (listName .. 'Button' .. i)
-        local normalText = btnName and _G[btnName .. 'NormalText']
-        if normalText and OldKraken.UIStyle.Font then
-            OldKraken.UIStyle.Font(normalText, 13)
-            if normalText.SetShadowColor then normalText:SetShadowColor(0, 0, 0, 0.9) end
-            if normalText.SetShadowOffset then normalText:SetShadowOffset(1, -1) end
+    if not activePred then
+        local maxButtons = UIDROPDOWNMENU_MAXBUTTONS or 32
+        for i = 1, maxButtons do
+            local btnName = listName and (listName .. 'Button' .. i)
+            local normalText = btnName and _G[btnName .. 'NormalText']
+            if normalText and OldKraken.UIStyle.Font then
+                OldKraken.UIStyle.Font(normalText, 13)
+                if normalText.SetShadowColor then normalText:SetShadowColor(0, 0, 0, 0.9) end
+                if normalText.SetShadowOffset then normalText:SetShadowOffset(1, -1) end
+            end
         end
     end
-    if not list.oldKrakenShowHook and type(list.HookScript) == 'function' then
-        list:HookScript('OnShow', function(self)
-            OldKraken.UIStyle.StyleDropDownList(self)
-        end)
-        list.oldKrakenShowHook = true
-    end
-    if not list.oldKrakenRestoreHook and type(list.HookScript) == 'function' then
-        list:HookScript('OnHide', function(self)
-            if self.oldKrakenStrata then
-                self:SetFrameStrata(self.oldKrakenStrata)
-                self.oldKrakenStrata = nil
+    attachDropDownListHooks(list)
+end
+
+local function ensureDropdownButtonHook()
+    if OldKraken.UIStyle.dropdownAddButtonHooked then return end
+    if type(hooksecurefunc) ~= 'function' or type(UIDropDownMenu_AddButton) ~= 'function' then return end
+    OldKraken.UIStyle.dropdownAddButtonHooked = true
+    hooksecurefunc('UIDropDownMenu_AddButton', function(info, level)
+        if not isOldKrakenButtonTarget() then return end
+        level = level or 1
+        local listFrame = _G['DropDownList' .. level]
+        if listFrame then
+            local count = listFrame.numButtons or 0
+            local normalText = _G['DropDownList' .. level .. 'Button' .. count .. 'NormalText']
+            if normalText and OldKraken.UIStyle.Font then
+                OldKraken.UIStyle.Font(normalText, 13)
+                if normalText.SetShadowColor then normalText:SetShadowColor(0, 0, 0, 0.9) end
+                if normalText.SetShadowOffset then normalText:SetShadowOffset(1, -1) end
             end
-            local selfName = type(self.GetName) == 'function' and self:GetName()
-            for _, suffix in ipairs({'Backdrop', 'MenuBackdrop'}) do
-                local backdrop = self[suffix] or (selfName and _G[selfName .. suffix])
-                if backdrop and type(backdrop) == 'table' and type(backdrop.SetAlpha) == 'function' then
-                    backdrop:SetAlpha(1)
-                end
-            end
-            if self.oldKrakenSkinTextures then
-                for _, tex in ipairs(self.oldKrakenSkinTextures) do
-                    if tex and tex.Hide then tex:Hide() end
-                end
-            end
-        end)
-        list.oldKrakenRestoreHook = true
-    end
+        end
+    end)
 end
 
 function OldKraken.UIStyle.Dropdown(frame, options)
@@ -457,6 +532,7 @@ function OldKraken.UIStyle.Dropdown(frame, options)
     local colors = OldKraken.UIStyle.Colors
     local name = frame:GetName()
     if not name then return end
+    frame.oldKrakenStyled = true
     if type(frame.SetHeight) == 'function' then frame:SetHeight(36) end
     for _, part in ipairs({'Left', 'Middle', 'Right'}) do
         local texture = _G[name .. part]
@@ -515,6 +591,7 @@ function OldKraken.UIStyle.Dropdown(frame, options)
             frame.oldKrakenBox = frame
         end
     end
+    ensureDropdownButtonHook()
     if not dropdownHooksInstalled and type(hooksecurefunc) == 'function' then
         dropdownHooksInstalled = true
         if type(UIDropDownMenu_SetWidth) == 'function' then
@@ -528,21 +605,6 @@ function OldKraken.UIStyle.Dropdown(frame, options)
         end
         if type(UIDropDownMenu_Initialize) == 'function' then
             hooksecurefunc('UIDropDownMenu_Initialize', function(dropdownFrame) layoutDropdownText(dropdownFrame) end)
-        end
-        if type(UIDropDownMenu_AddButton) == 'function' then
-            hooksecurefunc('UIDropDownMenu_AddButton', function(info, level)
-                level = level or 1
-                local listFrame = _G['DropDownList' .. level]
-                if listFrame then
-                    local count = listFrame.numButtons or 0
-                    local normalText = _G['DropDownList' .. level .. 'Button' .. count .. 'NormalText']
-                    if normalText and OldKraken.UIStyle.Font then
-                        OldKraken.UIStyle.Font(normalText, 13)
-                        if normalText.SetShadowColor then normalText:SetShadowColor(0, 0, 0, 0.9) end
-                        if normalText.SetShadowOffset then normalText:SetShadowOffset(1, -1) end
-                    end
-                end
-            end)
         end
     end
     local label = _G[name .. 'Text']
@@ -601,9 +663,17 @@ function OldKraken.UIStyle.Dropdown(frame, options)
         end
         frame.oldKrakenChevron = chevron
     end
+    local function ensureSecondaryDropDownHooks()
+        local list2 = _G.DropDownList2
+        if not list2 or type(list2) ~= 'table' or list2.oldKrakenShowHook then return end
+        list2.oldKrakenStylePredicate = isOldKrakenDropdownOpen
+        attachDropDownListHooks(list2)
+    end
+    ensureSecondaryDropDownHooks()
     if toggle and toggle.HookScript and not toggle.oldKrakenClickHook then
         toggle.oldKrakenClickHook = true
         toggle:HookScript('OnClick', function()
+            ensureSecondaryDropDownHooks()
             local list = _G.DropDownList1
             if not list or not list:IsShown() then return end
             OldKraken.UIStyle.StyleDropDownList(list)

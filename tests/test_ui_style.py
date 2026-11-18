@@ -19,7 +19,14 @@ function methods:SetHeight(value) self.height = value end
 function methods:SetWidth(value) self.width = value end
 function methods:SetColorTexture(...) self.color = {...} end
 function methods:SetAlpha(value) self.alpha = value end
+function methods:GetAlpha()
+    if self.alpha == nil then
+        return 1
+    end
+    return self.alpha
+end
 function methods:SetFrameStrata(value) self.strata = value end
+function methods:GetFrameStrata() return self.strata or 'MEDIUM' end
 function methods:SetToplevel(value) self.toplevel = value end
 function methods:SetTextColor(...) self.textColor = {...} end
 function methods:SetVertexColor(...) self.vertexColor = {...} end
@@ -32,6 +39,15 @@ function methods:GetName() return self.name end
 function methods:SetHighlightTexture(texture) self.highlightTexture = texture end
 function methods:RegisterEvent() end
 function methods:SetScript(name, callback) self.scripts[name] = callback end
+function methods:HookScript(name, callback)
+    self.hookCounts = self.hookCounts or {}
+    self.hookCounts[name] = (self.hookCounts[name] or 0) + 1
+    local prev = self.scripts[name]
+    self.scripts[name] = function(...)
+        if prev then prev(...) end
+        callback(...)
+    end
+end
 function methods:CreateTexture()
     local texture = setmetatable({scripts = {}}, {__index = methods})
     self.textures = self.textures or {}
@@ -57,6 +73,18 @@ function CreateFrame(_, name)
     if name then _G[name] = frame end
     return frame
 end
+hookSecureCounts = {}
+function hooksecurefunc(tblOrName, nameOrFn, fn)
+    if type(tblOrName) == 'string' then
+        hookSecureCounts[tblOrName] = (hookSecureCounts[tblOrName] or 0) + 1
+        local orig = _G[tblOrName]
+        _G[tblOrName] = function(...) local r = orig(...); nameOrFn(...); return r end
+    elseif type(tblOrName) == 'table' then
+        local orig = tblOrName[nameOrFn]
+        tblOrName[nameOrFn] = function(...) local r = orig and orig(...); fn(...); return r end
+    end
+end
+function UIDropDownMenu_AddButton() end
 function OldKraken:On() end
 ''')
 lua.execute((root / "Core.lua").read_text(encoding="utf-8"))
@@ -175,4 +203,153 @@ style.ApplySelection(card, true)
 assert(card.isSelected and card.selFill.color[1] == 0.102 and card.selEdges[1].color[1] == 0.478)
 style.ApplySelection(card, false)
 assert(not card.isSelected and card.selFill.color[1] == colors.panel[1])
+
+-- Explicit GetAlpha mock assertions (unset -> 1, 0.85, 0.6, 0).
+local alphaProbe = CreateFrame()
+assert(alphaProbe:GetAlpha() == 1)
+alphaProbe:SetAlpha(0.85); assert(alphaProbe:GetAlpha() == 0.85)
+alphaProbe:SetAlpha(0.6); assert(alphaProbe:GetAlpha() == 0.6)
+alphaProbe:SetAlpha(0); assert(alphaProbe:GetAlpha() == 0)
+
+-- DropDownList2 lifecycle & third-party isolation tests (Scenarios A-F).
+local list1 = CreateFrame('Frame', 'DropDownList1')
+list1:SetFrameStrata('DIALOG')
+_G.DropDownList1Backdrop = CreateFrame(); _G.DropDownList1Backdrop:SetAlpha(1)
+_G.DropDownList1MenuBackdrop = CreateFrame(); _G.DropDownList1MenuBackdrop:SetAlpha(1)
+
+local list2 = CreateFrame('Frame', 'DropDownList2')
+list2:SetFrameStrata('MEDIUM')
+list2.numButtons = 1
+local bd2 = CreateFrame(); bd2:SetAlpha(0.85)
+local mbd2 = CreateFrame(); mbd2:SetAlpha(0.6)
+_G.DropDownList2Backdrop = bd2
+_G.DropDownList2MenuBackdrop = mbd2
+local list2BtnText = CreateFrame()
+_G.DropDownList2Button1NormalText = list2BtnText
+
+local okDd = CreateFrame('Frame', 'OldKrakenTestSubmenuDropdown')
+local okToggle = CreateFrame()
+_G.OldKrakenTestSubmenuDropdownText = CreateFrame()
+_G.OldKrakenTestSubmenuDropdownLeft = CreateFrame()
+_G.OldKrakenTestSubmenuDropdownButton = okToggle
+style.Dropdown(okDd, {rounded = true})
+style.Dropdown(okDd, {rounded = true})
+assert(okDd.oldKrakenStyled == true)
+assert(style.dropdownAddButtonHooked == true)
+assert(hookSecureCounts.UIDropDownMenu_AddButton == 1, 'UIDropDownMenu_AddButton hook must be registered exactly once across multiple Dropdown() calls')
+assert(list2.hookCounts and list2.hookCounts.OnShow == 1 and list2.hookCounts.OnHide == 1)
+
+local foreignDd = CreateFrame('Frame', 'ThirdPartyAddonDropdown')
+
+-- Scenario C (before any Old Kraken open): third-party dropdown opens DropDownList2 -> untouched.
+UIDROPDOWNMENU_OPEN_MENU = foreignDd
+list2:Show()
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'MEDIUM', 'foreign dropdown must not elevate DropDownList2 strata')
+assert(bd2:GetAlpha() == 0.85 and mbd2:GetAlpha() == 0.6, 'foreign dropdown must keep original backdrop alphas')
+assert(not list2.oldKrakenSkinTextures, 'foreign dropdown must not create Old Kraken textures')
+UIDropDownMenu_AddButton({}, 2)
+assert(list2BtnText.font == nil, 'UIDropDownMenu_AddButton hook must not alter foreign dropdown fonts')
+list2:Hide()
+list2.scripts.OnHide(list2)
+
+-- Scenario A: Old Kraken opens DropDownList2 -> styled with opaque panel, buttonEdge, FULLSCREEN_DIALOG.
+UIDROPDOWNMENU_OPEN_MENU = okDd
+list2:Show()
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'FULLSCREEN_DIALOG')
+assert(bd2:GetAlpha() == 0 and mbd2:GetAlpha() == 0)
+assert(list2.oldKrakenSkinTextures and #list2.oldKrakenSkinTextures == 5)
+local fill = list2.oldKrakenSkinTextures[1]
+assert(fill.color[1] == colors.panel[1] and fill.color[2] == colors.panel[2] and fill.color[3] == colors.panel[3] and fill.color[4] == 0.98)
+assert(list2.oldKrakenSkinTextures[2].color[1] == colors.buttonEdge[1])
+assert(fill:IsShown())
+UIDropDownMenu_AddButton({}, 2)
+assert(list2BtnText.font and list2BtnText.font[2] == 13, 'Old Kraken dropdown must style level 2 button font')
+
+-- Scenario B: OnHide restores original FrameStrata, exact original alphas (0.85 / 0.6), and hides skin textures.
+list2:Hide()
+list2.scripts.OnHide(list2)
+assert(list2:GetFrameStrata() == 'MEDIUM')
+assert(bd2:GetAlpha() == 0.85 and mbd2:GetAlpha() == 0.6)
+for _, tex in ipairs(list2.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+
+-- Scenario D: After Old Kraken closes, third-party opens DropDownList2 -> must not inherit Old Kraken style.
+UIDROPDOWNMENU_OPEN_MENU = foreignDd
+list2:Show()
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'MEDIUM')
+assert(bd2:GetAlpha() == 0.85 and mbd2:GetAlpha() == 0.6)
+for _, tex in ipairs(list2.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+list2:Hide()
+list2.scripts.OnHide(list2)
+
+-- Scenario E: Repeated Old Kraken open/close cycles do not duplicate hooks or textures.
+for _ = 1, 3 do
+    UIDROPDOWNMENU_OPEN_MENU = okDd
+    okToggle.scripts.OnClick(okToggle)
+    list2:Show()
+    list2.scripts.OnShow(list2)
+    assert(list2:GetFrameStrata() == 'FULLSCREEN_DIALOG')
+    assert(#list2.textures == 5 and #list2.oldKrakenSkinTextures == 5)
+    assert(list2.hookCounts.OnShow == 1 and list2.hookCounts.OnHide == 1)
+    list2:Hide()
+    list2.scripts.OnHide(list2)
+    assert(list2:GetFrameStrata() == 'MEDIUM')
+    assert(bd2:GetAlpha() == 0.85 and mbd2:GetAlpha() == 0.6)
+    for _, tex in ipairs(list2.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+end
+
+-- Scenario F: Mid-flight owner change before OnShow -> restores non-styled state.
+UIDROPDOWNMENU_OPEN_MENU = okDd
+list2:Show()
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'FULLSCREEN_DIALOG')
+UIDROPDOWNMENU_OPEN_MENU = foreignDd
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'MEDIUM')
+assert(bd2:GetAlpha() == 0.85 and mbd2:GetAlpha() == 0.6)
+for _, tex in ipairs(list2.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+
+-- Scenario G: Exact restoration of alpha == 0 on OnHide.
+bd2:SetAlpha(0)
+UIDROPDOWNMENU_OPEN_MENU = okDd
+list2:Show()
+list2.scripts.OnShow(list2)
+assert(bd2:GetAlpha() == 0 and mbd2:GetAlpha() == 0)
+list2:Hide()
+list2.scripts.OnHide(list2)
+assert(bd2:GetAlpha() == 0 and mbd2:GetAlpha() == 0.6, 'alpha == 0 must be restored exactly as 0')
+bd2:SetAlpha(0.85)
+
+-- Scenario H: Stale UIDROPDOWNMENU_INIT_MENU vs UIDROPDOWNMENU_OPEN_MENU + string-named menu support.
+UIDROPDOWNMENU_OPEN_MENU = nil
+UIDROPDOWNMENU_INIT_MENU = okDd
+list2:Show()
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'MEDIUM', 'DropDownList2:OnShow must ignore stale INIT_MENU when OPEN_MENU is nil')
+assert(bd2:GetAlpha() == 0.85 and mbd2:GetAlpha() == 0.6)
+for _, tex in ipairs(list2.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+
+list2BtnText.font = nil
+UIDROPDOWNMENU_OPEN_MENU = nil
+UIDROPDOWNMENU_INIT_MENU = okDd
+UIDropDownMenu_AddButton({}, 2)
+assert(list2BtnText.font and list2BtnText.font[2] == 13, 'UIDropDownMenu_AddButton must style font via INIT_MENU when OPEN_MENU is nil')
+
+list2BtnText.font = nil
+UIDROPDOWNMENU_OPEN_MENU = foreignDd
+UIDROPDOWNMENU_INIT_MENU = okDd
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'MEDIUM')
+UIDropDownMenu_AddButton({}, 2)
+assert(list2BtnText.font == nil, 'UIDropDownMenu_AddButton must prioritize foreign OPEN_MENU over stale INIT_MENU')
+
+UIDROPDOWNMENU_OPEN_MENU = 'OldKrakenTestSubmenuDropdown'
+UIDROPDOWNMENU_INIT_MENU = nil
+list2.scripts.OnShow(list2)
+assert(list2:GetFrameStrata() == 'FULLSCREEN_DIALOG', 'string-named Old Kraken OPEN_MENU must be recognized')
+list2:Hide()
+list2.scripts.OnHide(list2)
+assert(list2:GetFrameStrata() == 'MEDIUM')
 ''')
