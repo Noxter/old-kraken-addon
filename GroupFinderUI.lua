@@ -276,6 +276,103 @@ local function dropdown(parent, x, y, width, options, selectedValue, onSelect, s
     return frame
 end
 
+local function availableRolesForContext(targetCategory)
+    local out = {}
+    local source = targetCategory == 'dungeon' and {'tank', 'healer', 'dps'} or roles
+    for _, value in ipairs(source) do
+        if Finder:CanPerformRole(Finder.identity, value) then out[#out + 1] = value end
+    end
+    return out
+end
+
+local function styleRoleSegment(b, active)
+    local colors = OldKraken.UIStyle and OldKraken.UIStyle.Colors
+    if not colors or type(b.fillParts) ~= 'table' then return end
+    local fill = active and colors.primaryButton or colors.button
+    local edge = active and colors.primaryButtonEdge or colors.buttonEdge
+    if fill then for _, t in ipairs(b.fillParts) do t:SetVertexColor(fill[1], fill[2], fill[3], fill[4] or 1); t.color = fill end end
+    if edge then for _, t in ipairs(b.ringParts or {}) do t:SetVertexColor(edge[1], edge[2], edge[3], edge[4] or 1); t.color = edge end end
+end
+
+local function createRoleSelector(parent, x, y, width)
+    local selector = CreateFrame('Frame', nil, parent)
+    selector:SetSize(width, 28)
+    selector:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y)
+    selector.buttons = {}
+    selector.allowedRoles = {}
+    selector.mode = 'none'
+    selector.selectedRole = ''
+    for i = 1, 4 do
+        local b = CreateFrame('Button', nil, selector, 'UIPanelButtonTemplate')
+        OldKraken.UIStyle.Button(b, nil, {rounded = true})
+        b:SetSize(69, 28)
+        b:SetScript('OnClick', function(self)
+            if not self.role or not Finder:CanPerformRole(Finder.identity, self.role) then return end
+            role = self.role
+            selector:Update(selector.currentCategory)
+        end)
+        b:Hide()
+        selector.buttons[i] = b
+    end
+    local badge = CreateFrame('Frame', nil, selector)
+    OldKraken.UIStyle.Panel(badge, {rounded = true})
+    badge:SetSize(width, 28)
+    badge:SetPoint('TOPLEFT', selector, 'TOPLEFT', 0, 0)
+    badge.text = badge:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(badge.text, 13) end
+    badge.text:SetPoint('LEFT', badge, 'LEFT', 10, 0)
+    badge.text:SetJustifyH('LEFT')
+    badge:Hide()
+    selector.badge = badge
+    function selector:Update(targetCategory)
+        self.currentCategory = targetCategory
+        local allowed = availableRolesForContext(targetCategory)
+        self.allowedRoles = allowed
+        local valid = false
+        for _, value in ipairs(allowed) do if value == role then valid = true; break end end
+        if not valid or not Finder:CanPerformRole(Finder.identity, role) then
+            local preferred = Finder:PreferredRole()
+            local prefValid = false
+            for _, value in ipairs(allowed) do if value == preferred then prefValid = true; break end end
+            role = prefValid and preferred or (allowed[1] or '')
+        end
+        self.selectedRole = role
+        if #allowed >= 2 then
+            self.mode = 'buttons'
+            self.badge:Hide()
+            local gap = 6
+            local btnW = math.floor((width - gap * (#allowed - 1)) / #allowed)
+            for i = 1, 4 do
+                local b = self.buttons[i]
+                local r = allowed[i]
+                if r then
+                    b.role = r
+                    b:SetSize(btnW, 28)
+                    b:ClearAllPoints()
+                    b:SetPoint('TOPLEFT', self, 'TOPLEFT', (i - 1) * (btnW + gap), 0)
+                    b:SetText(roleChoiceLabel(r))
+                    styleRoleSegment(b, r == role)
+                    b:Show()
+                else
+                    b.role = nil
+                    b:Hide()
+                end
+            end
+        elseif #allowed == 1 then
+            self.mode = 'badge'
+            for i = 1, 4 do self.buttons[i].role = nil; self.buttons[i]:Hide() end
+            self.badge.text:SetText(roleChoiceLabel(allowed[1]))
+            self.badge:Show()
+        else
+            self.mode = 'none'
+            for i = 1, 4 do self.buttons[i].role = nil; self.buttons[i]:Hide() end
+            self.badge.text:SetText('|cff9aa5b1Немає доступної ролі|r')
+            self.badge:Show()
+        end
+    end
+    return selector
+end
+
 local function choices(values, labels, first)
     local out = {}
     if first then out[#out + 1] = first end
@@ -635,7 +732,8 @@ refresh=function()
     window.detailsScroll:ClearAllPoints()
     window.detailsScroll:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, contentTop - 17)
     window.detailsScroll:SetHeight(compactMine and 362 or 286)
-    if not Finder:CanPerformRole(Finder.identity,role) then role=Finder:PreferredRole(); UIDropDownMenu_SetText(window.roleButton, roleChoiceLabel(role)) end
+    local roleCategory = tab == 'create' and category or (selected and Finder.groups[selected] and Finder.groups[selected].category or category)
+    if window.roleButton and window.roleButton.Update then window.roleButton:Update(roleCategory) end
     local alertsOn = Finder:GroupAlertsEnabled()
     window.alertButton:SetText(alertsOn and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
     if window.alertDot then
@@ -1098,11 +1196,10 @@ refresh=function()
     if window.reopenButton then window.reopenButton:SetShown(canReopen and true or false) end
     UpdateReannounceButton(window.bumpButton)
     window.roleLabel:ClearAllPoints(); window.roleLabel:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -484)
-    window.roleButton:ClearAllPoints(); window.roleButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 571, -502)
-    window.roleButton:SetWidth(328)
-    UIDropDownMenu_SetWidth(window.roleButton, 262)
+    window.roleButton:ClearAllPoints(); window.roleButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -502)
     window.roleButton:SetShown(canApply and true or false)
     window.roleLabel:SetShown(canApply and true or false)
+    if window.applyButton.SetEnabled then window.applyButton:SetEnabled(not canApply or (role ~= '' and Finder:CanPerformRole(Finder.identity, role))) end
     local requestCount, haveOwned = 0, false
     for _, group in pairs(Finder.groups or {}) do
         if group.owner == Finder.identity and not group.closed and not group.hidden then haveOwned = true; break end
@@ -1568,23 +1665,14 @@ local function createWindow(parent)
             end
             if category == 'dungeon' then
                 f.maxBox:SetText('5')
-                if role == 'flex' or role == '' then role='dps'; UIDropDownMenu_SetText(f.roleButton, roleChoiceLabel(role)) end
+                if role == 'flex' or role == '' then role='dps' end
             end
             refresh()
         end)
     f.categoryLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText('Категорія')
-    f.roleButton = dropdown(f, 587, -502, 296, function()
-        local allowed={}
-        for _,value in ipairs(category == 'dungeon' and {'tank','healer','dps'} or roles) do
-            if Finder:CanPerformRole(Finder.identity,value) then
-                allowed[#allowed+1] = {value = value, label = roleChoiceLabel(value)}
-            end
-        end
-        return allowed
-    end,
-        function() return role end, function(value) role=value; UIDropDownMenu_SetText(f.roleButton, roleChoiceLabel(value)) end)
-    UIDropDownMenu_SetText(f.roleButton, roleChoiceLabel(role))
+    f.roleButton = createRoleSelector(f, 587, -502, 296)
+    f.roleButton:Update(category)
     f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.roleLabel, 13, true) end
     local roleLabelMuted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
@@ -1880,6 +1968,10 @@ local function createWindow(parent)
     options:Hide(); footer:Hide()
     f.applyButton = button(f, 'Подати заявку', 587, -550, 296, function()
         local g=selected and Finder.groups[selected]
+        if role == '' or not Finder:CanPerformRole(Finder.identity, role) then
+            print('Old Kraken: оберіть доступну роль для подачі заявки.')
+            return
+        end
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
         elseif g then print('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.') end
     end, 40, 'primary')

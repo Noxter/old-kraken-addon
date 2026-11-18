@@ -432,6 +432,35 @@ for _, t in ipairs(pendingTimers) do t.fn() end
 assert(f.pending[offlineKey] == nil and f.pendingVersions[offlineKey] == nil and f.pendingRoles[offlineKey] == nil,
     'offline owner application and metadata should auto-prune via timer without manual UI click')
 assert(f.pending[partyKey] == 'pending', 'party owner application must not be pruned')
+-- Segmented role selector smoke checks: visibility, button count, active role, dropdown filters, creationRoles.
+local origRoles = UnitGetAvailableRoles
+function UnitGetAvailableRoles(unit) if unit == 'player' then return true, true, true end end
+ui.tabBar.tabs.all.scripts.OnClick()
+ui.searchFilter:SetText('Uldaman')
+ui.searchFilter.scripts.OnTextChanged()
+ui.rows[1].scripts.OnClick()
+assert(ui.roleButton and ui.roleButton.buttons and ui.roleButton.badge)
+assert(not ui.roleButton:IsShown(), 'pending application cannot apply so role selector is hidden')
+f.pending[crossKey] = nil
+ui.tabBar.tabs.all.scripts.OnClick()
+ui.searchFilter:SetText('Uldaman')
+ui.searchFilter.scripts.OnTextChanged()
+ui.rows[1].scripts.OnClick()
+assert(ui.roleButton:IsShown() and ui.roleButton.mode == 'buttons' and #ui.roleButton.allowedRoles == 3)
+assert(ui.roleButton.buttons[1]:IsShown() and ui.roleButton.buttons[2]:IsShown() and ui.roleButton.buttons[3]:IsShown() and not ui.roleButton.buttons[4]:IsShown())
+ui.roleButton.buttons[1].scripts.OnClick(ui.roleButton.buttons[1])
+assert(ui.roleButton.selectedRole == 'tank')
+ui.searchFilter:SetText('')
+ui.searchFilter.scripts.OnTextChanged()
+selectDropdown(ui.categoryFilter, 'dungeon')
+selectDropdown(ui.roleFilter, 'tank')
+selectDropdown(ui.roleFilter, '')
+selectDropdown(ui.categoryFilter, 'all')
+ui.tabBar.tabs.create.scripts.OnClick()
+assert(not ui.roleButton:IsShown() and #ui.creationRoles == 3 and ui.creationRoles[1].role == 'tank')
+ui.tabBar.tabs.all.scripts.OnClick()
+UnitGetAvailableRoles = origRoles
+
 UnitName = origUnitName
 GetTime = origGetTime
 C_Timer = origCTimer
