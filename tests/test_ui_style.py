@@ -214,8 +214,13 @@ alphaProbe:SetAlpha(0); assert(alphaProbe:GetAlpha() == 0)
 -- DropDownList2 lifecycle & third-party isolation tests (Scenarios A-F).
 local list1 = CreateFrame('Frame', 'DropDownList1')
 list1:SetFrameStrata('DIALOG')
-_G.DropDownList1Backdrop = CreateFrame(); _G.DropDownList1Backdrop:SetAlpha(1)
-_G.DropDownList1MenuBackdrop = CreateFrame(); _G.DropDownList1MenuBackdrop:SetAlpha(1)
+list1.numButtons = 1
+local bd1 = CreateFrame(); bd1:SetAlpha(0.75)
+local mbd1 = CreateFrame(); mbd1:SetAlpha(0.5)
+_G.DropDownList1Backdrop = bd1
+_G.DropDownList1MenuBackdrop = mbd1
+local list1BtnText = CreateFrame()
+_G.DropDownList1Button1NormalText = list1BtnText
 
 local list2 = CreateFrame('Frame', 'DropDownList2')
 list2:SetFrameStrata('MEDIUM')
@@ -352,4 +357,66 @@ assert(list2:GetFrameStrata() == 'FULLSCREEN_DIALOG', 'string-named Old Kraken O
 list2:Hide()
 list2.scripts.OnHide(list2)
 assert(list2:GetFrameStrata() == 'MEDIUM')
+
+-- DropDownList1 isolation & lifecycle tests (before, during, after Old Kraken, alpha=0, OPEN_MENU vs INIT_MENU).
+UIDROPDOWNMENU_OPEN_MENU = foreignDd
+UIDROPDOWNMENU_INIT_MENU = nil
+list1:Show()
+if list1.scripts.OnShow then list1.scripts.OnShow(list1) end
+assert(list1:GetFrameStrata() == 'DIALOG' and bd1:GetAlpha() == 0.75 and mbd1:GetAlpha() == 0.5)
+assert(not list1.oldKrakenSkinTextures)
+UIDropDownMenu_AddButton({}, 1)
+assert(list1BtnText.font == nil, 'foreign DropDownList1 must not receive Old Kraken button font')
+list1:Hide()
+if list1.scripts.OnHide then list1.scripts.OnHide(list1) end
+
+for _ = 1, 3 do
+    UIDROPDOWNMENU_OPEN_MENU = okDd
+    list1:Show()
+    okToggle.scripts.OnClick(okToggle)
+    list1.scripts.OnShow(list1)
+    assert(list1:GetFrameStrata() == 'FULLSCREEN_DIALOG' and bd1:GetAlpha() == 0 and mbd1:GetAlpha() == 0)
+    assert(#list1.textures == 5 and #list1.oldKrakenSkinTextures == 5)
+    assert(list1.hookCounts.OnShow == 1 and list1.hookCounts.OnHide == 1)
+    UIDropDownMenu_AddButton({}, 1)
+    assert(list1BtnText.font and list1BtnText.font[2] == 13)
+    list1:Hide()
+    list1.scripts.OnHide(list1)
+    assert(list1:GetFrameStrata() == 'DIALOG' and bd1:GetAlpha() == 0.75 and mbd1:GetAlpha() == 0.5)
+    for _, tex in ipairs(list1.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+end
+
+-- Third-party dropdown opens DropDownList1 AFTER Old Kraken -> must NOT be styled.
+list1BtnText.font = nil
+UIDROPDOWNMENU_OPEN_MENU = foreignDd
+UIDROPDOWNMENU_INIT_MENU = okDd
+list1:Show()
+list1.scripts.OnShow(list1)
+assert(list1:GetFrameStrata() == 'DIALOG', 'foreign DropDownList1 after Old Kraken must stay DIALOG')
+assert(bd1:GetAlpha() == 0.75 and mbd1:GetAlpha() == 0.5)
+for _, tex in ipairs(list1.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+UIDropDownMenu_AddButton({}, 1)
+assert(list1BtnText.font == nil, 'foreign DropDownList1 must not get Old Kraken font even with stale INIT_MENU')
+list1:Hide()
+list1.scripts.OnHide(list1)
+
+-- DropDownList1 ignores stale INIT_MENU when OPEN_MENU is nil.
+UIDROPDOWNMENU_OPEN_MENU = nil
+UIDROPDOWNMENU_INIT_MENU = okDd
+list1:Show()
+list1.scripts.OnShow(list1)
+assert(list1:GetFrameStrata() == 'DIALOG' and bd1:GetAlpha() == 0.75 and mbd1:GetAlpha() == 0.5)
+for _, tex in ipairs(list1.oldKrakenSkinTextures) do assert(not tex:IsShown()) end
+list1:Hide()
+
+-- DropDownList1 exact restoration of alpha == 0.
+bd1:SetAlpha(0)
+UIDROPDOWNMENU_OPEN_MENU = okDd
+list1:Show()
+list1.scripts.OnShow(list1)
+assert(bd1:GetAlpha() == 0 and mbd1:GetAlpha() == 0)
+list1:Hide()
+list1.scripts.OnHide(list1)
+assert(bd1:GetAlpha() == 0 and mbd1:GetAlpha() == 0.5, 'DropDownList1 alpha == 0 must be restored as 0')
+bd1:SetAlpha(0.75)
 ''')

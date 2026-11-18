@@ -11,7 +11,7 @@ local activeQuery,sequence,lastQuery,lastIncoming=nil,0,-60,{}
 local forgetChecks,lastScanProfession={},nil
 local frame,rows,offset,resultSet=nil,{},0,{}
 local PAGE_SIZE=10
-local selectRecipe,selectedEntry,viewOwner
+local selectRecipe,selectedEntry,selectedRecipeMaster,viewOwner
 local pickerProfession=0
 local professionContext, selectedMaster, tab, mastersOnline, temporaryProfessionContext = nil, nil, 'recipes', false, false
 local selectedType, lastTypeContextKey = 'all', ''
@@ -887,12 +887,22 @@ local function reagentEntries(r)
     if #items==0 then return 'Матеріали: гра не надала даних для цього рецепта.',{} end
     return 'Матеріали:',items
 end
+local function hideDetailMasterRows()
+    if not frame then return end
+    for _,row in ipairs(frame.detailMasterRows or {}) do row.masterName=nil; row.masterOnline=nil; row:Hide() end
+    if frame.detailExtraMasters then frame.detailExtraMasters:SetText(''); frame.detailExtraMasters:Hide() end
+end
 local function resizeInfo()
     if frame and frame.infoContent then
         local rowsHeight=0
         for _,row in ipairs(frame.reagentRows or {}) do if row:IsShown() then rowsHeight=rowsHeight+26 end end
+        local mastersHeight=0
+        for _,row in ipairs(frame.detailMasterRows or {}) do if row:IsShown() then mastersHeight=mastersHeight+18 end end
+        if frame.detailExtraMasters and frame.detailExtraMasters:IsShown() then
+            mastersHeight=mastersHeight+(frame.detailExtraMasters:GetStringHeight() or 14)+4
+        end
         local reagents=frame.embedded and (frame.detailReagents:GetStringHeight()+rowsHeight+24) or 0
-        frame.infoContent:SetHeight(math.max(frame.embedded and 262 or 110,frame.detailInfo:GetStringHeight()+reagents+8))
+        frame.infoContent:SetHeight(math.max(frame.embedded and 262 or 110,frame.detailInfo:GetStringHeight()+mastersHeight+reagents+8))
     end
 end
 render=function()
@@ -1001,6 +1011,7 @@ render=function()
             else row.entry=nil; row:UnlockHighlight(); row:Hide() end
         end
         frame.detailIcon:SetShown(selectedMaster~=nil); frame.order:Hide()
+        hideDetailMasterRows()
         frame.whisper:SetShown(selectedMaster~=nil and selectedMaster.name~=identity and online[selectedMaster.name]==true)
         if selectedMaster then
             local _,icon=OldKraken.Workshop:ProfessionInfo(selectedMaster.profession)
@@ -1071,9 +1082,20 @@ render=function()
     if r then
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(displayRecipeName(r))
-        local masters=Recipes:FindMasters(r.item,r.recipe); local names={}
+        local masters=Recipes:FindMasters(r.item,r.recipe)
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
-        local showWhisper=entry.owner~=identity and (viewOwner~=nil or #masters<=1)
+        if viewOwner~=nil then
+            selectedRecipeMaster=viewOwner~=identity and viewOwner or nil
+        elseif #masters==1 then
+            selectedRecipeMaster=masters[1].name~=identity and masters[1].name or nil
+        else
+            local foundSelected=false
+            for _,m in ipairs(masters) do
+                if m.name==selectedRecipeMaster and m.name~=identity then foundSelected=true; break end
+            end
+            if not foundSelected then selectedRecipeMaster=nil end
+        end
+        local showWhisper=selectedRecipeMaster~=nil and selectedRecipeMaster~=identity
         local showOrder=entry.owner~=identity and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false
         frame.whisper:SetShown(showWhisper)
         frame.order:SetShown(showOrder)
@@ -1087,8 +1109,47 @@ render=function()
                 frame.order:SetWidth(showWhisper and 120 or 240)
             end
         end
-        for i=1,math.min(#masters,5) do local m=masters[i]; names[#names+1]=playerLabel(m.name,classes)..' · '..statusLabel(m.name,online)..(GetServerTime()-m.seen>604800 and ' · |cffffb347застаріло|r' or '') end
-        frame.detailInfo:SetText(professionNames[r.profession]..' · Збережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..'\n'..(#names>0 and table.concat(names,'\n') or 'Немає даних')..(#masters>5 and ('\n… та ще '..(#masters-5)) or '')..(entry.owner==identity and '\n\nЦе ваш рецепт. Оберіть рецепт іншого майстра, щоб створити замовлення.' or ''))
+        frame.detailInfo:SetText(professionNames[r.profession]..' · Збережено: '..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and ' · застаріло' or '')..'\n\nМайстри: '..#masters..(#masters==0 and '\nНемає даних' or ''))
+        local shownMasters=math.min(#masters,5)
+        local colors=OldKraken.UIStyle and OldKraken.UIStyle.Colors
+        local selColor=(colors and colors.sel) or {0.102,0.141,0.302,1}
+        for i,row in ipairs(frame.detailMasterRows or {}) do
+            local m=i<=shownMasters and masters[i] or nil
+            if m then
+                row.masterName=m.name
+                row.masterOnline=online[m.name]==true
+                row.label:SetText(playerLabel(m.name,classes)..' · '..statusLabel(m.name,online)..(GetServerTime()-m.seen>604800 and ' · |cffffb347застаріло|r' or '')..(m.name==identity and ' · |cffffd36bви|r' or ''))
+                if row.bg then
+                    row.bg:SetShown(m.name==selectedRecipeMaster)
+                    if m.name==selectedRecipeMaster and row.bg.SetColorTexture then row.bg:SetColorTexture(selColor[1],selColor[2],selColor[3],0.65) end
+                end
+                row:Show()
+            else
+                row.masterName=nil
+                row.masterOnline=nil
+                if row.bg then row.bg:Hide() end
+                row:Hide()
+            end
+        end
+        local anchorBelow=shownMasters>0 and frame.detailMasterRows and frame.detailMasterRows[shownMasters] or frame.detailInfo
+        local extraParts={}
+        if #masters>5 then extraParts[#extraParts+1]='… та ще '..(#masters-5) end
+        if entry.owner==identity then extraParts[#extraParts+1]='Це ваш рецепт. Оберіть рецепт іншого майстра, щоб створити замовлення.' end
+        if frame.detailExtraMasters then
+            if #extraParts>0 then
+                frame.detailExtraMasters:ClearAllPoints()
+                frame.detailExtraMasters:SetPoint('TOPLEFT',anchorBelow,'BOTTOMLEFT',0,-2)
+                frame.detailExtraMasters:SetText(table.concat(extraParts,'\n'))
+                frame.detailExtraMasters:Show()
+                anchorBelow=frame.detailExtraMasters
+            else
+                frame.detailExtraMasters:SetText(''); frame.detailExtraMasters:Hide()
+            end
+        end
+        if frame.embedded and frame.detailReagents then
+            frame.detailReagents:ClearAllPoints()
+            frame.detailReagents:SetPoint('TOPLEFT',anchorBelow,'BOTTOMLEFT',0,-10)
+        end
         local header,items=reagentEntries(r)
         frame.detailReagents:SetText(header)
         for i,row in ipairs(frame.reagentRows or {}) do
@@ -1098,6 +1159,7 @@ render=function()
         end
     else
         frame.whisper:Hide(); frame.order:Hide()
+        hideDetailMasterRows()
         if #list==0 and viewOwner then
             if countCachedMasterRecipes(viewOwner,professionContext)==0 then
                 frame.detailTitle:SetText('Рецепти не синхронізовані')
@@ -1132,6 +1194,7 @@ local function switchTab(nextTab)
     local saved=states[nextTab] or {}
     tab=nextTab
     viewOwner,selectedEntry,selectedMaster=saved.owner,saved.selected,saved.master
+    selectedRecipeMaster=nil
     offset,mastersOnline=saved.offset or 0,saved.online==true
     if selectedEntry then
         local stored=people[selectedEntry.owner] and people[selectedEntry.owner][selectedEntry.record.recipe]
@@ -1322,7 +1385,7 @@ local function createWindow(parent)
                 local callback=selectRecipe; Recipes:CancelPicker()
                 if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Back() else f:Hide() end
                 callback(entry.record,entry.owner)
-            elseif self.entry then selectedEntry=self.entry; render() end
+            elseif self.entry then selectedEntry=self.entry; selectedRecipeMaster=nil; render() end
         end)
         rows[i].icon=rows[i]:CreateTexture(nil,'ARTWORK'); rows[i].icon:SetSize(21,21); rows[i].icon:SetPoint('LEFT',rows[i],'LEFT',3,0)
         rows[i].name=rows[i]:CreateFontString(nil,'OVERLAY','GameFontNormal'); rows[i].name:SetPoint('TOPLEFT',rows[i],'TOPLEFT',29,-1); rows[i].name:SetWidth(370); rows[i].name:SetJustifyH('LEFT'); rows[i].name:SetWordWrap(false)
@@ -1344,6 +1407,48 @@ local function createWindow(parent)
     end)
     f.infoContent=CreateFrame('Frame',nil,f.infoScroll); f.infoContent:SetSize(245,110); f.infoScroll:SetScrollChild(f.infoContent)
     f.detailInfo=f.infoContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.detailInfo:SetPoint('TOPLEFT'); f.detailInfo:SetWidth(245); f.detailInfo:SetJustifyH('LEFT'); f.detailInfo:SetJustifyV('TOP')
+    f.detailMasterRows={}
+    for i=1,5 do
+        local row=CreateFrame('Button',nil,f.infoContent)
+        row:SetSize(245,17)
+        row:SetPoint('TOPLEFT',f.detailInfo,'BOTTOMLEFT',0,-2-(i-1)*18)
+        row:EnableMouse(true)
+        row.bg=row:CreateTexture(nil,'BACKGROUND')
+        row.bg:SetAllPoints(row)
+        row.bg:SetColorTexture(0.24,0.34,0.68,0.38)
+        row.bg:Hide()
+        row.label=row:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+        row.label:SetPoint('LEFT',row,'LEFT',4,0)
+        row.label:SetWidth(237)
+        row.label:SetJustifyH('LEFT')
+        row.label:SetWordWrap(false)
+        row:SetScript('OnClick',function(self)
+            if not self.masterName or self.masterName==identity then return end
+            if selectedRecipeMaster==self.masterName then selectedRecipeMaster=nil
+            else selectedRecipeMaster=self.masterName end
+            render()
+        end)
+        row:SetScript('OnEnter',function(self)
+            if not self.masterName then return end
+            if GameTooltip then
+                GameTooltip:SetOwner(self,'ANCHOR_TOP')
+                if self.masterName==identity then
+                    GameTooltip:SetText('Це ваш персонаж')
+                else
+                    GameTooltip:SetText(self.masterOnline and self.masterName or (self.masterName..' (офлайн)'))
+                end
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
+        row:Hide()
+        f.detailMasterRows[i]=row
+    end
+    f.detailExtraMasters=f.infoContent:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
+    f.detailExtraMasters:SetPoint('TOPLEFT',f.detailInfo,'BOTTOMLEFT',0,-94)
+    f.detailExtraMasters:SetWidth(245)
+    f.detailExtraMasters:SetJustifyH('LEFT')
+    f.detailExtraMasters:Hide()
     f.detailReagents=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.detailReagents:SetPoint('TOPLEFT',f,'TOPLEFT',450,-302); f.detailReagents:SetWidth(275); f.detailReagents:SetJustifyH('LEFT'); f.detailReagents:SetJustifyV('TOP')
     f.reagentRows={}
     for i=1,9 do
@@ -1356,11 +1461,11 @@ local function createWindow(parent)
         row:Hide(); f.reagentRows[i]=row
     end
     f.whisper=button(f,'Шепнути',450,-410,110,function()
-        local name=tab=='masters' and selectedMaster and selectedMaster.name or (selectedEntry and selectedEntry.owner)
+        local name=tab=='masters' and selectedMaster and selectedMaster.name or (tab~='masters' and selectedRecipeMaster or nil)
         if name and name~=identity and type(ChatFrame_SendTell)=='function' then ChatFrame_SendTell(name) end
     end,nil,{rounded=true,height=34})
     f.whisper:SetScript('OnEnter',function(self)
-        local name=tab=='masters' and selectedMaster and selectedMaster.name or (selectedEntry and selectedEntry.owner)
+        local name=tab=='masters' and selectedMaster and selectedMaster.name or (tab~='masters' and selectedRecipeMaster or nil)
         if GameTooltip and name and name~=identity then
             GameTooltip:SetOwner(self,'ANCHOR_TOP')
             GameTooltip:SetText('Шепнути: '..name)
@@ -1414,6 +1519,11 @@ local function createWindow(parent)
         place(f.detailTitle,572,-144); f.detailTitle:SetWidth(312)
         place(f.infoScroll,514,-198,356,262)
         f.infoContent:SetSize(344,262); f.detailInfo:SetWidth(344)
+        for i,row in ipairs(f.detailMasterRows) do
+            row:SetWidth(344); row.label:SetWidth(338)
+            row:ClearAllPoints(); row:SetPoint('TOPLEFT',f.detailInfo,'BOTTOMLEFT',0,-2-(i-1)*18)
+        end
+        f.detailExtraMasters:SetWidth(344)
         f.detailReagents:SetParent(f.infoContent); f.detailReagents:ClearAllPoints()
         f.detailReagents:SetPoint('TOPLEFT',f.detailInfo,'BOTTOMLEFT',0,-16); f.detailReagents:SetWidth(344)
         for i,row in ipairs(f.reagentRows) do
@@ -1445,6 +1555,8 @@ local function createWindow(parent)
     end)
     detailHover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
     readableFont(f.detailInfo,14,3)
+    for _,row in ipairs(f.detailMasterRows) do readableFont(row.label,13) end
+    readableFont(f.detailExtraMasters,12)
     readableFont(f.detailReagents,13,3)
     readableFont(f.searchLabel,13)
     readableFont(f.count,12)
@@ -1564,7 +1676,7 @@ function Recipes:ShowProfession(profession,forceNavigation)
         self:Show(); return
     end
     self:Show(true); if not active or not frame then return end
-    selectRecipe=nil; selectedEntry=nil; viewOwner=nil; professionContext=profession; temporaryProfessionContext=false; selectedMaster=nil; tab='recipes'; mastersOnline=false; selectedType='all'
+    selectRecipe=nil; selectedEntry=nil; selectedRecipeMaster=nil; viewOwner=nil; professionContext=profession; temporaryProfessionContext=false; selectedMaster=nil; tab='recipes'; mastersOnline=false; selectedType='all'
     if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     frame.query:SetText('')
     frame.status:SetText(professionNames[profession]..': збережені рецепти та відповіді онлайн-майстрів; список може бути неповним.')
@@ -1582,7 +1694,7 @@ end
 function Recipes:Choose(callback,profession)
     if type(callback)~='function' then return end
     self:Show(); if not active or not frame then return end
-    selectRecipe=callback; selectedEntry=nil; viewOwner=nil; resultSet={}; resultQuery=nil; activeQuery=nil; offset=0; selectedType='all'
+    selectRecipe=callback; selectedEntry=nil; selectedRecipeMaster=nil; viewOwner=nil; resultSet={}; resultQuery=nil; activeQuery=nil; offset=0; selectedType='all'
     pickerProfession=professionNames[profession] and profession or 0
     restoringView=true; frame.query:SetText(''); restoringView=false
     UIDropDownMenu_SetText(frame.pickProfession,pickerProfession==0 and 'Усі професії' or professionNames[pickerProfession])
@@ -1621,7 +1733,7 @@ function Recipes:Knows(itemID,recipeID)
 end
 function Recipes:ShowMasters(itemID,recipeID)
     self:Show(true); if not active or not frame then return end
-    selectRecipe=nil; selectedEntry=nil; viewOwner=nil
+    selectRecipe=nil; selectedEntry=nil; selectedRecipeMaster=nil; viewOwner=nil
     local query=itemID>0 and ('item:'..itemID) or ('recipe:'..recipeID)
     frame.query:SetText(query); frame.status:SetText('Відомі майстри; дата показує останнє зчитування рецепта.')
     search(query); frame:Raise()

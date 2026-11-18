@@ -548,6 +548,224 @@ def test_stale_cache_during_context_switch():
     ''')
 
 
+def test_recipe_master_picker_and_whisper():
+    lua = client('PickerTester', embedded=True)
+    tick(lua)
+    lua.execute('''
+        local whispers = {}
+        ChatFrame_SendTell = function(name) whispers[#whispers + 1] = name end
+
+        local tooltipTexts = {}
+        GameTooltip = {
+            SetOwner = function() end,
+            SetText = function(_, txt) tooltipTexts[#tooltipTexts + 1] = txt end,
+            Show = function() end,
+            Hide = function() end,
+            SetHyperlink = function() return true end,
+            SetItemByID = function() return true end,
+            SetSpellByID = function() return true end,
+        }
+
+        local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        local now = GetServerTime()
+        -- Recipe 9501: 1 online master (not self)
+        scope.recipes['Solo Crafter'] = {
+            [9501] = {recipe = 9501, item = 5001, profession = 171, seen = now, name = 'Solo Potion', product = 'Solo Potion'},
+        }
+        -- Recipe 9502: 7 masters (online + offline + very long name)
+        local multiMasters = {
+            'Alpha Master',
+            'Beta Offline',
+            'Gamma LongNameVeryLongCharacterName',
+            'Delta Master',
+            'Epsilon Master',
+            'Zeta Master',
+            'Eta Master',
+        }
+        for _, m in ipairs(multiMasters) do
+            scope.recipes[m] = {
+                [9502] = {recipe = 9502, item = 5002, profession = 171, seen = now, name = 'Multi Elixir', product = 'Multi Elixir'},
+            }
+        end
+        -- Recipe 9503: own recipe only
+        scope.recipes['PickerTester Mon'] = {
+            [9503] = {recipe = 9503, item = 5003, profession = 171, seen = now, name = 'Self Flask', product = 'Self Flask'},
+        }
+
+        -- Mock guild roster online status: Alpha, Gamma, Delta, Epsilon, Zeta, Eta, Solo Crafter online; Beta Offline is offline.
+        local rosterRows = {
+            {name = 'Solo Crafter', online = true, classFile = 'MAGE'},
+            {name = 'Alpha Master', online = true, classFile = 'PRIEST'},
+            {name = 'Beta Offline', online = false, classFile = 'WARLOCK'},
+            {name = 'Gamma LongNameVeryLongCharacterName', online = true, classFile = 'DRUID'},
+            {name = 'Delta Master', online = true, classFile = 'SHAMAN'},
+            {name = 'Epsilon Master', online = false, classFile = 'PALADIN'},
+            {name = 'Zeta Master', online = false, classFile = 'ROGUE'},
+            {name = 'Eta Master', online = false, classFile = 'HUNTER'},
+            {name = 'PickerTester Mon', online = true, classFile = 'WARRIOR'},
+        }
+        GetNumGuildMembers = function() return #rosterRows end
+        GetGuildRosterInfo = function(i)
+            local r = rosterRows[i]
+            if not r then return nil end
+            return r.name, 'Member', 2, 60, r.classFile, 'Stormwind', '', '', r.online, 0, r.classFile
+        end
+
+        OldKraken.Workshop:Show()
+        OldKraken.WorkshopRecipes:ShowProfession(171)
+        while #timers > 0 do
+            local pending = timers; timers = {}
+            for _, t in ipairs(pending) do t() end
+        end
+
+        local rv = OldKraken.UIHub.pages.workshop.frame.recipesView
+        local function clickRecipe(recipeID)
+            for _, row in ipairs(frames) do
+                if type(row) == 'table' and type(row.entry) == 'table' and type(row.entry.record) == 'table' and row.entry.record.recipe == recipeID and row:IsShown() then
+                    row.scripts.OnClick(row)
+                    return row
+                end
+            end
+            error('recipe row not found: ' .. tostring(recipeID))
+        end
+
+        -- 1. Single master: whisper shown and targets that master
+        clickRecipe(9501)
+        assert(rv.whisper:IsShown(), 'single-master recipe must show whisper button')
+        assert(rv.detailMasterRows[1]:IsShown(), 'single master row must be shown')
+        assert(not rv.detailExtraMasters:IsShown(), 'single master must not show extra masters text')
+        rv.whisper.scripts.OnClick(rv.whisper)
+        assert(#whispers == 1 and whispers[1] == 'Solo Crafter', 'whisper must target the single master')
+
+        -- 2. Multiple masters (7): whisper hidden initially, no auto-whisper, max 5 rows + extra text
+        clickRecipe(9502)
+        assert(not rv.whisper:IsShown(), 'multi-master recipe must NOT auto-pick a master for whisper')
+        assert(#whispers == 1, 'selecting multi-master recipe must not send whisper automatically')
+        for i = 1, 5 do
+            assert(rv.detailMasterRows[i]:IsShown(), 'master row ' .. i .. ' must be shown')
+        end
+        assert(rv.detailExtraMasters:IsShown() and rv.detailExtraMasters.text == '… та ще 2',
+            'extra masters line must show … та ще 2, got ' .. tostring(rv.detailExtraMasters.text))
+        assert(rv.detailReagents:IsShown(), 'reagents block must stay visible below master rows')
+
+        -- Explicit selection of row 2 (Beta Offline) enables whisper to Beta Offline and shows offline tooltip
+        local offlineRow
+        for i = 1, 5 do
+            if rv.detailMasterRows[i].masterName == 'Beta Offline' then offlineRow = rv.detailMasterRows[i] end
+        end
+        assert(offlineRow, 'Beta Offline must be in top 5 master rows')
+        offlineRow.scripts.OnEnter(offlineRow)
+        assert(tooltipTexts[#tooltipTexts] == 'Beta Offline (офлайн)',
+            'offline master tooltip must indicate offline status, got: ' .. tostring(tooltipTexts[#tooltipTexts]) .. ' online=' .. tostring(offlineRow.masterOnline))
+        offlineRow.scripts.OnClick(offlineRow)
+        assert(rv.whisper:IsShown(), 'clicking a master row must show whisper button')
+        assert(offlineRow.bg:IsShown(), 'selected master row must highlight background')
+        rv.whisper.scripts.OnClick(rv.whisper)
+        assert(#whispers == 2 and whispers[2] == 'Beta Offline', 'whisper must target selected offline master')
+
+        -- Selecting another master switches target; clicking again toggles off
+        local gammaRow
+        for i = 1, 5 do
+            if rv.detailMasterRows[i].masterName == 'Gamma LongNameVeryLongCharacterName' then gammaRow = rv.detailMasterRows[i] end
+        end
+        assert(gammaRow, 'Gamma long-name master must be in top 5 master rows')
+        gammaRow.scripts.OnClick(gammaRow)
+        rv.whisper.scripts.OnClick(rv.whisper)
+        assert(#whispers == 3 and whispers[3] == 'Gamma LongNameVeryLongCharacterName')
+        gammaRow.scripts.OnClick(gammaRow)
+        assert(not rv.whisper:IsShown(), 'clicking selected master again must deselect and hide whisper')
+
+        -- 3. Own recipe: cannot whisper self
+        clickRecipe(9503)
+        assert(not rv.whisper:IsShown(), 'own recipe must hide whisper button')
+        rv.detailMasterRows[1].scripts.OnEnter(rv.detailMasterRows[1])
+        assert(tooltipTexts[#tooltipTexts] == 'Це ваш персонаж')
+        rv.detailMasterRows[1].scripts.OnClick(rv.detailMasterRows[1])
+        assert(not rv.whisper:IsShown(), 'clicking own character row must not enable whisper')
+    ''')
+
+
+def test_reagent_entries_bag_and_bank():
+    lua = client('ReagentTester', embedded=True)
+    tick(lua)
+    lua.execute('''
+        local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        scope.recipes['Solo Crafter'] = {
+            [9601] = {recipe = 9601, item = 5001, profession = 171, seen = GetServerTime(), name = 'Test Potion', product = 'Test Potion'},
+        }
+        OldKraken.Workshop:Show()
+        OldKraken.WorkshopRecipes:ShowProfession(171)
+        while #timers > 0 do
+            local pending = timers; timers = {}
+            for _, t in ipairs(pending) do t() end
+        end
+        local rv = OldKraken.UIHub.pages.workshop.frame.recipesView
+        for _, row in ipairs(frames) do
+            if type(row) == 'table' and type(row.entry) == 'table' and type(row.entry.record) == 'table' and row.entry.record.recipe == 9601 and row:IsShown() then
+                row.scripts.OnClick(row)
+                break
+            end
+        end
+
+        C_Item = C_Item or {}
+        C_Item.GetItemInfo = function(id) return 'Reagent ' .. tostring(id) end
+        C_TradeSkillUI = {
+            GetRecipeSchematic = function()
+                return {
+                    reagentSlotSchematics = {
+                        {quantityRequired = 4, reagents = {{itemID = 7001}}},
+                    },
+                }
+            end,
+        }
+
+        local function renderWithCounts(fn)
+            C_Item.GetItemCount = fn
+            GetItemCount = nil
+            OldKraken.WorkshopRecipes:RefreshPanel()
+            return rv.reagentRows[1].label.text
+        end
+
+        -- 1. Bags only (insufficient -> amber)
+        local t1 = renderWithCounts(function(_, includeBank) return includeBank and 3 or 3 end)
+        assert(t1:find('|cffffd36bу сумках: 3|r', 1, true), 'case 1 bags only amber: ' .. tostring(t1))
+
+        -- 2. Bank only (sufficient -> green)
+        local t2 = renderWithCounts(function(_, includeBank) return includeBank and 5 or 0 end)
+        assert(t2:find('|cff69dc8cє: 0 (+5 банк)|r', 1, true), 'case 2 bank only green: ' .. tostring(t2))
+
+        -- 3. Bags + bank (sufficient -> green)
+        local t3 = renderWithCounts(function(_, includeBank) return includeBank and 5 or 2 end)
+        assert(t3:find('|cff69dc8cє: 2 (+3 банк)|r', 1, true), 'case 3 bags+bank green: ' .. tostring(t3))
+
+        -- 4. Sufficient in bags only (green)
+        local t4 = renderWithCounts(function(_, includeBank) return includeBank and 4 or 4 end)
+        assert(t4:find('|cff69dc8cу сумках: 4|r', 1, true), 'case 4 sufficient bags green: ' .. tostring(t4))
+
+        -- 5. Zero in bags and bank (muted)
+        local t5 = renderWithCounts(function(_, includeBank) return 0 end)
+        assert(t5:find('|cff9aa5b1у сумках: 0|r', 1, true), 'case 5 zero muted: ' .. tostring(t5))
+
+        -- 6. Missing GetItemCount API
+        local t6 = renderWithCounts(nil)
+        assert(not t6:find('у сумках:', 1, true) and not t6:find('банк', 1, true), 'case 6 missing API: ' .. tostring(t6))
+
+        -- 7. GetItemCount throws error
+        local t7 = renderWithCounts(function() error('api failure') end)
+        assert(not t7:find('у сумках:', 1, true) and not t7:find('банк', 1, true), 'case 7 error caught: ' .. tostring(t7))
+
+        -- 8. Invalid return values (negative bags omits count; non-numeric total falls back to bags)
+        local t8a = renderWithCounts(function() return -1 end)
+        assert(not t8a:find('у сумках:', 1, true), 'case 8a negative bags: ' .. tostring(t8a))
+        local t8b = renderWithCounts(function(_, includeBank) return includeBank and 'bad' or 2 end)
+        assert(t8b:find('|cffffd36bу сумках: 2|r', 1, true), 'case 8b invalid total fallback: ' .. tostring(t8b))
+
+        -- 9. Bank never negative when total < bags
+        local t9 = renderWithCounts(function(_, includeBank) return includeBank and 2 or 5 end)
+        assert(t9:find('у сумках: 5|r', 1, true) and not t9:find('банк', 1, true) and not t9:find('-', 1, true), 'case 9 non-negative bank: ' .. tostring(t9))
+    ''')
+
+
 if __name__ == '__main__':
     test_recipe_type_filter()
     test_standalone_type_filter()
@@ -555,4 +773,6 @@ if __name__ == '__main__':
     test_type_cache_invalidates_on_item_change()
     test_armor_slots_and_submenu()
     test_stale_cache_during_context_switch()
+    test_recipe_master_picker_and_whisper()
+    test_reagent_entries_bag_and_bank()
     print('Workshop recipe type filter checks passed')

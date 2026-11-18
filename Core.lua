@@ -676,7 +676,7 @@ function OldKraken.UIStyle.Dropdown(frame, options)
             ensureSecondaryDropDownHooks()
             local list = _G.DropDownList1
             if not list or not list:IsShown() then return end
-            OldKraken.UIStyle.StyleDropDownList(list)
+            OldKraken.UIStyle.StyleDropDownList(list, isOldKrakenDropdownOpen)
             if not list.oldKrakenStrata then list.oldKrakenStrata = list:GetFrameStrata() end
             list:SetFrameStrata('FULLSCREEN_DIALOG')
         end)
