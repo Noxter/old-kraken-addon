@@ -365,6 +365,29 @@ OldKraken.listeners.GUILD_EVENTS_NEW('raid-key', {title='Guild raid', owner='Tes
 alert.scripts.OnClick(alert, 'LeftButton')
 assert(guildEvents.opened == 'raid-key')
 assert(alertSoundCalls == 1)
+
+local offlineNow = 5000
+function GetTime() return offlineNow end
+function GetNumGuildMembers() return 1 end
+function GetGuildRosterInfo(i)
+    if i == 1 then return 'Offline Leader', 'Member', 1, 35, 'Warrior', 'Orgrimmar', '', '', false, false, 'WARRIOR' end
+end
+local offlineKey = 'Offline Leader\\001off-1'
+f.groups[offlineKey] = {
+    id='off-1', owner='Offline Leader', title='RFK', category='dungeon', dungeon='rfk',
+    description='', role='tank', maxSize=5, minLevel=25, maxLevel=35,
+    members={'Offline Leader'}, memberRoles={['Offline Leader']='tank'},
+    revision=1, closed=false, seenAt=offlineNow,
+}
+f.pending[offlineKey] = 'pending'
+ui.tabBar.tabs.applications.scripts.OnClick()
+assert(#ui.visible == 1 and ui.rows[1].status.text == 'ОФЛАЙН', 'offline owner application should show ОФЛАЙН')
+assert(ui.deleteButtons[1]:IsShown(), 'delete button should be shown on applications tab')
+offlineNow = offlineNow + 301
+ui.tabBar.tabs.applications.scripts.OnClick()
+assert(f.pending[offlineKey] == nil and #ui.visible == 0, 'offline owner application should auto-prune after 300s')
+function GetNumGuildMembers() return 0 end
+function GetGuildRosterInfo() end
 ''')
 print('UI smoke checks passed')
 

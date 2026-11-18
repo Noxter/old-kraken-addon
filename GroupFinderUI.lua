@@ -70,21 +70,55 @@ local applicationBadges = {
     retry={text='ПОДАЙТЕ ЗНОВУ', color={1, 0.65, 0.25}},
 }
 
-local people = {}
+local OFFLINE_APPLICATION_TTL = 300
+local people, guildRosterLoaded, ownerOfflineSince = {}, false, {}
+local function isOwnerOnline(owner)
+    if not guildRosterLoaded or not owner or owner == Finder.identity then return true end
+    local rec = people[owner]
+    return rec ~= nil and rec.online == true
+end
+local function pruneOfflineApplications()
+    if not guildRosterLoaded then return end
+    local now = type(GetTime) == 'function' and GetTime() or 0
+    local changed = false
+    for key in pairs(Finder.pending or {}) do
+        local group = Finder.groups and Finder.groups[key]
+        if group and group.owner ~= Finder.identity then
+            if isOwnerOnline(group.owner) then
+                ownerOfflineSince[key] = nil
+            else
+                ownerOfflineSince[key] = ownerOfflineSince[key] or now
+                if now - ownerOfflineSince[key] >= OFFLINE_APPLICATION_TTL then
+                    Finder.pending[key] = nil
+                    ownerOfflineSince[key] = nil
+                    changed = true
+                end
+            end
+        else
+            ownerOfflineSince[key] = nil
+        end
+    end
+    for key in pairs(ownerOfflineSince) do
+        if not (Finder.pending and Finder.pending[key]) then ownerOfflineSince[key] = nil end
+    end
+    if changed then Finder:Changed() end
+end
 local function refreshPeople()
-    local nextPeople = {}
+    local nextPeople, rosterCount = {}, 0
     if type(GetNumGuildMembers) == 'function' and type(GetGuildRosterInfo) == 'function' then
         local ok, count = pcall(GetNumGuildMembers)
         if ok and type(count) == 'number' then
+            rosterCount = count
             for i = 1, count do
                 pcall(function()
-                    local name, _, _, level, _, _, _, _, _, _, class = GetGuildRosterInfo(i)
+                    local name, _, _, level, _, _, _, _, isOnline, _, class = GetGuildRosterInfo(i)
                     if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(level) or issecretvalue(class)) then return end
-                    if type(name) == 'string' and name ~= '' then nextPeople[name] = {level=tonumber(level), class=class} end
+                    if type(name) == 'string' and name ~= '' then nextPeople[name] = {level=tonumber(level), class=class, online=(isOnline == true)} end
                 end)
             end
         end
     end
+    guildRosterLoaded = rosterCount > 0
     if type(UnitName) == 'function' and type(UnitClass) == 'function' and type(UnitLevel) == 'function' then
         local units = {'player'}
         local raid = false
@@ -553,6 +587,8 @@ refresh=function()
     if window.maxLevelHint then window.maxLevelHint:SetShown(maxText == '') end
     local searchText = window.searchFilter:GetText() or ''
     if window.searchHint then window.searchHint:SetShown(searchText == '') end
+    refreshPeople()
+    pruneOfflineApplications()
     local query = string.lower(searchText)
     local lines = {}
     local totalOpenGroups = 0
@@ -581,7 +617,8 @@ refresh=function()
     window.visible = lines
     local pendingApplications = 0
     for key in pairs(Finder.pending or {}) do
-        if Finder.groups and Finder.groups[key] then pendingApplications = pendingApplications + 1 end
+        local group = Finder.groups and Finder.groups[key]
+        if group and isOwnerOnline(group.owner) then pendingApplications = pendingApplications + 1 end
     end
     if window.tabBar and window.tabBar.SetBadge then
         window.tabBar:SetBadge('applications', pendingApplications)
@@ -651,11 +688,14 @@ refresh=function()
             b.meta:SetText(string.format('%s  ·  рівні %d–%d  ·  місць %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (' · резерв ' .. reserved) or ''))
             local badge = tab == 'applications' and applicationBadges[status]
             if badge then
+                local offline = not isOwnerOnline(g.owner)
                 if b.statusPill and b.statusPill.SetKind then
-                    local pillKind = status == 'reject' and 'danger' or (status == 'closed' and 'neutral' or 'warning')
+                    local pillKind = offline and 'neutral' or (status == 'reject' and 'danger' or (status == 'closed' and 'neutral' or 'warning'))
                     b.statusPill:SetKind(pillKind)
                 end
-                b.status:SetText(badge.text); b.status:SetTextColor(unpack(badge.color)); b.status:Show(); b.statusBackground:Show()
+                b.status:SetText(offline and 'ОФЛАЙН' or badge.text)
+                if offline then b.status:SetTextColor(0.68, 0.72, 0.78) else b.status:SetTextColor(unpack(badge.color)) end
+                b.status:Show(); b.statusBackground:Show()
                 if b.statusPill then b.statusPill:Show() end
             else
                 local openKind = g.closed and 'neutral' or (#g.members >= g.maxSize and 'warning' or 'success')
@@ -726,7 +766,7 @@ refresh=function()
                 b:UnlockHighlight()
             end
             b:Show()
-            if tab ~= 'applications' and g.owner == Finder.identity and not g.hidden then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
+            if tab == 'applications' or (g.owner == Finder.identity and not g.hidden) then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
         elseif b then
             b:UnlockHighlight()
             b:Hide()
