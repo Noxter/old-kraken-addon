@@ -70,21 +70,109 @@ local applicationBadges = {
     retry={text='ПОДАЙТЕ ЗНОВУ', color={1, 0.65, 0.25}},
 }
 
-local people = {}
-local function refreshPeople()
-    local nextPeople = {}
+local OFFLINE_APPLICATION_TTL = 300
+local people, guildRosterLoaded, ownerOfflineSince, offlinePruneTimerPending = {}, false, {}, false
+local refreshPeople
+-- The model receives the owner in the identity form ("Name Surname"), while the
+-- guild roster is keyed by another representation ("Name-Realm"), so a direct
+-- lookup misses and the owner looks offline. Compare normalised parts instead.
+-- No realm on either side is not a match: two characters may share a name on
+-- different realms, and a false match could prune a live application.
+local function ownerKey(name)
+    if type(name) ~= 'string' then return nil end
+    local character, realm = name:match('^([^-%s]+)[%-%s](.+)$')
+    if not character or character == '' or not realm or realm == '' then return nil end
+    return character .. '\1' .. realm:gsub('%-', ' ')
+end
+local indexedPeople, peopleIndex
+local function ownerRecords()
+    if indexedPeople == people then return peopleIndex end
+    indexedPeople, peopleIndex = people, {}
+    for name, rec in pairs(people) do
+        local key = ownerKey(name)
+        if key then peopleIndex[key] = rec end
+    end
+    return peopleIndex
+end
+local function ownerRecord(owner)
+    if type(owner) ~= 'string' or owner == '' then return nil end
+    local rec = people[owner]
+    if rec then return rec end
+    local key = ownerKey(owner)
+    if not key then return nil end
+    return ownerRecords()[key]
+end
+-- Three states, not two: only a confirmed offline record may expire an
+-- application. A missing record is unknown, so the application is kept.
+local function isOwnerOnline(owner)
+    if not guildRosterLoaded or not owner or owner == Finder.identity then return true end
+    local rec = ownerRecord(owner)
+    return rec ~= nil and rec.online == true
+end
+local function isOwnerOffline(owner)
+    if not guildRosterLoaded or not owner or owner == Finder.identity then return false end
+    local rec = ownerRecord(owner)
+    return rec ~= nil and rec.online == false
+end
+local function pruneOfflineApplications()
+    if not guildRosterLoaded then return end
+    local now = type(GetTime) == 'function' and GetTime() or 0
+    local changed, nextDelay = false, nil
+    for key in pairs(Finder.pending or {}) do
+        local group = Finder.groups and Finder.groups[key]
+        if group and group.owner ~= Finder.identity then
+            if isOwnerOnline(group.owner) then
+                ownerOfflineSince[key] = nil
+            elseif isOwnerOffline(group.owner) then
+                ownerOfflineSince[key] = ownerOfflineSince[key] or now
+                local remaining = OFFLINE_APPLICATION_TTL - (now - ownerOfflineSince[key])
+                if remaining <= 0 then
+                    Finder.pending[key] = nil
+                    if Finder.pendingVersions then Finder.pendingVersions[key] = nil end
+                    if Finder.pendingRoles then Finder.pendingRoles[key] = nil end
+                    ownerOfflineSince[key] = nil
+                    changed = true
+                elseif not nextDelay or remaining < nextDelay then
+                    nextDelay = remaining
+                end
+            else
+                -- Owner state is unknown, which is not the same as offline: keep
+                -- the application and forget any half-counted offline window.
+                ownerOfflineSince[key] = nil
+            end
+        else
+            ownerOfflineSince[key] = nil
+        end
+    end
+    for key in pairs(ownerOfflineSince) do
+        if not (Finder.pending and Finder.pending[key]) then ownerOfflineSince[key] = nil end
+    end
+    if nextDelay and not offlinePruneTimerPending and C_Timer and type(C_Timer.After) == 'function' then
+        offlinePruneTimerPending = true
+        C_Timer.After(math.max(1, nextDelay), function()
+            offlinePruneTimerPending = false
+            refreshPeople()
+            pruneOfflineApplications()
+        end)
+    end
+    if changed then Finder:Changed() end
+end
+refreshPeople = function()
+    local nextPeople, rosterCount = {}, 0
     if type(GetNumGuildMembers) == 'function' and type(GetGuildRosterInfo) == 'function' then
         local ok, count = pcall(GetNumGuildMembers)
         if ok and type(count) == 'number' then
+            rosterCount = count
             for i = 1, count do
                 pcall(function()
-                    local name, _, _, level, _, _, _, _, _, _, class = GetGuildRosterInfo(i)
+                    local name, _, _, level, _, _, _, _, isOnline, _, class = GetGuildRosterInfo(i)
                     if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(level) or issecretvalue(class)) then return end
-                    if type(name) == 'string' and name ~= '' then nextPeople[name] = {level=tonumber(level), class=class} end
+                    if type(name) == 'string' and name ~= '' then nextPeople[name] = {level=tonumber(level), class=class, online=(isOnline == true)} end
                 end)
             end
         end
     end
+    guildRosterLoaded = rosterCount > 0
     if type(UnitName) == 'function' and type(UnitClass) == 'function' and type(UnitLevel) == 'function' then
         local units = {'player'}
         local raid = false
@@ -101,7 +189,17 @@ local function refreshPeople()
                 if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(surname) or issecretvalue(class) or issecretvalue(level)) then return end
                 if type(name) ~= 'string' or name == '' then return end
                 if type(surname) == 'string' and surname ~= '' then name = name .. ' ' .. surname end
-                nextPeople[name] = {class=class, level=tonumber(level)}
+                local prev = nextPeople[name]
+                local isConnected = true
+                if type(UnitIsConnected) == 'function' then
+                    local ok, connected = pcall(UnitIsConnected, unit)
+                    if ok and connected ~= nil then isConnected = connected and true or false end
+                end
+                nextPeople[name] = {
+                    class = class or (prev and prev.class),
+                    level = tonumber(level) or (prev and prev.level),
+                    online = (prev and prev.online == true) or isConnected,
+                }
             end)
         end
     end
@@ -109,7 +207,7 @@ local function refreshPeople()
 end
 
 local function playerLabel(name)
-    local info = people[name]
+    local info = ownerRecord(name)
     local classColor = info and type(info.class) == 'string' and RAID_CLASS_COLORS and RAID_CLASS_COLORS[info.class]
     local colored = name
     if classColor and classColor.r and classColor.g and classColor.b then
@@ -553,6 +651,8 @@ refresh=function()
     if window.maxLevelHint then window.maxLevelHint:SetShown(maxText == '') end
     local searchText = window.searchFilter:GetText() or ''
     if window.searchHint then window.searchHint:SetShown(searchText == '') end
+    refreshPeople()
+    pruneOfflineApplications()
     local query = string.lower(searchText)
     local lines = {}
     local totalOpenGroups = 0
@@ -581,7 +681,10 @@ refresh=function()
     window.visible = lines
     local pendingApplications = 0
     for key in pairs(Finder.pending or {}) do
-        if Finder.groups and Finder.groups[key] then pendingApplications = pendingApplications + 1 end
+        local group = Finder.groups and Finder.groups[key]
+        -- Count every application except the ones whose owner is confirmed
+        -- offline; an unknown owner is not a reason to hide the application.
+        if group and not isOwnerOffline(group.owner) then pendingApplications = pendingApplications + 1 end
     end
     if window.tabBar and window.tabBar.SetBadge then
         window.tabBar:SetBadge('applications', pendingApplications)
@@ -651,11 +754,14 @@ refresh=function()
             b.meta:SetText(string.format('%s  ·  рівні %d–%d  ·  місць %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (' · резерв ' .. reserved) or ''))
             local badge = tab == 'applications' and applicationBadges[status]
             if badge then
+                local offline = isOwnerOffline(g.owner)
                 if b.statusPill and b.statusPill.SetKind then
-                    local pillKind = status == 'reject' and 'danger' or (status == 'closed' and 'neutral' or 'warning')
+                    local pillKind = offline and 'neutral' or (status == 'reject' and 'danger' or (status == 'closed' and 'neutral' or 'warning'))
                     b.statusPill:SetKind(pillKind)
                 end
-                b.status:SetText(badge.text); b.status:SetTextColor(unpack(badge.color)); b.status:Show(); b.statusBackground:Show()
+                b.status:SetText(offline and 'ОФЛАЙН' or badge.text)
+                if offline then b.status:SetTextColor(0.68, 0.72, 0.78) else b.status:SetTextColor(unpack(badge.color)) end
+                b.status:Show(); b.statusBackground:Show()
                 if b.statusPill then b.statusPill:Show() end
             else
                 local openKind = g.closed and 'neutral' or (#g.members >= g.maxSize and 'warning' or 'success')
@@ -726,7 +832,7 @@ refresh=function()
                 b:UnlockHighlight()
             end
             b:Show()
-            if tab ~= 'applications' and g.owner == Finder.identity and not g.hidden then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
+            if tab == 'applications' or (g.owner == Finder.identity and not g.hidden) then window.deleteButtons[i]:Show() else window.deleteButtons[i]:Hide() end
         elseif b then
             b:UnlockHighlight()
             b:Hide()
@@ -1633,6 +1739,20 @@ local function createWindow(parent)
     end
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
+    local function truncateUtf8Bytes(text, limit)
+        if type(text) ~= 'string' or #text <= limit then return text or '' end
+        if limit <= 0 then return '' end
+        local cut = limit
+        local nextByte = text:byte(cut + 1)
+        if nextByte and nextByte >= 128 and nextByte < 192 then
+            while cut > 0 do
+                local b = text:byte(cut)
+                cut = cut - 1
+                if not b or b < 128 or b >= 192 then break end
+            end
+        end
+        return text:sub(1, cut)
+    end
     local function announceGroupInGuildChat(activityName, currentCount, maxPlayers, minLv, maxLv, descText)
         if type(IsInGuild) ~= 'function' or not IsInGuild() then return end
         local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
@@ -1645,9 +1765,28 @@ local function createWindow(parent)
         if minLv and maxLv and minLv > 0 and maxLv > 0 then
             metaParts[#metaParts + 1] = 'рівні ' .. minLv .. '–' .. maxLv
         end
-        local note = (descText or ''):match('^%s*(.-)%s*$')
-        local notePart = note ~= '' and (' · ' .. note) or ''
-        local msg = ('[Old Kraken] Збір групи: ' .. activityName .. ' (' .. table.concat(metaParts, ', ') .. ')' .. notePart .. ' — запис у вкладці «Групи» (/okr).'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+        local cleanActivity = tostring(activityName or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+        local prefix = '[Old Kraken] Збір групи: ' .. cleanActivity .. ' (' .. table.concat(metaParts, ', ') .. ')'
+        local suffix = ' — запис у вкладці «Групи» (/okr).'
+        local note = ((descText or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')):match('^%s*(.-)%s*$')
+        local maxBytes = 255
+        if #prefix + #suffix > maxBytes then
+            local ellipsis = '…'
+            prefix = truncateUtf8Bytes(prefix, math.max(0, maxBytes - #suffix - #ellipsis)) .. ellipsis
+        end
+        local notePart = ''
+        if note ~= '' then
+            local sep = ' · '
+            local budget = maxBytes - #prefix - #suffix - #sep
+            if budget > 4 then
+                if #note > budget then
+                    local ellipsis = '…'
+                    note = truncateUtf8Bytes(note, budget - #ellipsis) .. ellipsis
+                end
+                notePart = sep .. note
+            end
+        end
+        local msg = prefix .. notePart .. suffix
         local sent, err = pcall(sendChat, msg, 'GUILD')
         if not sent then print('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ' .. tostring(err)) end
     end

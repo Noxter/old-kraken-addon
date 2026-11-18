@@ -142,7 +142,10 @@ signupResult = OldKraken.GuildEvents:Signup(key, 'healer')
 """)
     store = storage_for(lua)
     assert lua.eval("signupResult") is False
-    assert store["observed"]["Owner Realm\0011999999900-123456-1"] is None
+    # A relay-only event never writes a direct snapshot, so the whole container may be
+    # absent; the invariant to hold is that no observed entry exists for the key.
+    observed = store["observed"]
+    assert observed is None or observed["Owner Realm\0011999999900-123456-1"] is None
     assert store["relays"]["Owner Realm\0011999999900-123456-1"] is not None
 
 
@@ -155,3 +158,12 @@ OldKraken.Communication.handlers.CEVENT('Relay Realm', 'forged-direct',
     store = storage_for(lua)
     assert store["observed"] is None or store["observed"]["Owner Realm\0011999999900-123456-1"] is None
     assert lua.eval("OldKraken.GuildEvents:GetRelayDiagnostics().invalid_payload") == 1
+
+
+if __name__ == "__main__":
+    test_relay_does_not_overwrite_last_direct_snapshot()
+    test_newer_direct_snapshot_supersedes_higher_untrusted_relay_revision()
+    test_relayed_cancellation_never_emits_cancellation_notification()
+    test_relay_only_event_is_display_only_and_cannot_create_signup_intent()
+    test_payload_owner_cannot_impersonate_direct_sender()
+    print("Relay authority checks passed")

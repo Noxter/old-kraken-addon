@@ -42,7 +42,7 @@ local function Prune(now)
         if now - v.time > CACHE_TTL then assemblies[k] = nil end
     end
     for k, v in pairs(completed) do
-        if now - v > CACHE_TTL then completed[k] = nil end
+        if now - v.time > CACHE_TTL then completed[k] = nil end
     end
 end
 
@@ -64,6 +64,10 @@ local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = tr
     WORDER = true, WORELAY = true, WOREQ = true, WOPAY = true, WOERROR = true, WOQUERY = true,
     WOACT = true, WOPAYR = true, WORESULT = true, WORESR = true }
 local GROUP_SNAPSHOTS={ANNOUNCE=true,UPDATE=true,SYNC=true,CANCEL=true,BUMP=true}
+-- Group Finder owns these kinds; every other kind belongs to another subsystem and
+-- must survive a Group Finder state reset.
+local GROUP_FINDER_KINDS={ANNOUNCE=true,CANCEL=true,JOIN=true,RESPONSE=true,
+    UPDATE=true,QUERY=true,SYNC=true,BUMP=true}
 local function groupRecordKey(kind,payload)
     if not GROUP_SNAPSHOTS[kind] and kind~='RESPONSE' and kind~='JOIN' then return end
     local fields,pos={},1
@@ -129,11 +133,26 @@ function Communication:RequestSync()
 end
 
 function Communication:ClearProtocolState()
+    -- Only this subsystem's traffic is discarded: Workshop Sync and Guild Events
+    -- share the same transport and must keep their queued pages and assemblies.
     for i = #self.queue, 1, -1 do
-        if self.queue[i].message:sub(1, 4) == 'GF2^' then table.remove(self.queue, i) end
+        local entry = self.queue[i]
+        local kind = entry.message:match("^GF2%^([A-Z]+)%^")
+        if kind and GROUP_FINDER_KINDS[kind] then
+            local job = entry.job
+            if job then
+                job.remaining = job.remaining - 1
+                if job.remaining == 0 then self.pendingTransmissions[job.key] = nil end
+            end
+            table.remove(self.queue, i)
+        end
     end
-    assemblies, completed = {}, {}
-    self.pendingTransmissions={}
+    for key, item in pairs(assemblies) do
+        if GROUP_FINDER_KINDS[item.kind] then assemblies[key] = nil end
+    end
+    for key, item in pairs(completed) do
+        if GROUP_FINDER_KINDS[item.kind] then completed[key] = nil end
+    end
     self.retryAt,self.backoff=0,0
 end
 
@@ -429,7 +448,7 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
         assemblies[key] = nil
         if Count(completed) >= CACHE_LIMIT then
             local oldestKey, oldestTime
-            for k, v in pairs(completed) do if not oldestTime or v < oldestTime then oldestKey, oldestTime = k, v end end
+            for k, v in pairs(completed) do if not oldestTime or v.time < oldestTime then oldestKey, oldestTime = k, v.time end end
             completed[oldestKey] = nil
         end
         payload = table.concat(item.parts)
@@ -442,7 +461,7 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
                 return
             end
         end
-        completed[key] = now
+        completed[key] = { time = now, kind = kind }
         self.stats.received = self.stats.received + 1
         return
     end

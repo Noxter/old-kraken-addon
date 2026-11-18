@@ -313,6 +313,20 @@ ui.requestsButton.scripts.OnClick()
 local requestWindow = OldKrakenRequestsFrame
 assert(requestWindow.entries[1].name == 'New Applicant')
 assert(requestWindow.entries[2].name == 'Old Applicant')
+local whisperedTarget
+function ChatFrame_SendTell(target) whisperedTarget = target end
+requestWindow.rows[1].hover.scripts.OnMouseUp(requestWindow.rows[1].hover, 'LeftButton')
+assert(whisperedTarget == 'New Applicant', 'left-click on applicant did not whisper')
+
+local sentGuildChat
+function IsInGuild() return true end
+function SendChatMessage(msg, channel) if channel == 'GUILD' then sentGuildChat = msg end end
+ui.tabBar.tabs.create.scripts.OnClick()
+selectActivityCard('rfc')
+ui.titleBox:SetText('Рейд на Оніксію')
+ui.descriptionBox:SetText(string.rep('Привіт ', 35))
+ui.createButton.scripts.OnClick()
+assert(type(sentGuildChat) == 'string' and #sentGuildChat <= 255, 'guild chat announce exceeded 255 bytes: ' .. tostring(sentGuildChat and #sentGuildChat))
 
 OldKraken.listeners.GROUP_FINDER_NEW(wcGroup)
 local alert
@@ -351,6 +365,78 @@ OldKraken.listeners.GUILD_EVENTS_NEW('raid-key', {title='Guild raid', owner='Tes
 alert.scripts.OnClick(alert, 'LeftButton')
 assert(guildEvents.opened == 'raid-key')
 assert(alertSoundCalls == 1)
+
+local offlineNow = 5000
+local origGetTime, origCTimer = GetTime, C_Timer
+local scheduledTimers = {}
+C_Timer = { After = function(delay, fn) scheduledTimers[#scheduledTimers + 1] = {delay=delay, fn=fn} end }
+function GetTime() return offlineNow end
+function GetNumGuildMembers() return 3 end
+function GetGuildRosterInfo(i)
+    if i == 1 then return 'Offline Leader', 'Member', 1, 35, 'Warrior', 'Orgrimmar', '', '', false, false, 'WARRIOR'
+    elseif i == 2 then return 'Party Leader', 'Member', 1, 36, 'Priest', 'Orgrimmar', '', '', true, false, 'PRIEST'
+    elseif i == 3 then return 'Cross-Realm', 'Member', 1, 42, 'Mage', 'Orgrimmar', '', '', true, false, 'MAGE' end
+end
+local origUnitName = UnitName
+function UnitName(unit)
+    if unit == 'party1' then return 'Party Leader' end
+    return origUnitName(unit)
+end
+local offlineKey = 'Offline Leader\\001off-1'
+local partyKey = 'Party Leader\\001party-1'
+f.groups[offlineKey] = {
+    id='off-1', owner='Offline Leader', title='RFK', category='dungeon', dungeon='rfk',
+    description='', role='tank', maxSize=5, minLevel=25, maxLevel=35,
+    members={'Offline Leader'}, memberRoles={['Offline Leader']='tank'},
+    revision=1, closed=false, seenAt=offlineNow,
+}
+f.groups[partyKey] = {
+    id='party-1', owner='Party Leader', title='SM', category='dungeon', dungeon='sm',
+    description='', role='healer', maxSize=5, minLevel=30, maxLevel=40,
+    members={'Party Leader'}, memberRoles={['Party Leader']='healer'},
+    revision=1, closed=false, seenAt=offlineNow,
+}
+f.pending[offlineKey] = 'pending'
+f.pendingVersions[offlineKey] = 1001
+f.pendingRoles[offlineKey] = 'dps'
+f.pending[partyKey] = 'pending'
+local origClassColors = RAID_CLASS_COLORS
+RAID_CLASS_COLORS = {MAGE = {r = 0.2, g = 0.4, b = 0.8}}
+local crossKey = 'Cross Realm\\001cross-1'
+f.groups[crossKey] = {
+    id='cross-1', owner='Cross Realm', title='Uldaman', category='dungeon', dungeon='uld',
+    description='', role='dps', maxSize=5, minLevel=40, maxLevel=45,
+    members={'Cross Realm'}, memberRoles={['Cross Realm']='dps'},
+    revision=1, closed=false, seenAt=offlineNow,
+}
+f.pending[crossKey] = 'pending'
+ui.tabBar.tabs.applications.scripts.OnClick()
+assert(#ui.visible == 3)
+local sawOffline, sawPending, sawCrossLabel = false, false, false
+for i = 1, 3 do
+    if ui.visible[i].key == offlineKey then sawOffline = ui.rows[i].status.text == 'ОФЛАЙН' end
+    if ui.visible[i].key == partyKey then sawPending = ui.rows[i].status.text == 'ОЧІКУЄ' end
+    if ui.visible[i].key == crossKey then
+        sawCrossLabel = ui.rows[i].meta.text:find('|cff3366ccCross Realm|r (42)', 1, true) ~= nil
+    end
+end
+RAID_CLASS_COLORS = origClassColors
+assert(sawOffline, 'offline owner application should show ОФЛАЙН')
+assert(sawPending, 'party owner in guild roster must remain online and show ОЧІКУЄ')
+assert(sawCrossLabel, 'playerLabel should resolve class color and level across Name-Realm and Name Realm')
+assert(ui.deleteButtons[1]:IsShown(), 'delete button should be shown on applications tab')
+assert(#scheduledTimers >= 1, 'offline prune timer should be scheduled')
+offlineNow = offlineNow + 301
+local pendingTimers = scheduledTimers; scheduledTimers = {}
+for _, t in ipairs(pendingTimers) do t.fn() end
+assert(f.pending[offlineKey] == nil and f.pendingVersions[offlineKey] == nil and f.pendingRoles[offlineKey] == nil,
+    'offline owner application and metadata should auto-prune via timer without manual UI click')
+assert(f.pending[partyKey] == 'pending', 'party owner application must not be pruned')
+UnitName = origUnitName
+GetTime = origGetTime
+C_Timer = origCTimer
+function GetNumGuildMembers() return 0 end
+function GetGuildRosterInfo() end
 ''')
 print('UI smoke checks passed')
 
