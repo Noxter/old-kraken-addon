@@ -591,6 +591,9 @@ def test_recipe_master_picker_and_whisper():
         scope.recipes['PickerTester Mon'] = {
             [9503] = {recipe = 9503, item = 5003, profession = 171, seen = now, name = 'Self Flask', product = 'Self Flask'},
         }
+        -- Recipe 9504: second multi-master recipe (shares Alpha Master with 9502)
+        scope.recipes['Alpha Master'][9504] = {recipe = 9504, item = 5004, profession = 171, seen = now, name = 'Second Multi', product = 'Second Multi'}
+        scope.recipes['Delta Master'][9504] = {recipe = 9504, item = 5004, profession = 171, seen = now, name = 'Second Multi', product = 'Second Multi'}
 
         -- Mock guild roster online status: Alpha, Gamma, Delta, Epsilon, Zeta, Eta, Solo Crafter online; Beta Offline is offline.
         local rosterRows = {
@@ -674,6 +677,34 @@ def test_recipe_master_picker_and_whisper():
         assert(#whispers == 3 and whispers[3] == 'Gamma LongNameVeryLongCharacterName')
         gammaRow.scripts.OnClick(gammaRow)
         assert(not rv.whisper:IsShown(), 'clicking selected master again must deselect and hide whisper')
+
+        -- Selecting each of the 5 displayed master rows individually targets that exact master
+        for i = 1, 5 do
+            local row = rv.detailMasterRows[i]
+            local expectedName = row.masterName
+            assert(expectedName, 'master row ' .. i .. ' must have masterName')
+            row.scripts.OnClick(row)
+            assert(rv.whisper:IsShown(), 'whisper must show after selecting master row ' .. i)
+            assert(row.bg:IsShown(), 'row ' .. i .. ' must be highlighted')
+            local beforeCount = #whispers
+            rv.whisper.scripts.OnClick(rv.whisper)
+            assert(#whispers == beforeCount + 1 and whispers[#whispers] == expectedName,
+                'whisper must target exact master for row ' .. i .. ': ' .. tostring(expectedName))
+        end
+
+        -- Switching to another multi-master recipe (even sharing Alpha Master) must reset selectedRecipeMaster
+        rv.detailMasterRows[1].scripts.OnClick(rv.detailMasterRows[1])
+        assert(rv.whisper:IsShown())
+        clickRecipe(9504)
+        assert(not rv.whisper:IsShown(), 'switching to another recipe must reset selectedRecipeMaster')
+
+        -- Switching tabs (recipes -> masters -> recipes) must reset selectedRecipeMaster
+        clickRecipe(9502)
+        rv.detailMasterRows[1].scripts.OnClick(rv.detailMasterRows[1])
+        assert(rv.whisper:IsShown())
+        OldKraken.WorkshopRecipes:SelectTab('masters')
+        OldKraken.WorkshopRecipes:SelectTab('recipes')
+        assert(not rv.whisper:IsShown(), 'switching tabs must reset selectedRecipeMaster')
 
         -- 3. Own recipe: cannot whisper self
         clickRecipe(9503)
