@@ -207,7 +207,7 @@ refreshPeople = function()
 end
 
 local function playerLabel(name)
-    local info = people[name]
+    local info = ownerRecord(name)
     local classColor = info and type(info.class) == 'string' and RAID_CLASS_COLORS and RAID_CLASS_COLORS[info.class]
     local colored = name
     if classColor and classColor.r and classColor.g and classColor.b then

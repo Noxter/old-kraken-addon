@@ -371,10 +371,11 @@ local origGetTime, origCTimer = GetTime, C_Timer
 local scheduledTimers = {}
 C_Timer = { After = function(delay, fn) scheduledTimers[#scheduledTimers + 1] = {delay=delay, fn=fn} end }
 function GetTime() return offlineNow end
-function GetNumGuildMembers() return 2 end
+function GetNumGuildMembers() return 3 end
 function GetGuildRosterInfo(i)
     if i == 1 then return 'Offline Leader', 'Member', 1, 35, 'Warrior', 'Orgrimmar', '', '', false, false, 'WARRIOR'
-    elseif i == 2 then return 'Party Leader', 'Member', 1, 36, 'Priest', 'Orgrimmar', '', '', true, false, 'PRIEST' end
+    elseif i == 2 then return 'Party Leader', 'Member', 1, 36, 'Priest', 'Orgrimmar', '', '', true, false, 'PRIEST'
+    elseif i == 3 then return 'Cross-Realm', 'Member', 1, 42, 'Mage', 'Orgrimmar', '', '', true, false, 'MAGE' end
 end
 local origUnitName = UnitName
 function UnitName(unit)
@@ -399,15 +400,25 @@ f.pending[offlineKey] = 'pending'
 f.pendingVersions[offlineKey] = 1001
 f.pendingRoles[offlineKey] = 'dps'
 f.pending[partyKey] = 'pending'
+local crossKey = 'Cross Realm\\001cross-1'
+f.groups[crossKey] = {
+    id='cross-1', owner='Cross Realm', title='Uldaman', category='dungeon', dungeon='uld',
+    description='', role='dps', maxSize=5, minLevel=40, maxLevel=45,
+    members={'Cross Realm'}, memberRoles={['Cross Realm']='dps'},
+    revision=1, closed=false, seenAt=offlineNow,
+}
+f.pending[crossKey] = 'pending'
 ui.tabBar.tabs.applications.scripts.OnClick()
-assert(#ui.visible == 2)
-local sawOffline, sawPending = false, false
-for i = 1, 2 do
+assert(#ui.visible == 3)
+local sawOffline, sawPending, sawCrossLabel = false, false, false
+for i = 1, 3 do
     if ui.visible[i].key == offlineKey then sawOffline = ui.rows[i].status.text == 'ОФЛАЙН' end
     if ui.visible[i].key == partyKey then sawPending = ui.rows[i].status.text == 'ОЧІКУЄ' end
+    if ui.visible[i].key == crossKey then sawCrossLabel = ui.rows[i].meta.text:find('(42)', 1, true) ~= nil end
 end
 assert(sawOffline, 'offline owner application should show ОФЛАЙН')
 assert(sawPending, 'party owner in guild roster must remain online and show ОЧІКУЄ')
+assert(sawCrossLabel, 'playerLabel should resolve class/level across Name-Realm and Name Realm')
 assert(ui.deleteButtons[1]:IsShown(), 'delete button should be shown on applications tab')
 assert(#scheduledTimers >= 1, 'offline prune timer should be scheduled')
 offlineNow = offlineNow + 301
