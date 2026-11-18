@@ -156,4 +156,20 @@ assert(#workshopFrame.professionCards == 6 and rawget(workshopFrame, 'page') == 
 local enchanting = workshopFrame.professionCards[6]
 enchanting.scripts.OnClick(enchanting)
 assert(selectedProfession == 333, 'profession cards changed when saved records increased')
+
+OldKraken.DB.settings = OldKraken.DB.settings or {}
+local ctrlHeld = false
+function IsControlKeyDown() return ctrlHeld end
+OldKraken.DB.settings.uiScale = 1.0
+assert(OldKraken.UIHub:HandleScaleWheel(1) == false, 'scale wheel should ignore scroll without Ctrl')
+assert(OldKraken.DB.settings.uiScale == 1.0)
+ctrlHeld = true
+assert(OldKraken.UIHub:HandleScaleWheel(1) == true)
+assert(OldKraken.DB.settings.uiScale == 1.15)
+assert(OldKraken.UIHub:HandleScaleWheel(1) == true)
+assert(OldKraken.UIHub:HandleScaleWheel(1) == true)
+assert(OldKraken.UIHub:HandleScaleWheel(1) == true)
+assert(OldKraken.DB.settings.uiScale == 1.4, 'scale wheel should clamp at 1.4')
+for _ = 1, 6 do OldKraken.UIHub:HandleScaleWheel(-1) end
+assert(OldKraken.DB.settings.uiScale == 0.85, 'scale wheel should clamp at 0.85')
 ''')

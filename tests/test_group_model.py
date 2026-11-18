@@ -70,5 +70,23 @@ local replacement
 for _, g in pairs(model.groups) do if g.title == 'Нова група' then replacement = g end end
 assert(group.closed and replacement and replacement.id ~= group.id)
 assert(replacement.dungeon == 'wc' and replacement.title == 'Нова група')
+local sentUpdates = 0
+local allowUpdateSend = true
+local origSend = model.send
+model.send = function(kind, payload)
+    if kind == 'UPDATE' then
+        if not allowUpdateSend then return false end
+        sentUpdates = sentUpdates + 1
+    end
+    return origSend(kind, payload)
+end
+assert(model:UpdateDescription(replacement.id, 'Оновлений опис групи'))
+assert(replacement.description == 'Оновлений опис групи' and sentUpdates == 1)
+local prevRev = replacement.revision
+allowUpdateSend = false
+local okRollback = model:UpdateDescription(replacement.id, 'Неуспішний опис')
+assert(not okRollback and replacement.description == 'Оновлений опис групи' and replacement.revision == prevRev,
+    'UpdateDescription did not roll back description and revision on send failure')
 ''')
+
 print('Group model checks passed')

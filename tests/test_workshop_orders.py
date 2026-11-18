@@ -390,6 +390,55 @@ def test_embedded_orders():
     print('Embedded workshop order checks passed')
 
 
+def test_bop_filter_reloads_after_item_data():
+    lua = client('BopTester', embedded=True)
+    tick(lua)
+    lua.execute('''
+        local cachedBindType = nil
+        function GetItemInfo(id)
+            if id == 9001 then
+                if cachedBindType == nil then return nil end
+                return 'Bind Item', nil, 1, 1, 1, '', '', 1, '', 134400, 0, 0, 0, cachedBindType
+            elseif id == 9002 then
+                return 'Trade Item', nil, 1, 1, 1, '', '', 1, '', 134400, 0, 0, 0, 0
+            end
+        end
+        local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        scope.recipes['Crafter Mon'] = {
+            [7001] = {recipe=7001, item=9001, profession=171, seen=GetServerTime(), name='BoP Potion', product='BoP Potion'},
+            [7002] = {recipe=7002, item=9002, profession=171, seen=GetServerTime(), name='Trade Potion', product='Trade Potion'},
+        }
+        OldKraken.Workshop:Show()
+        OldKraken.WorkshopRecipes:ShowProfession(171)
+        local function drainTimers()
+            while #timers > 0 do
+                local pending = timers; timers = {}
+                for _, t in ipairs(pending) do t() end
+            end
+        end
+        drainTimers()
+        local function hasVisibleRecipe(label)
+            for _, frame in ipairs(frames) do
+                if frame:IsShown() and type(frame.name) == 'table' and frame.name.text == label then return true end
+            end
+            return false
+        end
+        assert(hasVisibleRecipe('BoP Potion') and hasVisibleRecipe('Trade Item'))
+        cachedBindType = 1
+        local fired = false
+        for _, frame in ipairs(frames) do
+            if frame.scripts and frame.scripts.OnEvent and frame.events and frame.events.GET_ITEM_INFO_RECEIVED then
+                frame.scripts.OnEvent(frame, 'GET_ITEM_INFO_RECEIVED', 9001, true)
+                fired = true
+            end
+        end
+        drainTimers()
+        assert(fired)
+        assert(hasVisibleRecipe('Trade Item') and not hasVisibleRecipe('BoP Potion') and not hasVisibleRecipe('Bind Item'),
+            'BoP recipe should be hidden after GET_ITEM_INFO_RECEIVED loads bindType=1')
+    ''')
+
+
 if __name__ == '__main__':
     test_orders()
     test_relayed_actions_cannot_impersonate_worker()
@@ -397,4 +446,5 @@ if __name__ == '__main__':
     test_incomplete_profession_scan()
     test_partial_recipe_scan_retains_records()
     test_order_relay_and_owner_authority()
+    test_bop_filter_reloads_after_item_data()
     print('Workshop order checks passed')

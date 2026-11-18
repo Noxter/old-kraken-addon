@@ -313,6 +313,20 @@ ui.requestsButton.scripts.OnClick()
 local requestWindow = OldKrakenRequestsFrame
 assert(requestWindow.entries[1].name == 'New Applicant')
 assert(requestWindow.entries[2].name == 'Old Applicant')
+local whisperedTarget
+function ChatFrame_SendTell(target) whisperedTarget = target end
+requestWindow.rows[1].hover.scripts.OnMouseUp(requestWindow.rows[1].hover, 'LeftButton')
+assert(whisperedTarget == 'New Applicant', 'left-click on applicant did not whisper')
+
+local sentGuildChat
+function IsInGuild() return true end
+function SendChatMessage(msg, channel) if channel == 'GUILD' then sentGuildChat = msg end end
+ui.tabBar.tabs.create.scripts.OnClick()
+selectActivityCard('rfc')
+ui.titleBox:SetText('Рейд на Оніксію')
+ui.descriptionBox:SetText(string.rep('Привіт ', 35))
+ui.createButton.scripts.OnClick()
+assert(type(sentGuildChat) == 'string' and #sentGuildChat <= 255, 'guild chat announce exceeded 255 bytes: ' .. tostring(sentGuildChat and #sentGuildChat))
 
 OldKraken.listeners.GROUP_FINDER_NEW(wcGroup)
 local alert

@@ -1633,6 +1633,20 @@ local function createWindow(parent)
     end
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
+    local function truncateUtf8Bytes(text, limit)
+        if type(text) ~= 'string' or #text <= limit then return text or '' end
+        if limit <= 0 then return '' end
+        local cut = limit
+        local nextByte = text:byte(cut + 1)
+        if nextByte and nextByte >= 128 and nextByte < 192 then
+            while cut > 0 do
+                local b = text:byte(cut)
+                cut = cut - 1
+                if not b or b < 128 or b >= 192 then break end
+            end
+        end
+        return text:sub(1, cut)
+    end
     local function announceGroupInGuildChat(activityName, currentCount, maxPlayers, minLv, maxLv, descText)
         if type(IsInGuild) ~= 'function' or not IsInGuild() then return end
         local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
@@ -1645,9 +1659,28 @@ local function createWindow(parent)
         if minLv and maxLv and minLv > 0 and maxLv > 0 then
             metaParts[#metaParts + 1] = 'рівні ' .. minLv .. '–' .. maxLv
         end
-        local note = (descText or ''):match('^%s*(.-)%s*$')
-        local notePart = note ~= '' and (' · ' .. note) or ''
-        local msg = ('[Old Kraken] Збір групи: ' .. activityName .. ' (' .. table.concat(metaParts, ', ') .. ')' .. notePart .. ' — запис у вкладці «Групи» (/okr).'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+        local cleanActivity = tostring(activityName or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+        local prefix = '[Old Kraken] Збір групи: ' .. cleanActivity .. ' (' .. table.concat(metaParts, ', ') .. ')'
+        local suffix = ' — запис у вкладці «Групи» (/okr).'
+        local note = ((descText or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')):match('^%s*(.-)%s*$')
+        local maxBytes = 255
+        if #prefix + #suffix > maxBytes then
+            local ellipsis = '…'
+            prefix = truncateUtf8Bytes(prefix, math.max(0, maxBytes - #suffix - #ellipsis)) .. ellipsis
+        end
+        local notePart = ''
+        if note ~= '' then
+            local sep = ' · '
+            local budget = maxBytes - #prefix - #suffix - #sep
+            if budget > 4 then
+                if #note > budget then
+                    local ellipsis = '…'
+                    note = truncateUtf8Bytes(note, budget - #ellipsis) .. ellipsis
+                end
+                notePart = sep .. note
+            end
+        end
+        local msg = prefix .. notePart .. suffix
         local sent, err = pcall(sendChat, msg, 'GUILD')
         if not sent then print('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ' .. tostring(err)) end
     end

@@ -655,7 +655,16 @@ end
 function Recipes:GetRosterPresentation() return onlineIndex() end
 function Recipes:FormatPlayerName(name,classes) return playerLabel(name,classes or {}) end
 function Recipes:FormatOnlineStatus(name,online) return statusLabel(name,online or {}) end
-local bopCache={}
+local bopCache,requestedItems,pendingItems={},{},{}
+local function requestItemData(id)
+    if not id or id<=0 then return end
+    pendingItems[id]=true
+    local now=GetTime()
+    if not requestedItems[id] or now-requestedItems[id]>=5 then
+        requestedItems[id]=now
+        if C_Item and type(C_Item.RequestLoadItemDataByID)=='function' then pcall(C_Item.RequestLoadItemDataByID,id) end
+    end
+end
 local function isBindOnPickup(r)
     local id=r and r.item or 0
     if id<=0 then return false end
@@ -669,6 +678,7 @@ local function isBindOnPickup(r)
             return cached
         end
     end
+    requestItemData(id)
     return false
 end
 local function recipeIcon(r)
@@ -681,7 +691,6 @@ local function recipeIcon(r)
     end
     return 134400
 end
-local requestedItems,pendingItems={},{}
 function Recipes:ItemLabel(id)
     local name,icon
     if C_Item and type(C_Item.GetItemNameByID)=='function' then
@@ -692,14 +701,7 @@ function Recipes:ItemLabel(id)
     end
     local getIcon=C_Item and C_Item.GetItemIconByID or GetItemIcon
     if type(getIcon)=='function' then local ok,value=pcall(getIcon,id); if ok and (usable(value,'number') or usable(value,'string')) then icon=value end end
-    if not name then
-        pendingItems[id]=true
-        local now=GetTime()
-        if not requestedItems[id] or now-requestedItems[id]>=5 then
-            requestedItems[id]=now
-            if C_Item and type(C_Item.RequestLoadItemDataByID)=='function' then pcall(C_Item.RequestLoadItemDataByID,id) end
-        end
-    end
+    if not name then requestItemData(id) end
     return '|T'..tostring(icon or 134400)..':22:22:0:0|t |cffffffff'..(name or 'Завантаження назви…')..'|r'
 end
 local itemEvents=CreateFrame('Frame')
