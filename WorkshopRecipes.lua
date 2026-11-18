@@ -690,18 +690,38 @@ local RECIPE_TYPE_LABELS={
     all='Усі типи', armor='Броня', weapon='Зброя', bag='Сумки', trinket='Аксесуари',
     potion='Зілля', elixir='Еліксири', flask='Фляги', enhancement='Покращення',
     explosive='Вибухівка', device='Пристрої', reagent='Реагенти', other='Інше',
+    ['armor:head']='Голова', ['armor:shoulder']='Плечі', ['armor:back']='Спина',
+    ['armor:chest']='Груди', ['armor:shirt']='Сорочка', ['armor:wrist']='Наручі',
+    ['armor:hands']='Рукавиці', ['armor:waist']='Пояс', ['armor:legs']='Штани',
+    ['armor:feet']='Чоботи', ['armor:shield']='Щит',
 }
 local RECIPE_TYPE_ORDER={'armor','weapon','bag','trinket','potion','elixir','flask','enhancement','explosive','device','reagent','other'}
+local ARMOR_SLOT_ORDER={
+    'armor:head','armor:shoulder','armor:back','armor:chest','armor:shirt',
+    'armor:wrist','armor:hands','armor:waist','armor:legs','armor:feet','armor:shield',
+}
 local EQUIP_LOC_TYPES={
     INVTYPE_BAG='bag', INVTYPE_QUIVER='bag',
     INVTYPE_TRINKET='trinket', INVTYPE_NECK='trinket', INVTYPE_FINGER='trinket',
     INVTYPE_WEAPON='weapon', INVTYPE_2HWEAPON='weapon', INVTYPE_WEAPONMAINHAND='weapon',
     INVTYPE_WEAPONOFFHAND='weapon', INVTYPE_RANGED='weapon', INVTYPE_THROWN='weapon',
     INVTYPE_RANGEDRIGHT='weapon', INVTYPE_HOLDABLE='other',
-    INVTYPE_SHIELD='armor', INVTYPE_HEAD='armor', INVTYPE_SHOULDER='armor', INVTYPE_BODY='armor',
-    INVTYPE_CHEST='armor', INVTYPE_ROBE='armor', INVTYPE_WAIST='armor', INVTYPE_LEGS='armor',
-    INVTYPE_FEET='armor', INVTYPE_WRIST='armor', INVTYPE_HAND='armor', INVTYPE_CLOAK='armor',
+    INVTYPE_SHIELD='armor:shield', INVTYPE_HEAD='armor:head', INVTYPE_SHOULDER='armor:shoulder', INVTYPE_BODY='armor:shirt',
+    INVTYPE_CHEST='armor:chest', INVTYPE_ROBE='armor:chest', INVTYPE_WAIST='armor:waist', INVTYPE_LEGS='armor:legs',
+    INVTYPE_FEET='armor:feet', INVTYPE_WRIST='armor:wrist', INVTYPE_HAND='armor:hands', INVTYPE_CLOAK='armor:back',
 }
+local function matchesRecipeType(cat, selected)
+    if selected=='all' then return true end
+    if selected=='armor' then return cat=='armor' or cat:sub(1,6)=='armor:' end
+    return cat==selected
+end
+local function typeFilterLabel(selected)
+    if not selected or selected=='all' then return RECIPE_TYPE_LABELS.all end
+    return '|cffe0b052Тип: '..(RECIPE_TYPE_LABELS[selected] or selected)..'|r'
+end
+local function updateTypeFilterText()
+    if frame and frame.typeFilter then UIDropDownMenu_SetText(frame.typeFilter,typeFilterLabel(selectedType)) end
+end
 local function classifyItemBySubType(itemType, itemSubType, classID)
     local sub=lower((itemSubType or '')..' '..(itemType or ''))
     if sub:find('flask',1,true) or sub:find('насто',1,true) or sub:find('фляг',1,true) then return 'flask' end
@@ -744,10 +764,10 @@ end
 local function ensureAvailableTypes()
     local contextKey=typeContextKey()
     if availableTypeCache.rev==indexRevision and availableTypeCache.itemRev==itemDataRevision and availableTypeCache.key==contextKey then
-        return availableTypeCache.list, availableTypeCache.set
+        return availableTypeCache.list, availableTypeCache.set, true
     end
     if typeScanJob and typeScanJob.rev==indexRevision and typeScanJob.itemRev==itemDataRevision and typeScanJob.key==contextKey then
-        return availableTypeCache.list, availableTypeCache.set
+        return {'all'}, {all=true}, false
     end
     local job={rev=indexRevision,itemRev=itemDataRevision,key=contextKey}
     typeScanJob=job
@@ -760,7 +780,9 @@ local function ensureAvailableTypes()
                 and (targetProf or targetOwner or not isSecondary)
                 and (not targetSelect or ((targetPicker==0 or r.profession==targetPicker) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession)))
                 and not isBindOnPickup(r) then
-                present[classifyRecipe(r)]=true
+                local cat=classifyRecipe(r)
+                present[cat]=true
+                if cat:sub(1,6)=='armor:' then present.armor=true end
             end
         end
     end,function()
@@ -770,10 +792,13 @@ local function ensureAvailableTypes()
         for _,key in ipairs(RECIPE_TYPE_ORDER) do
             if present[key] then list[#list+1]=key; set[key]=true end
         end
+        for _,slot in ipairs(ARMOR_SLOT_ORDER) do
+            if present[slot] then set[slot]=true end
+        end
         availableTypeCache={rev=job.rev,itemRev=job.itemRev,key=job.key,list=list,set=set}
         changed()
     end,function() return typeScanJob==job end)
-    return availableTypeCache.list, availableTypeCache.set
+    return {'all'}, {all=true}, false
 end
 local function recipeIcon(r)
     local getIcon=type(C_Item)=='table' and C_Item.GetItemIconByID or GetItemIcon
@@ -891,9 +916,9 @@ render=function()
         end
         frame.typeFilter:SetShown(showTypeFilter)
         if showTypeFilter then
-            local _,presentTypes=ensureAvailableTypes()
-            if availableTypeCache.key==ctxKey and selectedType~='all' and not presentTypes[selectedType] then selectedType='all' end
-            UIDropDownMenu_SetText(frame.typeFilter,RECIPE_TYPE_LABELS[selectedType] or 'Усі типи')
+            local _,presentTypes,ready=ensureAvailableTypes()
+            if ready and availableTypeCache.key==ctxKey and selectedType~='all' and not presentTypes[selectedType] then selectedType='all' end
+            updateTypeFilterText()
         end
     end
     frame.onlineOnly:SetShown(mastersView and true or false)
@@ -971,7 +996,7 @@ render=function()
             and (professionContext or viewOwner or not isSecondary)
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
-            and (not showTypeFilter or selectedType=='all' or classifyRecipe(entry.record)==selectedType)
+            and (not showTypeFilter or matchesRecipeType(classifyRecipe(entry.record),selectedType))
             and matchesFilter(entry.record,filter) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
@@ -1139,17 +1164,61 @@ local function createWindow(parent)
     end)
     f.pickProfession:Hide()
     f.typeFilter=CreateFrame('Frame','OldKrakenRecipeTypeFilter',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f.typeFilter,{rounded=true})
-    f.typeFilter:SetPoint('TOPLEFT',f,'TOPLEFT',parent and 446 or 439,parent and -61 or -71); UIDropDownMenu_SetWidth(f.typeFilter,parent and 170 or 160)
-    UIDropDownMenu_Initialize(f.typeFilter,function(_,level)
-        local types=ensureAvailableTypes()
-        for _,typeKey in ipairs(types) do
-            local value=typeKey; local info=UIDropDownMenu_CreateInfo()
-            info.text=RECIPE_TYPE_LABELS[value] or value; info.value=value; info.checked=selectedType==value
-            info.func=function() selectedType=value; offset=0; selectedEntry=nil; UIDropDownMenu_SetText(f.typeFilter,info.text); render() end
-            UIDropDownMenu_AddButton(info,level)
+    local menuWidth=parent and 170 or 160
+    f.typeFilter:SetPoint('TOPLEFT',f,'TOPLEFT',parent and 446 or 439,parent and -61 or -71); UIDropDownMenu_SetWidth(f.typeFilter,menuWidth)
+    UIDropDownMenu_Initialize(f.typeFilter,function(_,level,menuList)
+        level=level or 1
+        local function applyType(value)
+            selectedType=value; offset=0; selectedEntry=nil
+            updateTypeFilterText()
+            if type(CloseDropDownMenus)=='function' then CloseDropDownMenus() end
+            render()
+        end
+        local types,presentSet,ready=ensureAvailableTypes()
+        if not ready then
+            if level==1 then
+                local allInfo=UIDropDownMenu_CreateInfo()
+                allInfo.text=RECIPE_TYPE_LABELS.all; allInfo.value='all'; allInfo.checked=selectedType=='all'; allInfo.minWidth=menuWidth
+                allInfo.func=function() applyType('all') end
+                UIDropDownMenu_AddButton(allInfo,level)
+                local loading=UIDropDownMenu_CreateInfo()
+                loading.text='Завантаження…'; loading.disabled=true; loading.notCheckable=true; loading.minWidth=menuWidth
+                UIDropDownMenu_AddButton(loading,level)
+            elseif level==2 and menuList=='armor' then
+                local loading=UIDropDownMenu_CreateInfo()
+                loading.text='Завантаження…'; loading.disabled=true; loading.notCheckable=true; loading.minWidth=140
+                UIDropDownMenu_AddButton(loading,level)
+            end
+            return
+        end
+        if level==1 then
+            for _,typeKey in ipairs(types) do
+                local value=typeKey; local info=UIDropDownMenu_CreateInfo()
+                info.text=RECIPE_TYPE_LABELS[value] or value; info.value=value; info.checked=selectedType==value; info.minWidth=menuWidth
+                if value=='armor' then
+                    local hasSlots=false
+                    for _,slot in ipairs(ARMOR_SLOT_ORDER) do if presentSet[slot] then hasSlots=true; break end end
+                    if hasSlots then info.hasArrow=true; info.menuList='armor' end
+                end
+                info.func=function() applyType(value) end
+                UIDropDownMenu_AddButton(info,level)
+            end
+        elseif level==2 and menuList=='armor' then
+            local allArmor=UIDropDownMenu_CreateInfo()
+            allArmor.text='Уся броня'; allArmor.value='armor'; allArmor.checked=selectedType=='armor'; allArmor.minWidth=140
+            allArmor.func=function() applyType('armor') end
+            UIDropDownMenu_AddButton(allArmor,level)
+            for _,slot in ipairs(ARMOR_SLOT_ORDER) do
+                if presentSet[slot] then
+                    local value=slot; local info=UIDropDownMenu_CreateInfo()
+                    info.text=RECIPE_TYPE_LABELS[value] or value; info.value=value; info.checked=selectedType==value; info.minWidth=140
+                    info.func=function() applyType(value) end
+                    UIDropDownMenu_AddButton(info,level)
+                end
+            end
         end
     end)
-    UIDropDownMenu_SetText(f.typeFilter,'Усі типи')
+    UIDropDownMenu_SetText(f.typeFilter,typeFilterLabel('all'))
     f.count=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); f.count:SetPoint('TOPLEFT',f,'TOPLEFT',20,-104)
     for i=1,PAGE_SIZE do
         rows[i]=button(f,'',20,-125-(i-1)*26,410,function(self)

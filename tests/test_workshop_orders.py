@@ -48,7 +48,8 @@ def client(name, embedded=False):
         function UIDropDownMenu_SetText(f,text) f.text=text end
         function UIDropDownMenu_Initialize(f,fn) f.dropdown=fn end
         function UIDropDownMenu_CreateInfo() return {} end
-        function UIDropDownMenu_AddButton(item) choices[#choices+1]=item end
+        function UIDropDownMenu_AddButton(item,level) item.level=level or 1; choices[#choices+1]=item end
+        function CloseDropDownMenus() dropdownClosed=(dropdownClosed or 0)+1 end
         function selectOption(frame,value)
             choices={}; frame.dropdown(frame,1)
             for _,item in ipairs(choices) do if item.value==value then item.func(); return end end

@@ -136,7 +136,7 @@ def test_recipe_type_filter():
         OldKraken.WorkshopRecipes:ShowMemberProfession('Smith Mon', 164)
         drainTimers()
         for _, o in ipairs(dropdownOptions()) do if o.value == 'armor' then o.func() end end
-        assert(dd.text == 'Броня')
+        assert(dd.text == '|cffe0b052Тип: Броня|r')
         OldKraken.WorkshopRecipes:ShowMemberProfession('OtherSmith Mon', 164)
         drainTimers()
         assert(dd.text == 'Усі типи', 'switching viewOwner must reset selectedType even when both have armor')
@@ -181,8 +181,152 @@ def test_standalone_type_filter():
         end
         local dd = OldKrakenRecipeTypeFilter
         assert(dd and dd:IsShown(), 'standalone recipes window must show type filter')
+        choices = {}
+        dd.dropdown(dd, 1)
+        assert(choices[1].minWidth == 160, 'standalone dropdown must set minWidth=160')
+        for _, o in ipairs(choices) do if o.value == 'potion' then o.func() end end
+        assert(dd.text == '|cffe0b052Тип: Зілля|r', 'standalone active filter must use gold label')
         OldKraken.WorkshopRecipes:Choose(function() end, 171)
         assert(not dd:IsShown(), 'standalone selectRecipe must hide type filter to avoid overlap')
+    ''')
+
+
+def test_armor_slots_and_submenu():
+    lua = client('ArmorSlotsSubmenu', embedded=True)
+    tick(lua)
+    lua.execute('''
+        local lateLoaded = false
+        local items = {
+            [6001] = {'Head Item', 'Armor', 'Plate', 'INVTYPE_HEAD', 4, 4, 0},
+            [6002] = {'Shoulder Item', 'Armor', 'Plate', 'INVTYPE_SHOULDER', 4, 4, 0},
+            [6003] = {'Back Item', 'Armor', 'Cloth', 'INVTYPE_CLOAK', 4, 1, 0},
+            [6004] = {'Chest Item', 'Armor', 'Plate', 'INVTYPE_CHEST', 4, 4, 0},
+            [6005] = {'Robe Item', 'Armor', 'Cloth', 'INVTYPE_ROBE', 4, 1, 0},
+            [6006] = {'Shirt Item', 'Armor', 'Miscellaneous', 'INVTYPE_BODY', 4, 0, 0},
+            [6007] = {'Wrist Item', 'Armor', 'Plate', 'INVTYPE_WRIST', 4, 4, 0},
+            [6008] = {'Hands Item', 'Armor', 'Plate', 'INVTYPE_HAND', 4, 4, 0},
+            [6009] = {'Waist Item', 'Armor', 'Plate', 'INVTYPE_WAIST', 4, 4, 0},
+            [6010] = {'Legs Item', 'Armor', 'Plate', 'INVTYPE_LEGS', 4, 4, 0},
+            [6011] = {'Feet Item', 'Armor', 'Plate', 'INVTYPE_FEET', 4, 4, 0},
+            [6012] = {'Shield Item', 'Armor', 'Shields', 'INVTYPE_SHIELD', 4, 6, 0},
+            [6013] = {'NoLoc Armor', 'Armor', 'Cloth', '', 4, 1, 0},
+        }
+        GetItemInfo = nil
+        C_Item = C_Item or {}
+        C_Item.GetItemInfo = function(id)
+            if id == 6014 then
+                if not lateLoaded then return nil end
+                return 'Late Pants', nil, 2, 1, 1, 'Armor', 'Mail', 1, 'INVTYPE_LEGS', 134400, 0, 4, 3, 0
+            end
+            local d = items[id]
+            if not d then return nil end
+            return d[1], nil, 1, 1, 1, d[2], d[3], 1, d[4], 134400, 0, d[5], d[6], d[7]
+        end
+
+        local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        local smith = {}
+        for idx = 1, 13 do
+            smith[9000 + idx] = {recipe = 9000 + idx, item = 6000 + idx, profession = 164, seen = GetServerTime(), name = 'Item ' .. idx, product = 'Item ' .. idx}
+        end
+        scope.recipes['MasterA Mon'] = smith
+        scope.recipes['MasterB Mon'] = {
+            [9001] = {recipe = 9001, item = 6001, profession = 164, seen = GetServerTime(), name = 'Head Only', product = 'Head Only'},
+        }
+        scope.recipes['TailorC Mon'] = {
+            [9101] = {recipe = 9101, item = 6014, profession = 197, seen = GetServerTime(), name = 'Late Pants', product = 'Late Pants'},
+        }
+
+        local function drainTimers()
+            while #timers > 0 do
+                local pending = timers; timers = {}
+                for _, t in ipairs(pending) do t() end
+            end
+        end
+
+        OldKraken.Workshop:Show()
+        OldKraken.WorkshopRecipes:ShowProfession(164)
+        drainTimers()
+
+        local recipesView = OldKraken.UIHub.pages.workshop.frame.recipesView
+        local dd = OldKrakenRecipeTypeFilter
+        assert(dd.text == 'Усі типи', 'default filter label must be Усі типи')
+
+        -- Level 1 must contain only base categories, no armor:* subcategories, and armor must have hasArrow + menuList.
+        choices = {}
+        dd.dropdown(dd, 1)
+        local armorItem
+        for _, o in ipairs(choices) do
+            assert(not o.value:find(':', 1, true), 'level 1 must not contain armor:* subcategories: ' .. tostring(o.value))
+            assert(o.minWidth == 170, 'embedded level 1 must set minWidth=170')
+            if o.value == 'armor' then armorItem = o end
+        end
+        assert(armorItem and armorItem.hasArrow and armorItem.menuList == 'armor', 'armor must open level 2 submenu')
+
+        -- Level 2 must start with 'Уся броня' and list all 11 armor slots in fixed order (CHEST + ROBE grouped under armor:chest).
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        local expectedSlots = {
+            'armor', 'armor:head', 'armor:shoulder', 'armor:back', 'armor:chest', 'armor:shirt',
+            'armor:wrist', 'armor:hands', 'armor:waist', 'armor:legs', 'armor:feet', 'armor:shield',
+        }
+        assert(#choices == #expectedSlots, 'level 2 must contain Уся броня + 11 slots, got ' .. #choices)
+        for i, v in ipairs(expectedSlots) do
+            assert(choices[i].value == v and choices[i].level == 2, 'slot order mismatch at ' .. i)
+        end
+        assert(choices[1].text == 'Уся броня')
+
+        -- Selecting 'Уся броня' matches all 13 items (12 equipLoc slots + 1 subtype-only armor without equipLoc).
+        dropdownClosed = 0
+        choices[1].func()
+        assert(dropdownClosed >= 1, 'selecting Уся броня must close dropdown menus')
+        assert(dd.text == '|cffe0b052Тип: Броня|r')
+        assert(recipesView.count.text:find('Знайдено: 13 ', 1, true), 'armor must include all 11 slots + subtype-only armor')
+
+        -- Selecting armor:chest matches both INVTYPE_CHEST and INVTYPE_ROBE (2 items).
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        for _, o in ipairs(choices) do if o.value == 'armor:chest' then o.func() end end
+        assert(dd.text == '|cffe0b052Тип: Груди|r')
+        assert(recipesView.count.text:find('Знайдено: 2 ', 1, true), 'CHEST and ROBE must both classify as armor:chest')
+
+        -- Selecting armor:legs matches only 1 item, closes menus, and marks checked on reopen.
+        dropdownClosed = 0
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        for _, o in ipairs(choices) do if o.value == 'armor:legs' then o.func() end end
+        assert(dropdownClosed >= 1, 'selecting level 2 slot must call CloseDropDownMenus')
+        assert(dd.text == '|cffe0b052Тип: Штани|r')
+        assert(recipesView.count.text:find('Знайдено: 1 ', 1, true), 'armor:legs must match only pants')
+
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        for _, o in ipairs(choices) do
+            if o.value == 'armor:legs' then assert(o.checked) else assert(not o.checked) end
+        end
+
+        -- Switching to MasterB Mon (who only has armor:head) must show only 'Уся броня' + 'Голова' in level 2 and reset filter.
+        OldKraken.WorkshopRecipes:ShowMemberProfession('MasterB Mon', 164)
+        drainTimers()
+        assert(dd.text == 'Усі типи', 'switching master must reset filter')
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        assert(#choices == 2 and choices[1].value == 'armor' and choices[2].value == 'armor:head',
+            'level 2 must omit absent slots for MasterB Mon')
+
+        -- Switching profession resets filter; late item load updates armor:legs availability in Tailoring.
+        OldKraken.WorkshopRecipes:ShowProfession(197)
+        drainTimers()
+        assert(dd.text == 'Усі типи', 'switching profession must reset filter')
+        lateLoaded = true
+        for _, f in ipairs(frames) do
+            if f.scripts and f.scripts.OnEvent and f.events and f.events.ITEM_DATA_LOAD_RESULT then
+                f.scripts.OnEvent(f, 'ITEM_DATA_LOAD_RESULT', 6014, true)
+            end
+        end
+        drainTimers()
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        assert(#choices == 2 and choices[2].value == 'armor:legs', 'late item data load must populate armor:legs in submenu')
     ''')
 
 
@@ -271,9 +415,126 @@ def test_type_cache_invalidates_on_item_change():
     ''')
 
 
+def test_stale_cache_during_context_switch():
+    lua = client('StaleCacheGuard', embedded=True)
+    tick(lua)
+    lua.execute('''
+        local origAfter = C_Timer.After
+        C_Timer.After = function(_, fn) timers[#timers + 1] = fn end
+        local items = {
+            [7001] = {'Head Item', 'Armor', 'Plate', 'INVTYPE_HEAD', 4, 4, 0},
+            [7002] = {'Legs Item', 'Armor', 'Plate', 'INVTYPE_LEGS', 4, 4, 0},
+            [7003] = {'Feet Item', 'Armor', 'Cloth', 'INVTYPE_FEET', 4, 1, 0},
+            [7004] = {'Healing Potion', 'Consumable', 'Potion', '', 0, 1, 0},
+        }
+        GetItemInfo = nil
+        C_Item = C_Item or {}
+        C_Item.GetItemInfo = function(id)
+            local d = items[id]
+            if not d then return nil end
+            return d[1], nil, 1, 1, 1, d[2], d[3], 1, d[4], 134400, 0, d[5], d[6], d[7]
+        end
+
+        local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        scope.recipes['Master1 Mon'] = {
+            [9501] = {recipe = 9501, item = 7001, profession = 164, seen = GetServerTime(), name = 'Head', product = 'Head'},
+            [9502] = {recipe = 9502, item = 7002, profession = 164, seen = GetServerTime(), name = 'Legs', product = 'Legs'},
+        }
+        scope.recipes['Master2 Mon'] = {
+            [9503] = {recipe = 9503, item = 7003, profession = 164, seen = GetServerTime(), name = 'Feet', product = 'Feet'},
+        }
+        for i = 1, 205 do
+            scope.recipes['Master2 Mon'][9600 + i] = {recipe = 9600 + i, item = 7003, profession = 164, seen = GetServerTime(), name = 'Feet ' .. i, product = 'Feet ' .. i}
+        end
+        scope.recipes['Alch Mon'] = {
+            [9504] = {recipe = 9504, item = 7004, profession = 171, seen = GetServerTime(), name = 'Potion', product = 'Potion'},
+        }
+        for i = 1, 205 do
+            scope.recipes['Alch Mon'][9900 + i] = {recipe = 9900 + i, item = 7004, profession = 171, seen = GetServerTime(), name = 'Potion ' .. i, product = 'Potion ' .. i}
+        end
+
+        local function drainTimers()
+            while #timers > 0 do
+                local pending = timers; timers = {}
+                for _, t in ipairs(pending) do t() end
+            end
+        end
+
+        -- Test A: Master switch before scan completes must not expose previous master's armor slots.
+        OldKraken.Workshop:Show()
+        OldKraken.WorkshopRecipes:ShowMemberProfession('Master1 Mon', 164)
+        local dd = OldKrakenRecipeTypeFilter
+        local recipesView = OldKraken.UIHub.pages.workshop.frame.recipesView
+        drainTimers()
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        assert(#choices == 3 and choices[2].value == 'armor:head' and choices[3].value == 'armor:legs')
+
+        -- Switch to Master2 Mon WITHOUT draining timers yet.
+        OldKraken.WorkshopRecipes:ShowMemberProfession('Master2 Mon', 164)
+        choices = {}
+        dd.dropdown(dd, 1)
+        for _, o in ipairs(choices) do
+            assert(o.value ~= 'armor', 'stale armor category must not appear while new master scan is pending')
+            if o.text == 'Завантаження…' then assert(o.disabled and o.func == nil, 'loading placeholder must have no callback') end
+        end
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        assert(#choices == 1 and choices[1].disabled and choices[1].func == nil and choices[1].value == nil,
+            'level 2 must not expose Master1 armor slots while Master2 scan is pending')
+
+        drainTimers()
+        choices = {}
+        dd.dropdown(dd, 2, 'armor')
+        assert(#choices == 2 and choices[1].value == 'armor' and choices[2].value == 'armor:feet',
+            'after Master2 scan completes, only Master2 slots must appear')
+
+        -- Test B & C: Profession switch + repeated dropdown opens before scan completes must not create duplicate jobs or leak old categories.
+        local timerCount = 0
+        local prevAfter = C_Timer.After
+        C_Timer.After = function(delay, fn)
+            timerCount = timerCount + 1
+            return prevAfter(delay, fn)
+        end
+
+        OldKraken.WorkshopRecipes:ShowProfession(171)
+        local afterSwitchTimers = timerCount
+        choices = {}
+        dd.dropdown(dd, 1)
+        for _, o in ipairs(choices) do
+            assert(o.value ~= 'armor', 'stale armor from Blacksmithing must not appear in Alchemy before scan completes')
+            if o.text == 'Завантаження…' then assert(o.disabled and o.func == nil) end
+        end
+        -- Re-open dropdown while scan is still pending: must NOT schedule duplicate scan job.
+        choices = {}
+        dd.dropdown(dd, 1)
+        assert(timerCount == afterSwitchTimers, 're-opening dropdown during active scan must not spawn duplicate scan jobs')
+        for _, o in ipairs(choices) do
+            assert(o.value ~= 'armor')
+        end
+        C_Timer.After = prevAfter
+
+        -- Test D: After scan completes, new profession categories work and filter properly.
+        drainTimers()
+        choices = {}
+        dd.dropdown(dd, 1)
+        local hasPotion, hasArmor = false, false
+        for _, o in ipairs(choices) do
+            if o.value == 'potion' then hasPotion = true; o.func() end
+            if o.value == 'armor' then hasArmor = true end
+        end
+        assert(hasPotion and not hasArmor, 'Alchemy must show potion and not armor after scan completes')
+        assert(dd.text == '|cffe0b052Тип: Зілля|r')
+        assert(recipesView.count.text:find('Знайдено: 206 ', 1, true))
+        C_Timer.After = origAfter
+    ''')
+
+
 if __name__ == '__main__':
     test_recipe_type_filter()
     test_standalone_type_filter()
     test_global_getiteminfo_fallback()
     test_type_cache_invalidates_on_item_change()
+    test_armor_slots_and_submenu()
+    test_stale_cache_during_context_switch()
     print('Workshop recipe type filter checks passed')
