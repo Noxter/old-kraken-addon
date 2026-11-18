@@ -315,7 +315,7 @@ local function createRoleSelector(parent, x, y, width)
         selector.buttons[i] = b
     end
     local badge = CreateFrame('Frame', nil, selector)
-    OldKraken.UIStyle.Panel(badge, {rounded = true})
+    OldKraken.UIStyle.Panel(badge, 0, 0, width, 28)
     badge:SetSize(width, 28)
     badge:SetPoint('TOPLEFT', selector, 'TOPLEFT', 0, 0)
     badge.text = badge:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')

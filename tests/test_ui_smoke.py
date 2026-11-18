@@ -40,7 +40,10 @@ OldKraken.UIStyle = {
     Button = function() end,
     Input = function() end,
     Dropdown = function() end,
-    Panel = function() end,
+    Panel = function(frame, x, y, width, height)
+        assert(frame and type(x) == 'number' and type(y) == 'number' and type(width) == 'number' and type(height) == 'number',
+            'UIStyle.Panel requires numeric x, y, width, height')
+    end,
     Font = function(fs) return fs end,
     Label = function(parent, text) local fs = parent:CreateFontString(); fs:SetText(text or ''); return fs end,
     Divider = function(parent) return parent:CreateTexture() end,
