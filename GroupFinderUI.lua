@@ -73,10 +73,46 @@ local applicationBadges = {
 local OFFLINE_APPLICATION_TTL = 300
 local people, guildRosterLoaded, ownerOfflineSince, offlinePruneTimerPending = {}, false, {}, false
 local refreshPeople
+-- The model receives the owner in the identity form ("Name Surname"), while the
+-- guild roster is keyed by another representation ("Name-Realm"), so a direct
+-- lookup misses and the owner looks offline. Compare normalised parts instead.
+-- No realm on either side is not a match: two characters may share a name on
+-- different realms, and a false match could prune a live application.
+local function ownerKey(name)
+    if type(name) ~= 'string' then return nil end
+    local character, realm = name:match('^([^-%s]+)[%-%s](.+)$')
+    if not character or character == '' or not realm or realm == '' then return nil end
+    return character .. '\1' .. realm:gsub('%-', ' ')
+end
+local indexedPeople, peopleIndex
+local function ownerRecords()
+    if indexedPeople == people then return peopleIndex end
+    indexedPeople, peopleIndex = people, {}
+    for name, rec in pairs(people) do
+        local key = ownerKey(name)
+        if key then peopleIndex[key] = rec end
+    end
+    return peopleIndex
+end
+local function ownerRecord(owner)
+    if type(owner) ~= 'string' or owner == '' then return nil end
+    local rec = people[owner]
+    if rec then return rec end
+    local key = ownerKey(owner)
+    if not key then return nil end
+    return ownerRecords()[key]
+end
+-- Three states, not two: only a confirmed offline record may expire an
+-- application. A missing record is unknown, so the application is kept.
 local function isOwnerOnline(owner)
     if not guildRosterLoaded or not owner or owner == Finder.identity then return true end
-    local rec = people[owner]
+    local rec = ownerRecord(owner)
     return rec ~= nil and rec.online == true
+end
+local function isOwnerOffline(owner)
+    if not guildRosterLoaded or not owner or owner == Finder.identity then return false end
+    local rec = ownerRecord(owner)
+    return rec ~= nil and rec.online == false
 end
 local function pruneOfflineApplications()
     if not guildRosterLoaded then return end
@@ -87,7 +123,7 @@ local function pruneOfflineApplications()
         if group and group.owner ~= Finder.identity then
             if isOwnerOnline(group.owner) then
                 ownerOfflineSince[key] = nil
-            else
+            elseif isOwnerOffline(group.owner) then
                 ownerOfflineSince[key] = ownerOfflineSince[key] or now
                 local remaining = OFFLINE_APPLICATION_TTL - (now - ownerOfflineSince[key])
                 if remaining <= 0 then
@@ -99,6 +135,10 @@ local function pruneOfflineApplications()
                 elseif not nextDelay or remaining < nextDelay then
                     nextDelay = remaining
                 end
+            else
+                -- Owner state is unknown, which is not the same as offline: keep
+                -- the application and forget any half-counted offline window.
+                ownerOfflineSince[key] = nil
             end
         else
             ownerOfflineSince[key] = nil

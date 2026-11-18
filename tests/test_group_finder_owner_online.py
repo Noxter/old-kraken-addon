@@ -29,11 +29,11 @@ local Finder = {identity = 'Me Realm', pending = {}, pendingVersions = {}, pendi
     + block
     + r"""
 local KEY = 'Owner Realm\001g1'
-local function reset(roster)
+local function reset(roster, elapsed)
     people = roster
     guildRosterLoaded = true
-    -- The owner was first seen as offline 400 seconds ago, past the TTL.
-    ownerOfflineSince = {[KEY] = NOW - 400}
+    -- The owner was first seen as offline `elapsed` seconds ago.
+    ownerOfflineSince = {[KEY] = NOW - (elapsed or 400)}
     Finder.pending = {[KEY] = 'apply'}
     Finder.pendingVersions = {[KEY] = 1}
     Finder.pendingRoles = {[KEY] = 'dps'}
@@ -57,6 +57,21 @@ reset({['Owner Realm'] = {online = false}})
 pruneOfflineApplications()
 assert(Finder.pending[KEY] == nil, 'an owner confirmed offline must still be pruned after the TTL')
 assert(Finder.pendingVersions[KEY] == nil and Finder.pendingRoles[KEY] == nil)
+
+-- Normalisation must not match a different realm's character with the same name,
+-- even when that other entry is offline: a false match would prune a live
+-- application.
+reset({['Owner-Realm2'] = {online = false}})
+pruneOfflineApplications()
+assert(Finder.pending[KEY] ~= nil,
+    'a same-named character from another realm must not count as this owner')
+
+-- A confirmed-offline owner is pruned only once the full TTL has elapsed.
+reset({['Owner-Realm'] = {online = false}}, 100)
+pruneOfflineApplications()
+assert(Finder.pending[KEY] ~= nil, 'an offline owner must not be pruned before the TTL elapses')
+assert(ownerOfflineSince[KEY] == NOW - 100,
+    'the offline window must keep counting from when the owner was first seen offline')
 """
 )
 print("Group Finder owner online-state checks passed")
