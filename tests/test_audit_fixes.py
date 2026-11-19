@@ -253,10 +253,14 @@ def run_task1_roster_uihub():
         GetGuildRosterInfo = function(i) return unpack(mockRoster[i]) end
         OldKraken.DB.settings.roster.class = 'ALL'
         OldKraken.GuildRoster:Load()
-        assert(OldKrakenRosterFrame.shownChip.label:GetText():find('2'), 'ALL class filter must show both classes')
+        local shownAll = OldKrakenRosterFrame.shownChip.label:GetText()
+        assert(tonumber(shownAll:match('%d+')) == 2, 'ALL class filter must show both classes: ' .. shownAll)
         OldKraken.DB.settings.roster.class = 'MAGE'
+        OldKraken.GuildRoster:Show()
+        assert(OldKraken.DB.settings.roster.class == 'MAGE', 'Valid user class must be preserved')
         OldKraken.GuildRoster:Render()
-        assert(OldKrakenRosterFrame.shownChip.label:GetText():find('1'), 'Specific class filter must show only matching class')
+        local shownMage = OldKrakenRosterFrame.shownChip.label:GetText()
+        assert(tonumber(shownMage:match('%d+')) == 1, 'Specific class filter must show only matching class: ' .. shownMage)
         '''
     )
 
@@ -1049,9 +1053,14 @@ def run_real_persistence_roundtrips():
     rt7.execute(
         '''
         local f = OldKraken.GroupFinder
-        -- Expired tombstone pruned in new runtime; deletedGroups still blocks stale ANNOUNCE
+        local keyD = 'Alice Sun\001' .. testIds.idD
+        assert(f.groups[keyD] ~= nil, 'Deleted tombstone must be restored on reload')
+        -- Advance past GROUP_TTL so Prune really expires the tombstone; deletedGroups blocks stale ANNOUNCE.
+        SetMockTime(5000 + 3601, 1700005000 + 3601)
         f:Prune()
-        assert(not f:ReceiveGroup('Alice Sun', staleD), 'Deleted group must remain blocked after real reload + Prune')
+        assert(f.groups[keyD] == nil, 'Expired tombstone must be pruned by TTL')
+        assert(not f:ReceiveGroup('Alice Sun', staleD),
+            'deletedGroups must block a stale ANNOUNCE after the tombstone is gone')
 
         -- Reopen idC in new runtime preserves per-sender floors
         assert(f:Reopen(testIds.idC))
