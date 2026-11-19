@@ -122,6 +122,46 @@ def test_direct_owner_replaces_newer_relay_in_real_recipe_store():
     ''')
 
 
+def test_direct_recipe_updates_override_relay_but_not_newer_direct_state():
+    lua = real_workshop_client('Carol')
+    lua.execute(r'''
+        local recipes=OldKraken.WorkshopRecipes
+        local scope=OldKraken.DB.workshop.guilds['Realm\001Guild']
+        local c=OldKraken.GroupFinder
+        local function record(id,deleted)
+            return {recipe=id,item=456,profession=171,seen=now,name='Relay',product='Potion',deleted=deleted}
+        end
+        assert(recipes:ImportSnapshot('Alice Mon',{record(101),record(102,true),record(103),record(104,true)},true,false))
+        local function direct(kind,id,seen,name)
+            handlers[kind]('Alice Mon','GUILD',c._pack({id,456,171,seen,name,'Potion'}))
+        end
+        direct('WRLEARN',101,now-1,'Learned')
+        direct('WRLEARN',102,now-1,'Restored')
+        direct('WRFORGET',103,now-1,'Forgotten')
+        direct('WRFORGET',104,now-1,'Forgotten')
+        assert(scope.recipes['Alice Mon'][101].name=='Learned')
+        assert(scope.recipes['Alice Mon'][102].name=='Restored')
+        assert(not scope.recipes['Alice Mon'][103] and not scope.recipes['Alice Mon'][104])
+        assert(scope.recipeSources['Alice Mon'][101]==false and scope.recipeSources['Alice Mon'][103]==false)
+        direct('WRLEARN',101,now-2,'Stale')
+        direct('WRFORGET',102,now-2,'Stale')
+        direct('WRLEARN',103,now-2,'Stale')
+        assert(scope.recipes['Alice Mon'][101].name=='Learned')
+        assert(scope.recipes['Alice Mon'][102].name=='Restored')
+        assert(not scope.recipes['Alice Mon'][103])
+        -- Direct search replies have the same authority as live updates.
+        assert(recipes:ImportSnapshot('Alice Mon',{record(105),record(106,true)},true,false))
+        recipes:ShowProfession(171)
+        local token=assert(recipes:CaptureView().activeQuery).token
+        handlers.WRBATCH('Alice Mon','GUILD',c._pack({'Carol Mon',token,105,456,171,now-1,'Batch direct','Potion'}))
+        assert(scope.recipes['Alice Mon'][105].name=='Batch direct')
+        clock=clock+11; recipes:ShowMasters(456,0)
+        token=assert(recipes:CaptureView().activeQuery).token
+        handlers.WRRESULT('Alice Mon','GUILD',c._pack({'Carol Mon',token,106,456,171,now-1,'Result direct','Potion'}))
+        assert(scope.recipes['Alice Mon'][106].name=='Result direct')
+    ''')
+
+
 def test_stalled_relay_fails_over_and_owner_preempts():
     lua = sync_client('Bob', [])
     g = lua.globals()
@@ -155,6 +195,57 @@ def test_stalled_relay_fails_over_and_owner_preempts():
     assert fields[1] == 'Relay2 Realm'
 
 
+def test_large_snapshot_recovers_a_lost_late_page_during_replay():
+    lua = sync_client('Bob', [])
+    g = lua.globals()
+    g.handlers['WRIDX']('Alice Realm', 'GUILD', pack(lua, ['Bob Realm','Alice Realm',7,65]))
+    pages = [pack(lua, ['Bob Realm','Alice Realm',7,n,65,n,456,171,1700000000,'Recipe','Potion','L'])
+             for n in range(1, 66)]
+    for payload in pages[:-1]:
+        g.handlers['WRPAGE']('Alice Realm', 'GUILD', payload)
+    for payload in pages[:-1]:
+        lua.execute('now=now+3; ticker(); drain()')
+        g.handlers['WRPAGE']('Alice Realm', 'GUILD', payload)
+    assert g.now > 280 and g.imported['Alice Realm'] is None
+    g.handlers['WRPAGE']('Alice Realm', 'GUILD', pages[-1])
+    assert len(g.imported['Alice Realm']) == 65
+
+    # A conflicting duplicate cannot prevent failover by pretending to be progress.
+    lua = sync_client('Bob', [])
+    g = lua.globals()
+    index = pack(lua, ['Bob Realm','Alice Realm',7,2])
+    g.handlers['WRIDX']('Relay1 Realm', 'GUILD', index)
+    first = pack(lua, ['Bob Realm','Alice Realm',7,1,2,1,456,171,1700000000,'Recipe','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', first)
+    lua.execute('now=150')
+    conflict = pack(lua, ['Bob Realm','Alice Realm',7,1,2,1,456,171,1700000000,'Altered','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', conflict)
+    g.handlers['WRIDX']('Relay2 Realm', 'GUILD', index)
+    lua.execute('ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Relay2 Realm'
+
+    # Identical replay traffic keeps a live relay from being replaced too early.
+    lua = sync_client('Bob', [])
+    g = lua.globals()
+    index = pack(lua, ['Bob Realm','Alice Realm',7,2])
+    g.handlers['WRIDX']('Relay1 Realm', 'GUILD', index)
+    first = pack(lua, ['Bob Realm','Alice Realm',7,1,2,1,456,171,1700000000,'Recipe','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', first)
+    lua.execute('now=149')
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', first)
+    lua.execute('now=150')
+    g.handlers['WRIDX']('Relay2 Realm', 'GUILD', index)
+    lua.execute('ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Relay1 Realm'
+    # The absolute six-hour deadline remains effective despite replay traffic.
+    lua.execute('now=21700')
+    last = pack(lua, ['Bob Realm','Alice Realm',7,2,2,2,456,171,1700000000,'Recipe','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', last)
+    assert g.imported['Alice Realm'] is None
+
+
 def test_packaged_version_identifies_actual_commit():
     with tempfile.TemporaryDirectory() as folder:
         toc = Path(folder) / 'OldKraken.toc'
@@ -176,6 +267,8 @@ if __name__ == '__main__':
     test_recovers_oversized_cancellation_saved_by_old_build()
     test_cancellation_uses_prior_membership_only_when_omitted()
     test_direct_owner_replaces_newer_relay_in_real_recipe_store()
+    test_direct_recipe_updates_override_relay_but_not_newer_direct_state()
     test_stalled_relay_fails_over_and_owner_preempts()
+    test_large_snapshot_recovers_a_lost_late_page_during_replay()
     test_packaged_version_identifies_actual_commit()
     print('Alpha regression checks passed')

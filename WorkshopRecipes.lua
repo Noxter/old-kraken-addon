@@ -520,7 +520,7 @@ comm:RegisterHandler('WRBATCH',function(sender,_,payload)
         if matches(r,activeQuery.query) and (people[sender][r.recipe] or cachedCount<5000) then
             local old=people[sender][r.recipe]
             if not old then cachedCount=cachedCount+1 end
-            local stored=storeRecipe(sender,r,false)
+            local stored=storeRecipe(sender,r,false,true)
             if stored then
                 local k=sender..'\001'..r.recipe
                 if resultSet[k] or resultCount<5000 then if not resultSet[k] then resultCount=resultCount+1 end; resultSet[k]={owner=sender,record=stored} end
@@ -538,7 +538,7 @@ comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if not matches(r,activeQuery.query) then return end
     if type(people[sender])~='table' then if count(people)>=1000 then return end; people[sender]={} end
     if not people[sender][r.recipe] and count(people[sender])>=5000 then return end
-    local stored=storeRecipe(sender,r,false); if not stored then return end
+    local stored=storeRecipe(sender,r,false,true); if not stored then return end
     local k=sender..'\001'..r.recipe
     if resultSet[k] or count(resultSet)<500 then resultSet[k]={owner=sender,record=stored} end
     changed(); indexRevision=indexRevision+1; recipeChanged=true
@@ -553,7 +553,7 @@ comm:RegisterHandler('WRLEARN',function(sender,_,payload)
     local old=people[sender][r.recipe]
     local sources=scope.recipeSources[sender]
     if validRecord(old) and old.seen>=r.seen and not (type(sources)=='table' and sources[r.recipe]) then return end
-    local stored=storeRecipe(sender,r,false); if not stored then return end
+    local stored=storeRecipe(sender,r,false,true); if not stored then return end
     if activeQuery and GetTime()<=activeQuery.untilTime then
         local k=sender..'\001'..r.recipe
         if matches(stored,activeQuery.query) and (resultSet[k] or count(resultSet)<500) then resultSet[k]={owner=sender,record=stored}
@@ -565,7 +565,7 @@ comm:RegisterHandler('WRFORGET',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
     local f=codec._unpackFields(payload,6); if not f or #f~=6 then return end
     local r={recipe=tonumber(f[1]),item=tonumber(f[2]),profession=tonumber(f[3]),seen=tonumber(f[4]),name=f[5],product=f[6],deleted=true}
-    if validRecord(r) and storeTombstone(sender,r,false) then changed(); indexRevision=indexRevision+1; recipeChanged=true end
+    if validRecord(r) and storeTombstone(sender,r,false,true) then changed(); indexRevision=indexRevision+1; recipeChanged=true end
 end)
 
 local events=CreateFrame('Frame')

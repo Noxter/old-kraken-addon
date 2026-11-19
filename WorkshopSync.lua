@@ -67,7 +67,7 @@ comm:RegisterHandler('WRIDX',function(sender,_,payload)
         elseif not direct and (pending.provider==sender or now-pending.lastProgress<45) then return end
     end
     if not pending and size(incoming)>=8 then return end
-    incoming[owner]={provider=sender,rev=rev,count=count,parts={},received=0,expires=now+21600,lastProgress=now,sent=false}
+    incoming[owner]={provider=sender,rev=rev,count=count,parts={},partPayloads={},received=0,recordCount=0,expires=now+21600,lastProgress=now,sent=false}
 end)
 comm:RegisterHandler('WRGET',function(sender,_,payload)
     if not active or not text(sender,128) or sender==identity then return end
@@ -91,7 +91,13 @@ comm:RegisterHandler('WRPAGE',function(sender,_,payload)
     if not f or #f<5 or (#f-5)%7~=0 or f[1]~=identity or not text(f[2],128) then return end
     local owner,rev,part,total=f[2],tonumber(f[3]),tonumber(f[4]),tonumber(f[5]); local pending=incoming[owner]
     if not pending or pending.provider~=sender or pending.rev~=rev or not int(part,1,5000) or not int(total,1,math.max(1,pending.count)) or part>total or (pending.total and pending.total~=total) or (#f==5 and pending.count>0) then return end
-    if pending.parts[part] then return end
+    if GetTime()>=pending.expires then incoming[owner]=nil; return end
+    if pending.parts[part] then
+        -- A replay may need many minutes to reach a missing late page.
+        -- Only an identical page from the selected provider proves activity.
+        if pending.partPayloads[part]==payload then pending.lastProgress=GetTime() end
+        return
+    end
     local records={}
     for i=6,#f,7 do
         if f[i+6]~='D' and f[i+6]~='L' then return end
@@ -99,7 +105,9 @@ comm:RegisterHandler('WRPAGE',function(sender,_,payload)
         if not recipes:ValidateSnapshotRecord(r) then return end
         records[#records+1]=r
     end
-    pending.total=total; pending.parts[part]=records; pending.received=pending.received+1; pending.lastProgress=GetTime()
+    if pending.recordCount+#records>pending.count then incoming[owner]=nil; return end
+    pending.total=total; pending.parts[part]=records; pending.partPayloads[part]=payload
+    pending.recordCount=pending.recordCount+#records; pending.received=pending.received+1; pending.lastProgress=GetTime()
     if pending.received~=total then return end
     local all,seen={},{}
     for i=1,total do for _,r in ipairs(pending.parts[i]) do
