@@ -111,6 +111,14 @@ local function countActiveGroups(groups)
     return count
 end
 
+local function countHiddenTombstones(groups)
+    local count = 0
+    for _, group in pairs(groups) do
+        if group.closed and group.hidden then count = count + 1 end
+    end
+    return count
+end
+
 -- Preserve unknown or externally joined players without guessing their role.
 function Finder:DungeonSlots(group, exclude)
     local slots, unassigned = {}, {}
@@ -301,7 +309,7 @@ function Finder:SyncPartyMembers(party, partyRoles)
     return true, changed
 end
 
-function Finder:ReceiveGroup(sender, payload)
+function Finder:ReceiveGroup(sender, payload, hiddenOwn)
     local f = unpackFields(payload, 215)
     if not f or #f < 12 then return false end
     local id, owner, rev, closed, title, category, description, maxSize, count = unpack(f, 1, 9)
@@ -348,8 +356,15 @@ function Finder:ReceiveGroup(sender, payload)
         if existing.revision == rev and self:EncodeGroup(existing) == payload then existing.seenAt = GetTime() end
         return false
     end
-    if not existing and countActiveGroups(self.groups) >= MAX_GROUPS then return false end
-    self.groups[key] = { id=id, owner=owner, revision=rev, closed=closed=='1', title=title,
+    local isHiddenTombstone = hiddenOwn == true and owner == self.identity and closed == '1'
+    if not existing then
+        if isHiddenTombstone then
+            if countHiddenTombstones(self.groups) >= MAX_GROUPS then return false end
+        elseif countActiveGroups(self.groups) >= MAX_GROUPS then
+            return false
+        end
+    end
+    self.groups[key] = { id=id, owner=owner, revision=rev, closed=closed=='1', hidden=isHiddenTombstone or nil, title=title,
         category=category, description=description, maxSize=maxSize, minLevel=minLevel,
         maxLevel=maxLevel, role=role, members=members, partyObserved=observed, memberRoles=memberRoles, dungeon=dungeon, seenAt=GetTime() }
     if self.pending[key] == 'pending' then

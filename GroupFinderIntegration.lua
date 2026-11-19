@@ -400,8 +400,20 @@ frame:SetScript('OnEvent', function(_, event)
         storage.legacyShortNames = nil
         storage.identityFormat = 2
     end
+    local hiddenMap = {}
+    if type(storage.hiddenGroups) == 'table' then
+        for id, hidden in pairs(storage.hiddenGroups) do
+            if type(id) == 'string' and hidden == true then hiddenMap[id] = true end
+        end
+    end
     if type(storage.records) == 'table' then
-        for _, record in ipairs(storage.records) do finder:ReceiveGroup(identity, record) end
+        local loaded = 0
+        for _, record in ipairs(storage.records) do
+            if loaded >= 200 then break end
+            local fields = type(record) == 'string' and finder._unpackFields(record, 215) or nil
+            local isHidden = fields and fields[1] and hiddenMap[fields[1]] == true or false
+            if finder:ReceiveGroup(identity, record, isHidden) then loaded = loaded + 1 end
+        end
     end
     if type(storage.hiddenGroups) == 'table' then
         for id, hidden in pairs(storage.hiddenGroups) do
