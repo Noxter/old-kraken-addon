@@ -55,7 +55,7 @@ OldKraken = {
         ApplySelection=function(card, selected) card.isSelected = selected and true or false end,
     },
     Communication = {},
-    GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end, CanPerformRole=function() return true end},
+    GroupFinder = {_pack=function() return '' end, _unpackFields=function() return nil end, CanPerformRole=function() return true end, GetGameRoles=function() return nil end},
 }
 StaticPopupDialogs={}
 function StaticPopup_Show(_,_,_,callback)

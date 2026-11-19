@@ -222,6 +222,12 @@ comm:RegisterHandler('CVSTATE', function(sender,id,payload) receiveEvent(sender,
 local function canPerformRole(name,role)
     return role=='flex' or codec:CanPerformRole(name,role)
 end
+local function canDecideRole(name,role)
+    -- Existing signups were checked when received; the shared role cache may
+    -- have been cleared since then or lost when the organizer reloaded.
+    local available=codec:GetGameRoles(name) or (codec.roleCapabilities and codec.roleCapabilities[name])
+    return not available or role=='flex' or available[role]==true
+end
 local function updateSignup(sender, owner, id, role, version)
     local key = eventKey(owner,id)
     local e = events[key]
@@ -403,7 +409,7 @@ end
 function Events:Decide(key, name, status)
     local e=events[key]
     if not active or not e or e.owner~=identity or e.cancelled or not e.people[name] or name==identity or not statuses[status] or status=='pending' then return false end
-    if (status=='accepted' or status=='reserve') and not canPerformRole(name,e.people[name]) then return false end
+    if (status=='accepted' or status=='reserve') and not canDecideRole(name,e.people[name]) then return false end
     if status=='accepted' and e.statuses[name]~='accepted' and acceptedCount(e)>=e.size then return false end
     if e.statuses[name]==status then return true end
     local previous=e.statuses[name]
@@ -847,7 +853,7 @@ refresh=function()
                 row.stateText:SetText('|c'..tint..(statuses[st] or st)..'|r')
                 row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
                 row.invite:SetShown(own and e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
-                row.accept:SetEnabled(canPerformRole(name,role)); row.reserve:SetEnabled(canPerformRole(name,role))
+                row.accept:SetEnabled(canDecideRole(name,role)); row.reserve:SetEnabled(canDecideRole(name,role))
                 row.accept:SetShown(own and name~=identity); row.reserve:SetShown(own and name~=identity); row.reject:SetShown(own and name~=identity); row:Show()
             end
             height=height+#names*32

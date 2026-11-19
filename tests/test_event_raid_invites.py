@@ -14,6 +14,8 @@ local originalFrame=CreateFrame
 function CreateFrame(...)
     local frame=originalFrame(...)
     function frame:GetStringHeight() return 14 end
+    function frame:GetParent() return self.parent end
+    function frame:SetEnabled(value) self.enabled=value end
     return frame
 end
 options={}
@@ -129,9 +131,24 @@ handlers.CEVRSVP('Caster',nil,finder._pack({e.owner,e.id,'tank','2000000000100',
 assert(not e.people.Caster)
 handlers.CEVRSVP('Caster',nil,finder._pack({e.owner,e.id,'dps','2000000000101','001'}))
 assert(e.people.Caster=='dps')
+finder:Prune()
+assert(not finder.roleCapabilities.Caster, 'group finder pruning should reproduce the missing event role cache')
+events:ShowEvent(key)
+local casterRow
+for _,row in ipairs(ui.signupRows) do if row:IsShown() and row.member=='Caster' then casterRow=row end end
+assert(casterRow and casterRow.accept.enabled and casterRow.reserve.enabled)
+casterRow.accept.scripts.OnClick(casterRow.accept)
+assert(e.statuses.Caster=='accepted', 'accept button must work when the event role cache was cleared')
+casterRow.reserve.scripts.OnClick(casterRow.reserve)
+assert(e.statuses.Caster=='reserve', 'reserve button must work when the event role cache was cleared')
+finder.roleCapabilities.Caster={tank=false,healer=false,dps=true}
 assert(events:Decide(key,'Caster','accepted'))
 e.people.Caster='healer'
 assert(not events:Decide(key,'Caster','accepted') and not events:Decide(key,'Caster','reserve'))
+events:ShowEvent(key)
+for _,row in ipairs(ui.signupRows) do
+    if row:IsShown() and row.member=='Caster' then assert(not row.accept.enabled and not row.reserve.enabled) end
+end
 assert(events:Decide(key,'Caster','rejected'))
 gameRoles={tank=true,healer=true,dps=false}
 assert(events:Signup(key,'tank') and events:Signup(key,'healer'))
