@@ -22,6 +22,7 @@ local statusFilter,professionFilter='all',0
 local searchQuery=''
 local chosenRecipe
 local refresh
+OldKraken:On('WORKSHOP_ALERT_SETTING', function() if window and refresh then refresh() end end)
 local saveDraft,restoreDraft,clearDraft
 local restoringDraft=false
 local function recipePlaceholder() return T('Обрати рецепт') end
@@ -951,9 +952,9 @@ local function createWindow(parent)
     if embedded and OldKraken.UIStyle.Chip then
         f.alerts = OldKraken.UIStyle.Chip(f, T('Нові: увімк.'), {dot = 'success', width = 126, height = 34, rounded = true})
         f.alerts:SetPoint('TOPLEFT', f, 'TOPLEFT', 658, -107)
-        f.alerts:SetScript('OnClick', function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; refresh() end)
+        f.alerts:SetScript('OnClick', function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; OldKraken:Fire('WORKSHOP_ALERT_SETTING') end)
     else
-        f.alerts=button(f,T('Нові: увімк.'),235,y(-42),145,function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; refresh() end,nil,{rounded=true,height=34})
+        f.alerts=button(f,T('Нові: увімк.'),235,y(-42),145,function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; OldKraken:Fire('WORKSHOP_ALERT_SETTING') end,nil,{rounded=true,height=34})
     end
     button(f,T('Оновити'),embedded and 792 or 390,embedded and -107 or y(-42),embedded and 98 or 100,function() nextSync=0; print(T('Old Kraken: запит замовлень поставлено в чергу.')) end,nil,{rounded=true,height=34})
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',embedded and 16 or 25,embedded and -180 or y(-88)); f.empty:SetWidth(430); f.empty:SetJustifyH('LEFT'); f.empty:SetText(T('Замовлень не знайдено. Змініть фільтри або створіть замовлення.'))

@@ -66,6 +66,22 @@ function OldKraken.ActivityCatalog.SetArtwork(texture, activity)
     else texture:SetTexCoord(0.225,0.775,0.25,0.80) end
 end
 
+local canonicalTitles = {}
+for _, list in ipairs({dungeons, raids}) do
+    for _, entry in ipairs(list) do
+        if type(entry.value) == 'string' and entry.value ~= '' and type(entry.label) == 'string' then
+            local uk = entry.label
+            local en = OldKraken.TranslateEn and OldKraken.TranslateEn(uk) or uk
+            canonicalTitles[entry.value] = {[uk] = true, [en] = true}
+        end
+    end
+end
+OldKraken.ActivityCatalog.canonicalTitles = canonicalTitles
+function OldKraken.ActivityCatalog.IsCanonicalTitle(activity, title)
+    local set = type(activity) == 'string' and canonicalTitles[activity]
+    return type(set) == 'table' and type(title) == 'string' and set[title] == true
+end
+
 if OldKraken.LocalizeTable then
     OldKraken.LocalizeTable(dungeons, 'label')
     OldKraken.LocalizeTable(raids, 'label')

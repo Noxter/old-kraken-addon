@@ -767,10 +767,25 @@ local english = {
     ["Автоматично приглушувати фонові банери в данжах і рейдах та відкладати заявки під час бою."] = "Automatically mute background banners in dungeons and raids, and defer requests during combat.",
     ["Нові заявки: "] = "New requests: ",
     ["Очікують підтвердження"] = "Pending review",
+    ["Офлайн"] = "Offline",
+    ["|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності."] = "|cff2ec4b6Old Kraken|r: Listing \"%s\" was automatically closed after 60 min of inactivity.",
+    ["Old Kraken: досягнуто межі ревізії групи; створіть новий набір."] = "Old Kraken: The listing revision limit was reached; create a new listing.",
+    ["Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір."] = "Old Kraken: The listing is too large to reopen. Shorten its description or create a new listing.",
+    ["Замовлення Майстерні"] = "Workshop Orders",
+    ["Тест банера: "] = "Test banner: ",
+    ["група"] = "group",
+    ["заявка"] = "request",
+    ["подія"] = "event",
+    ["майстерня"] = "workshop",
+    ["Скинути позиції банерів"] = "Reset banner positions",
 }
 
 local language = 'ukUA'
 local labelTables = {}
+
+function OldKraken.TranslateEn(text)
+    return english[text] or text
+end
 
 function OldKraken.Translate(text)
     if language == 'enUS' then return english[text] or text end

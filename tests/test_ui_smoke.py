@@ -133,6 +133,7 @@ function methods:LockHighlight() self.highlightLocked = true end
 function methods:UnlockHighlight() self.highlightLocked = false end
 function methods:GetStringHeight() return 0 end
 function methods:SetScript(name, fn) self.scripts[name] = fn end
+function methods:RegisterEvent(name) self.events = rawget(self, 'events') or {}; self.events[name] = true end
 function methods:CreateFontString() return CreateFrame() end
 function methods:CreateTexture() return CreateFrame() end
 function methods:GetFontString()
