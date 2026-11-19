@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.5.3"
+OldKraken.version = "0.5.4-alpha.1"
 OldKraken._listeners = OldKraken._listeners or {}
 local T = OldKraken.Translate or function(text) return text end
 
