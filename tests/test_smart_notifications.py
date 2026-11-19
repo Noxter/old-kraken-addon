@@ -75,22 +75,22 @@ for _, frame in ipairs(createdFrames) do
     end
 end
 assert(smartBtn, 'UIHub settings page must contain Smart Notifications toggle button')
-assert(smartBtn.text == 'Розумні сповіщення: вимк.', 'initial button text must reflect saved false state without clicking, got: ' .. tostring(smartBtn.text))
+assert(smartBtn.text == 'Розумні сповіщення: |cff9aa5b1вимк.|r', 'initial button text must reflect saved false state without clicking, got: ' .. tostring(smartBtn.text))
 
 -- Set back to true and re-open/refresh settings page lifecycle
 OldKraken.DB.settings.smartNotifications = true
 OldKraken.UIHub:ShowPage('groups')
 OldKraken.UIHub:ShowPage('settings')
 if settingsPage.scripts and settingsPage.scripts.OnShow then settingsPage.scripts.OnShow(settingsPage) end
-assert(smartBtn.text == 'Розумні сповіщення: увімк.', 're-opening settings must reflect true state')
+assert(smartBtn.text == 'Розумні сповіщення: |cff69dc8cувімк.|r', 're-opening settings must reflect true state')
 
 -- Clicking toggles both directions
 smartBtn.scripts.OnClick(smartBtn)
 assert(OldKraken.DB.settings.smartNotifications == false, 'clicking UIHub toggle must disable smartNotifications')
-assert(smartBtn.text == 'Розумні сповіщення: вимк.')
+assert(smartBtn.text == 'Розумні сповіщення: |cff9aa5b1вимк.|r')
 smartBtn.scripts.OnClick(smartBtn)
 assert(OldKraken.DB.settings.smartNotifications == true, 'clicking UIHub toggle again must re-enable smartNotifications')
-assert(smartBtn.text == 'Розумні сповіщення: увімк.')
+assert(smartBtn.text == 'Розумні сповіщення: |cff69dc8cувімк.|r')
 
 -- Prepare own and foreign groups
 finder.identity = 'Leader Mon'

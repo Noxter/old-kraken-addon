@@ -299,9 +299,14 @@ end
 local function createSettings(parent)
     local page = CreateFrame('Frame', nil, parent)
     page:SetSize(PAGE_WIDTH, PAGE_HEIGHT)
+    local colors = OldKraken.UIStyle and OldKraken.UIStyle.Colors
+    if OldKraken.UIStyle and OldKraken.UIStyle.Panel then
+        OldKraken.UIStyle.Panel(page, 0, -48, 560, 166)
+        OldKraken.UIStyle.Panel(page, 0, -230, 560, 128)
+    end
 
     local label = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
-    label:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -55)
+    label:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -64)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(label, 15, true) end
     label:SetText(T('Мова інтерфейсу'))
 
@@ -314,31 +319,33 @@ local function createSettings(parent)
         return control
     end
 
-    local ukrainian = button('Українська', 0, -82, 136)
-    local english = button('English', 146, -82, 136)
-    local apply = button(T('Застосувати й перезавантажити'), 0, -155, 280)
+    local ukrainian = button('Українська', 18, -92, 136)
+    local english = button('English', 164, -92, 136)
+    local apply = button(T('Застосувати й перезавантажити'), 18, -162, 282)
     local hint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    hint:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -129)
+    hint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -136)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(hint, 13) end
+    if colors and colors.mutedText then hint:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
     hint:SetText(T('Зміна мови перезавантажить інтерфейс WoW.'))
 
     local alertsLabel = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
-    alertsLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -215)
+    alertsLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -246)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(alertsLabel, 15, true) end
     alertsLabel:SetText(T('Сповіщення'))
 
-    local smartButton = button(T('Розумні сповіщення: увімк.'), 0, -242, 280)
+    local smartButton = button('', 18, -274, 282)
     local smartHint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    smartHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -284)
-    smartHint:SetWidth(520)
+    smartHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -316)
+    smartHint:SetWidth(524)
     smartHint:SetJustifyH('LEFT')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(smartHint, 13) end
+    if colors and colors.mutedText then smartHint:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
     smartHint:SetText(T('Автоматично приглушувати фонові банери в данжах і рейдах та відкладати заявки під час бою.'))
 
     local function refreshSmartButton()
         local settings = OldKraken.DB and OldKraken.DB.settings
         local enabled = type(settings) ~= 'table' or settings.smartNotifications ~= false
-        smartButton:SetText(enabled and T('Розумні сповіщення: увімк.') or T('Розумні сповіщення: вимк.'))
+        smartButton:SetText(T('Розумні сповіщення') .. ': ' .. (enabled and ('|cff69dc8c' .. T('увімк.') .. '|r') or ('|cff9aa5b1' .. T('вимк.') .. '|r')))
     end
     smartButton:SetScript('OnClick', function()
         local settings = OldKraken.DB and OldKraken.DB.settings
