@@ -752,6 +752,12 @@ local english = {
     ["Мова інтерфейсу"] = "Interface language",
     ["Застосувати й перезавантажити"] = "Apply and reload",
     ["Зміна мови перезавантажить інтерфейс WoW."] = "Changing the language reloads the WoW interface.",
+    ["Сповіщення"] = "Notifications",
+    ["Розумні сповіщення: увімк."] = "Smart notifications: on",
+    ["Розумні сповіщення: вимк."] = "Smart notifications: off",
+    ["Автоматично приглушувати фонові банери в данжах і рейдах та відкладати заявки під час бою."] = "Automatically mute background banners in dungeons and raids, and defer requests during combat.",
+    ["Нові заявки: "] = "New requests: ",
+    ["Очікують підтвердження"] = "Pending review",
 }
 
 local language = 'ukUA'

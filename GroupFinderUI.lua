@@ -2202,10 +2202,67 @@ refreshAlertRoster=function()
     groupAlert.rosterGroup,groupAlert.rosterRevision=group,group.revision
 end
 
-local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
+local deferredRequests = {}
+local deferredRequestSequence = 0
+
+local function smartNotificationsEnabled()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    return type(settings) ~= 'table' or settings.smartNotifications ~= false
+end
+
+local function isValidRequestAlertTarget(groupKey)
+    if not groupKey then return false end
+    local group = Finder.groups[groupKey]
+    if not group or group.closed or group.owner ~= Finder.identity then return false end
+    local reqs = group.id and Finder.requests[group.id]
+    if type(reqs) ~= 'table' then return false end
+    for _, role in pairs(reqs) do
+        if role ~= nil then return true end
+    end
+    return false
+end
+
+local function isPlayerInCombat()
+    if type(InCombatLockdown) ~= 'function' then return false end
+    local ok, inCombat = pcall(InCombatLockdown)
+    return ok and inCombat == true
+end
+
+local function isInGroupPvEInstance()
+    if type(IsInInstance) ~= 'function' then return false end
+    local ok, inInstance, instanceType = pcall(IsInInstance)
+    if not ok or inInstance ~= true then return false end
+    return instanceType == 'party' or instanceType == 'raid'
+end
+
+local function shouldShowAlertBanner(kind, isPreview)
+    if not smartNotificationsEnabled() then return true end
+    if isPlayerInCombat() then return false end
+    if isPreview then return true end
+    if kind ~= 'request' and isInGroupPvEInstance() then return false end
+    return true
+end
+
+local function logAlert(title, subtitle, kind)
     local isEvent = kind == 'event' or kind == 'event_signup'
     local isWorkshop = kind == 'workshop'
     print('|cff2ec4b6Old Kraken|r: ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or '') .. (isEvent and '. /okr events' or (isWorkshop and '. /okr orders' or '. /okr group')))
+end
+
+local function playAlertSound()
+    local now = type(GetTime) == 'function' and GetTime()
+    if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK
+        and type(now) == 'number' and now - lastAlertSoundAt >= ALERT_SOUND_INTERVAL then
+        lastAlertSoundAt = now
+        pcall(PlaySound, SOUNDKIT.READY_CHECK)
+    end
+end
+
+local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isPreview)
+    local isEvent = kind == 'event' or kind == 'event_signup'
+    local isWorkshop = kind == 'workshop'
+    logAlert(title, subtitle, kind)
+    if not shouldShowAlertBanner(kind, isPreview) then return end
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         groupAlert.roleSlots = {}
@@ -2300,6 +2357,14 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
                 if OldKraken.GuildEvents then OldKraken.GuildEvents:ShowEvent(target) end
                 return
             end
+            if alertKind == 'request' then
+                local validTarget = isValidRequestAlertTarget(target)
+                tab, selected, offset, requestOffset = 'mine', validTarget and target or nil, 0, 0
+                if requestsWindow then requestsWindow:Hide() end
+                Finder:Show()
+                if validTarget then showRequests() end
+                return
+            end
             if target and Finder.groups[target] then
                 local targetTab = alertKind == 'decision' and 'applications'
                     or (alertKind == 'group' and 'all' or 'mine')
@@ -2309,7 +2374,6 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
             end
             if requestsWindow then requestsWindow:Hide() end
             Finder:Show()
-            if alertKind == 'request' then showRequests() end
         end)
         groupAlert:SetScript('OnUpdate', function(self, elapsed)
             if self.dragging or self:IsMouseOver() then
@@ -2382,23 +2446,18 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     groupAlert.remaining = ALERT_DURATION
     groupAlert:SetAlpha(1)
     groupAlert:Show()
-    local now = type(GetTime) == 'function' and GetTime()
-    if type(PlaySound) == 'function' and SOUNDKIT and SOUNDKIT.READY_CHECK
-        and type(now) == 'number' and now - lastAlertSoundAt >= ALERT_SOUND_INTERVAL then
-        lastAlertSoundAt = now
-        pcall(PlaySound, SOUNDKIT.READY_CHECK)
-    end
+    playAlertSound()
 end
 
 function Finder:PreviewAlert(kind)
     if kind == 'group' then
-        showAlert(T('Гравець збирає: Назва групи'), T('Склад 2/5 · Вільно місць: 3'), 'group',nil,'rfc',{category='dungeon',maxSize=5,owner=T('Танк'),role='tank',members={T('Танк'),T('Лікар')},memberRoles={[T('Лікар')]='healer'}})
+        showAlert(T('Гравець збирає: Назва групи'), T('Склад 2/5 · Вільно місць: 3'), 'group',nil,'rfc',{category='dungeon',maxSize=5,owner=T('Танк'),role='tank',members={T('Танк'),T('Лікар')},memberRoles={[T('Лікар')]='healer'}}, true)
     elseif kind == 'request' then
-        showAlert(T('Нова заявка від гравця'), T('Танк · Назва групи'), 'request')
+        showAlert(T('Нова заявка від гравця'), T('Танк · Назва групи'), 'request', nil, nil, nil, true)
     elseif kind == 'event' then
-        showAlert(T('Назва події'), T('Організатор · сьогодні о 20:00'), 'event')
+        showAlert(T('Назва події'), T('Організатор · сьогодні о 20:00'), 'event', nil, nil, nil, true)
     elseif kind == 'workshop' then
-        showAlert(T('Замовлення'), T('Приклад сповіщення Майстерні'), 'workshop')
+        showAlert(T('Замовлення'), T('Приклад сповіщення Майстерні'), 'workshop', nil, nil, nil, true)
     end
 end
 
@@ -2447,10 +2506,57 @@ OldKraken:On('GROUP_FINDER_NEW', function(group)
     showAlert(playerLabel(group.owner) .. T(' збирає: ') .. group.title, summary .. ' · ' .. needed, 'group', groupKey, group.dungeon, group)
 end)
 
+local function flushDeferredRequests()
+    local pending = deferredRequests
+    deferredRequests = {}
+    if not smartNotificationsEnabled() or isPlayerInCombat() then return end
+    local uniqueApplicants = {}
+    local count = 0
+    local bestGroupKey = nil
+    local bestSeq = -1
+    for groupKey, applicants in pairs(pending) do
+        local group = Finder.groups[groupKey]
+        local reqs = group and group.id and Finder.requests[group.id]
+        if group and not group.closed and group.owner == Finder.identity and type(reqs) == 'table' then
+            local groupBestSeq = -1
+            for applicantName, seq in pairs(applicants) do
+                if reqs[applicantName] ~= nil then
+                    if not uniqueApplicants[applicantName] then
+                        uniqueApplicants[applicantName] = true
+                        count = count + 1
+                    end
+                    if type(seq) == 'number' and seq > groupBestSeq then
+                        groupBestSeq = seq
+                    end
+                end
+            end
+            if groupBestSeq > bestSeq then
+                bestSeq = groupBestSeq
+                bestGroupKey = groupKey
+            end
+        end
+    end
+    if count > 0 and bestGroupKey then
+        showAlert(T('Нові заявки: ') .. count, T('Очікують підтвердження'), 'request', bestGroupKey)
+    end
+end
+
+local alertCombatEvents = CreateFrame('Frame')
+alertCombatEvents:RegisterEvent('PLAYER_REGEN_ENABLED')
+alertCombatEvents:SetScript('OnEvent', function(_, event)
+    if event == 'PLAYER_REGEN_ENABLED' then flushDeferredRequests() end
+end)
+
 OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
     refreshPeople()
+    local groupKey = group.owner .. '\001' .. group.id
+    if smartNotificationsEnabled() and isPlayerInCombat() and group.owner == Finder.identity and type(name) == 'string' and name ~= '' then
+        deferredRequests[groupKey] = deferredRequests[groupKey] or {}
+        deferredRequestSequence = deferredRequestSequence + 1
+        deferredRequests[groupKey][name] = deferredRequestSequence
+    end
     showAlert(T('Нова заявка від ') .. playerLabel(name), roleLabel(role) .. '  |cff9ba9bc·|r  |cffffd36b' .. group.title .. '|r',
-        'request', group.owner .. '\001' .. group.id)
+        'request', groupKey)
     refreshRequests()
 end)
 

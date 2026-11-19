@@ -31,6 +31,7 @@ local DEFAULTS = {
     settings = {
         uiScale = 1,
         language = 'ukUA',
+        smartNotifications = true,
         roster = {
             status = "all",
             sort = "level",

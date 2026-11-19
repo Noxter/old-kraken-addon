@@ -322,6 +322,31 @@ local function createSettings(parent)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(hint, 13) end
     hint:SetText(T('Зміна мови перезавантажить інтерфейс WoW.'))
 
+    local alertsLabel = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    alertsLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -215)
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(alertsLabel, 15, true) end
+    alertsLabel:SetText(T('Сповіщення'))
+
+    local smartButton = button(T('Розумні сповіщення: увімк.'), 0, -242, 280)
+    local smartHint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    smartHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -284)
+    smartHint:SetWidth(520)
+    smartHint:SetJustifyH('LEFT')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(smartHint, 13) end
+    smartHint:SetText(T('Автоматично приглушувати фонові банери в данжах і рейдах та відкладати заявки під час бою.'))
+
+    local function refreshSmartButton()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        local enabled = type(settings) ~= 'table' or settings.smartNotifications ~= false
+        smartButton:SetText(enabled and T('Розумні сповіщення: увімк.') or T('Розумні сповіщення: вимк.'))
+    end
+    smartButton:SetScript('OnClick', function()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        if type(settings) ~= 'table' then return end
+        settings.smartNotifications = settings.smartNotifications == false
+        refreshSmartButton()
+    end)
+
     local active = OldKraken.GetLanguage()
     local selected = active
     local function selectLanguage(language)
@@ -338,8 +363,9 @@ local function createSettings(parent)
         settings.language = selected
         ReloadUI()
     end)
-    page:SetScript('OnShow', function() selectLanguage(active) end)
+    page:SetScript('OnShow', function() selectLanguage(active); refreshSmartButton() end)
     selectLanguage(active)
+    refreshSmartButton()
     return page
 end
 
