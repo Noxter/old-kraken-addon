@@ -812,6 +812,10 @@ function Roster:RenderVisible()
             cells[7]:SetTextColor(1, 0.55, 0.15); versionStatus = T('Застаріла: версія старіша за вашу.'); badgeKind = 'warning'
         elseif comparison == 1 then
             cells[7]:SetTextColor(0.3, 0.8, 1); versionStatus = T('Новіша за вашу версію.'); badgeKind = 'info'
+        elseif comparison == 0 and version:match('%+g%x+$') and localVersion and localVersion:match('%+g%x+$') and version~=localVersion then
+            cells[7]:SetTextColor(1, 0.76, 0.42); versionStatus = T('Однакова версія, але різні Git-збірки.'); badgeKind = 'warning'
+        elseif comparison == 0 and localVersion and version~=localVersion and ((version:match('%+g%x+$') and not localVersion:match('%+g%x+$')) or (localVersion:match('%+g%x+$') and not version:match('%+g%x+$'))) then
+            cells[7]:SetTextColor(0.7, 0.7, 0.7); versionStatus = T('Неможливо порівняти Git-збірки: в однієї немає ідентифікатора.'); badgeKind = 'neutral'
         elseif comparison == 0 then
             cells[7]:SetTextColor(0.25, 1, 0.25); versionStatus = T('Така сама версія, як у вас.'); badgeKind = 'success'
         elseif version then

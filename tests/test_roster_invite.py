@@ -77,6 +77,15 @@ function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Membe
 function OldKraken.Communication:CompareVersions() return 0 end
 OldKraken.GuildRoster:Render()
 assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'success' and row.cells[7].textColor[2] == 1)
+function OldKraken.Communication:GetLocalVersion() return '0.4.0+g111111111111' end
+function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Member' then return '0.4.0+g222222222222' end end
+OldKraken.GuildRoster:Render()
+assert(row.versionBadge.kind == 'warning' and row.cellHovers[7].fullText:find('різні Git-збірки',1,true))
+function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Member' then return '0.4.0' end end
+OldKraken.GuildRoster:Render()
+assert(row.versionBadge.kind == 'neutral' and row.cellHovers[7].fullText:find('немає ідентифікатора',1,true))
+function OldKraken.Communication:GetLocalVersion() return '0.4.0' end
+function OldKraken.Communication:GetRosterVersion(name) if name == 'Online Member' then return '0.4.0' end end
 function OldKraken.Communication:CompareVersions() return 1 end
 OldKraken.GuildRoster:Render()
 assert(row.versionBadge:IsShown() and row.versionBadge.kind == 'info' and row.cells[7].textColor[3] == 1)
@@ -109,6 +118,7 @@ assert(c:CompareVersions('0.4.1','0.4.0')==1)
 assert(c:CompareVersions('0.4.0','0.4.0-rc.1')==1)
 assert(c:CompareVersions('0.4.0-beta.1','0.4.0-alpha.10')==1)
 assert(c:CompareVersions('0.4.0+build.2','0.4.0')==0)
+assert(c:CompareVersions('0.5.4-alpha.1+g111111111111','0.5.4-alpha.1+g222222222222')==0)
 assert(c:CompareVersions('unknown','0.4.0')==nil)
 assert(c:HasRosterAddon('Me-Realm'))
 assert(not c:HasRosterAddon('Other-Realm'))
@@ -120,6 +130,9 @@ c:OnAddonMessage('wrong','OKP^HERE','GUILD','Wrong'); assert(not c:HasRosterAddo
 c:OnAddonMessage(c.PREFIX,'OKP^HERE','WHISPER','Wrong'); assert(not c:HasRosterAddon('Wrong'))
 c:OnAddonMessage(c.PREFIX,'OKP^HERE^0.4.0-alpha.2','GUILD','Other-Realm')
 assert(c:GetRosterVersion('Other')=='0.4.0-alpha.2')
+c:OnAddonMessage(c.PREFIX,'OKP^HERE^0.5.4-alpha.1+g0123456789ab','GUILD','Other-Realm')
+assert(c:GetRosterVersion('Other')=='0.5.4-alpha.1+g0123456789ab')
+c:OnAddonMessage(c.PREFIX,'OKP^HERE^0.4.0-alpha.2','GUILD','Other-Realm')
 c:OnAddonMessage(c.PREFIX,'OKP^HERE','GUILD','Other-Realm')
 assert(c:GetRosterVersion('Other')=='0.4.0-alpha.2')
 c:OnAddonMessage(c.PREFIX,'OKP^HERE^bad|color','GUILD','Other-Realm')

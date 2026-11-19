@@ -109,6 +109,7 @@ local function storeRecipe(owner,r,relayed,authoritative)
     if type(scope.recipeTombstones[owner])~='table' then scope.recipeTombstones[owner]={} end
     local records,sources=people[owner],scope.recipeSources[owner]
     local tomb=scope.recipeTombstones[owner][r.recipe]
+    if relayed and sources[r.recipe]~=true and (validRecord(records[r.recipe]) or validRecord(tomb)) then return records[r.recipe] end
     if validRecord(tomb) then
         if tomb.seen>=r.seen and not (authoritative and not relayed and sources[r.recipe]==true) then return nil end
         scope.recipeTombstones[owner][r.recipe]=nil
@@ -125,6 +126,7 @@ local function storeTombstone(owner,r,relayed,authoritative)
     if type(scope.recipeTombstones[owner])~='table' then scope.recipeTombstones[owner]={} end
     local records,tombs,sources=people[owner],scope.recipeTombstones[owner],scope.recipeSources[owner]
     local old,tomb=records[r.recipe],tombs[r.recipe]
+    if relayed and sources[r.recipe]~=true and (validRecord(old) or validRecord(tomb)) then return false end
     local directOverride=authoritative and not relayed and sources[r.recipe]==true
     if validRecord(old) and old.seen>r.seen and not directOverride then return false end
     if validRecord(tomb) and tomb.seen>=r.seen and not directOverride then return false end

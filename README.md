@@ -3,7 +3,7 @@
 [![WoW Forever](https://img.shields.io/badge/WoW_Forever-1.60.1-blue.svg)](https://github.com/Noxter/old-kraken-addon)
 [![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)](https://github.com/Noxter/old-kraken-addon)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-36%20suites%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-42%20suites%20passing-brightgreen.svg)](tests/)
 
 **Old Kraken** — аддон для гри World of Warcraft (клієнт **WoW Forever 1.60.1**, Interface `16001`), створений для об'єднання ключових активностей гільдії в одному зручному інтерфейсі: реєстр учасників, гільдійний пошук груп, календар подій, розумні сповіщення та майстерня професій.
 
@@ -104,9 +104,15 @@
 
 ---
 
+## Версія збірки
+
+У ZIP, створених GitHub Actions, до версії додається `+g` і перші 12 символів Git-коміту, наприклад `0.5.4-alpha.1+g0123456789ab`. Цю версію видно в списку аддонів і ростері; різні Git-збірки одного релізу позначаються окремо. GitHub Actions вказує коміт, з якого фактично зібрано ZIP. Сирі файли репозиторію без процесу пакування містять базову версію без Git-суфікса.
+
+---
+
 ## Тестування та надійність
 
-Проєкт містить **36 автоматизованих тестових файлів** (`tests/test_*.py`), що виконуються через Python/Lupa на середовищі Lua 5.1. Вони перевіряють:
+Проєкт містить **42 автоматизованих тестових файли** (`tests/test_*.py`), що виконуються через Python/Lupa на середовищі Lua 5.1. Вони перевіряють:
 - Цілісність бази даних та міграції схеми (`Database.lua`).
 - Кодек, чергу, фрагментацію та обробку пакетів (`Communication.lua`).
 - Моделі станів груп, monotonic fence та дедуплікацію (`GroupFinder.lua`).
