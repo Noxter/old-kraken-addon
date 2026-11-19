@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from lupa.lua51 import LuaRuntime
@@ -806,8 +807,270 @@ def run_task3_4_5_guild_events():
     )
 
 
+def _make_gf_runtime(initial_db=None, start_time=100, start_server_time=1700000000):
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.execute(
+        '''
+        local now = ''' + str(start_time) + '''
+        local serverNow = ''' + str(start_server_time) + '''
+        GetTime = function() return now end
+        GetServerTime = function() return serverNow end
+        SetMockTime = function(t, st) now = t; serverNow = st end
+        IsInGuild = function() return true end
+        GetGuildInfo = function() return 'Old Kraken' end
+        GetRealmName = function() return 'Realm' end
+        UnitName = function(u)
+            if u == 'player' then return 'Alice', 'Sun' end
+            return nil
+        end
+        UnitGetAvailableRoles = function() return true, true, true end
+        UnitGroupRolesAssigned = function() return 'NONE' end
+        GetNumGroupMembers = function() return 0 end
+        IsInRaid = function() return false end
+        gfFrames = {}
+        CreateFrame = function()
+            local f = { _scripts = {} }
+            function f:RegisterEvent() end
+            function f:SetScript(ev, fn) self._scripts[ev] = fn end
+            gfFrames[#gfFrames + 1] = f
+            return f
+        end
+        C_Timer = { After = function() end, NewTicker = function() return { Cancel = function() end } end }
+        OldKraken = {
+            name = 'OldKraken',
+            version = '0.5.3-alpha.1',
+            _listeners = {},
+            On = function(self, ev, fn)
+                self._listeners[ev] = self._listeners[ev] or {}
+                self._listeners[ev][#self._listeners[ev] + 1] = fn
+            end,
+            Fire = function(self, ev, ...)
+                for _, fn in ipairs(self._listeners[ev] or {}) do fn(...) end
+            end,
+            DB = {
+                groupFinder = {},
+                settings = { groupFinderNotifications = true },
+            },
+            Communication = {
+                handlers = {},
+                queue = {},
+                RegisterHandler = function(self, kind, fn) self.handlers[kind] = fn end,
+                SendProtocol = function() return true end,
+                ClearProtocolState = function() end,
+            },
+        }
+        '''
+    )
+    if initial_db is not None:
+        def py_to_lua(val):
+            if isinstance(val, dict):
+                t = lua.table()
+                for k, v in val.items():
+                    t[k] = py_to_lua(v)
+                return t
+            if isinstance(val, list):
+                t = lua.table()
+                for i, v in enumerate(val, 1):
+                    t[i] = py_to_lua(v)
+                return t
+            return val
+        lua.globals().OldKraken.DB = py_to_lua(initial_db)
+
+    lua.execute((root / 'GroupFinder.lua').read_text(encoding='utf-8'))
+    lua.execute((root / 'GroupFinderIntegration.lua').read_text(encoding='utf-8'))
+    lua.execute(
+        '''
+        for _, gf in ipairs(gfFrames) do
+            if gf._scripts.OnEvent then gf._scripts.OnEvent(gf, 'PLAYER_LOGIN') end
+        end
+        '''
+    )
+    return lua
+
+
+def _export_lua_db(lua):
+    def lua_to_py(val):
+        if type(val).__name__ == '_LuaTable':
+            keys = list(val.keys())
+            if keys and all(isinstance(k, int) for k in keys) and sorted(keys) == list(range(1, len(keys) + 1)):
+                return [lua_to_py(val[i]) for i in range(1, len(keys) + 1)]
+            return {k: lua_to_py(v) for k, v in val.items()}
+        return val
+    return json.loads(json.dumps(lua_to_py(lua.globals().OldKraken.DB)))
+
+
+def run_real_persistence_roundtrips():
+    # Scenario A: 100 active + 30 deleted (130 total own records) across real LuaRuntime reload
+    rt1 = _make_gf_runtime()
+    rt1.execute(
+        '''
+        local f = OldKraken.GroupFinder
+        activeIds, deletedIds = {}, {}
+        local created = {}
+        for i = 1, 100 do
+            local ok, id = f:Create('Grp ' .. i, 'other', '', 5, 1, 60, 'dps', '')
+            assert(ok and id)
+            created[i] = id
+            activeIds[id] = true
+        end
+        for i = 1, 30 do
+            assert(f:Delete(created[i]))
+            activeIds[created[i]] = nil
+            deletedIds[created[i]] = true
+        end
+        for i = 101, 130 do
+            local ok, id = f:Create('Grp ' .. i, 'other', '', 5, 1, 60, 'dps', '')
+            assert(ok and id)
+            activeIds[id] = true
+        end
+        f:Changed()
+        '''
+    )
+    saved_a = _export_lua_db(rt1)
+    active_a = set(rt1.globals().activeIds.keys())
+    deleted_a = set(rt1.globals().deletedIds.keys())
+    assert len(active_a) == 100 and len(deleted_a) == 30
+
+    rt2 = _make_gf_runtime(initial_db=saved_a)
+    f2 = rt2.globals().OldKraken.GroupFinder
+    restored_active, restored_deleted = set(), set()
+    for _, g in f2.groups.items():
+        if g.closed and g.hidden:
+            restored_deleted.add(g.id)
+        else:
+            assert not g.closed and not g.hidden
+            restored_active.add(g.id)
+    assert restored_active == active_a, f'Expected 100 active, got {len(restored_active)}'
+    assert restored_deleted == deleted_a, f'Expected 30 tombstones, got {len(restored_deleted)}'
+
+    # Scenario B: 100 deleted + 100 active (200 total own records) across real LuaRuntime reload
+    rt3 = _make_gf_runtime()
+    rt3.execute(
+        '''
+        local f = OldKraken.GroupFinder
+        activeIds, deletedIds = {}, {}
+        for i = 1, 100 do
+            local ok, id = f:Create('Old ' .. i, 'other', '', 5, 1, 60, 'dps', '')
+            assert(ok and id)
+            assert(f:Delete(id))
+            deletedIds[id] = true
+        end
+        for i = 1, 100 do
+            local ok, id = f:Create('New ' .. i, 'other', '', 5, 1, 60, 'dps', '')
+            assert(ok and id)
+            activeIds[id] = true
+        end
+        f:Changed()
+        '''
+    )
+    saved_b = _export_lua_db(rt3)
+    active_b = set(rt3.globals().activeIds.keys())
+    deleted_b = set(rt3.globals().deletedIds.keys())
+    assert len(active_b) == 100 and len(deleted_b) == 100
+
+    rt4 = _make_gf_runtime(initial_db=saved_b)
+    f4 = rt4.globals().OldKraken.GroupFinder
+    restored_active_b, restored_deleted_b = set(), set()
+    for _, g in f4.groups.items():
+        if g.closed and g.hidden:
+            restored_deleted_b.add(g.id)
+        else:
+            restored_active_b.add(g.id)
+    assert restored_active_b == active_b, f'Expected 100 active, got {len(restored_active_b)}'
+    assert restored_deleted_b == deleted_b, f'Expected 100 tombstones, got {len(restored_deleted_b)}'
+
+    # Scenario C: Network ANNOUNCE still capped at MAX_GROUPS=100; updates/duplicates don't bloat count
+    rt5 = _make_gf_runtime()
+    rt5.execute(
+        '''
+        local f = OldKraken.GroupFinder
+        for i = 1, 100 do
+            local p = f:EncodeGroup({
+                id = '1700000000-100000-' .. i, owner = 'Remote ' .. i, revision = 1, closed = false,
+                title = 'Remote ' .. i, category = 'other', description = '',
+                maxSize = 5, minLevel = 1, maxLevel = 60, role = 'dps',
+                members = {'Remote ' .. i}, memberRoles = {['Remote ' .. i] = 'dps'}, dungeon = '',
+            })
+            assert(f:ReceiveGroup('Remote ' .. i, p))
+        end
+        -- 101st network ANNOUNCE must be rejected
+        local p101 = f:EncodeGroup({
+            id = '1700000000-100000-101', owner = 'Remote 101', revision = 1, closed = false,
+            title = 'Remote 101', category = 'other', description = '',
+            maxSize = 5, minLevel = 1, maxLevel = 60, role = 'dps',
+            members = {'Remote 101'}, memberRoles = {['Remote 101'] = 'dps'}, dungeon = '',
+        })
+        assert(not f:ReceiveGroup('Remote 101', p101), '101st network ANNOUNCE must be rejected')
+        -- Update to existing group rev=2 succeeds without creating extra entry
+        local upd1 = f:EncodeGroup({
+            id = '1700000000-100000-1', owner = 'Remote 1', revision = 2, closed = false,
+            title = 'Remote 1 Updated', category = 'other', description = '',
+            maxSize = 5, minLevel = 1, maxLevel = 60, role = 'dps',
+            members = {'Remote 1'}, memberRoles = {['Remote 1'] = 'dps'}, dungeon = '',
+        })
+        assert(f:ReceiveGroup('Remote 1', upd1), 'Update to existing group must succeed at capacity')
+        local total = 0
+        for _ in pairs(f.groups) do total = total + 1 end
+        assert(total == 100, 'Group count must remain exactly 100')
+        '''
+    )
+
+    # Real multi-runtime round-trip for reopenFloors, deletedGroups, and lastBump
+    rt6 = _make_gf_runtime(start_time=500, start_server_time=1700000500)
+    rt6.execute(
+        '''
+        local f = OldKraken.GroupFinder
+        local okC, idC = f:Create('Reopen Roundtrip', 'other', '', 5, 1, 60, 'tank', '')
+        local okD, idD = f:Create('Deleted Roundtrip', 'other', '', 5, 1, 60, 'dps', '')
+        local okE, idE = f:Create('Closed Bump Roundtrip', 'other', '', 5, 1, 60, 'healer', '')
+        assert(okC and okD and okE)
+        testIds = { idC = idC, idD = idD, idE = idE }
+        staleD = f:EncodeGroup(f.groups['Alice Sun\001' .. idD])
+
+        assert(f:ReceiveJoin('App A', f._pack({'Alice Sun', idC, 'healer', 'apply', '100', '010'})))
+        assert(f:ReceiveJoin('App B', f._pack({'Alice Sun', idC, 'dps', 'apply', '200', '001'})))
+        assert(f:Cancel(idC))
+        f:Prune()
+
+        local store = OldKraken.DB.groupFinder['Realm\001Old Kraken\001Alice']
+        store.lastBump = { [idD] = 1700000500, [idE] = 1700000500 }
+        assert(f:Delete(idD))
+        assert(f:Cancel(idE))
+        f:Changed()
+        '''
+    )
+    saved_6 = _export_lua_db(rt6)
+    ids6 = dict(rt6.globals().testIds.items())
+    stale_d = str(rt6.globals().staleD)
+
+    rt7 = _make_gf_runtime(initial_db=saved_6, start_time=5000, start_server_time=1700005000)
+    rt7.globals().testIds = rt7.table(**ids6)
+    rt7.globals().staleD = stale_d
+    rt7.execute(
+        '''
+        local f = OldKraken.GroupFinder
+        -- Expired tombstone pruned in new runtime; deletedGroups still blocks stale ANNOUNCE
+        f:Prune()
+        assert(not f:ReceiveGroup('Alice Sun', staleD), 'Deleted group must remain blocked after real reload + Prune')
+
+        -- Reopen idC in new runtime preserves per-sender floors
+        assert(f:Reopen(testIds.idC))
+        assert(not f:ReceiveJoin('App A', f._pack({'Alice Sun', testIds.idC, 'healer', 'apply', '100', '010'})))
+        assert(not f:ReceiveJoin('App B', f._pack({'Alice Sun', testIds.idC, 'dps', 'apply', '200', '001'})))
+        assert(f:ReceiveJoin('App A', f._pack({'Alice Sun', testIds.idC, 'healer', 'apply', '101', '010'})))
+        assert(f:ReceiveJoin('App B', f._pack({'Alice Sun', testIds.idC, 'dps', 'apply', '201', '001'})))
+
+        -- lastBump survived for Cancel(idE) and stayed pruned for Delete(idD)
+        local store = OldKraken.DB.groupFinder['Realm\001Old Kraken\001Alice']
+        assert(store.lastBump[testIds.idD] == nil, 'Deleted group lastBump must remain pruned')
+        assert(store.lastBump[testIds.idE] == 1700000500, 'Closed (non-hidden) group lastBump must survive reload')
+        '''
+    )
+
+
 if __name__ == '__main__':
     run_task1_roster_uihub()
     run_task2_and_task6_group_finder()
+    run_real_persistence_roundtrips()
     run_task3_4_5_guild_events()
     print('PASS: all 6 audit regression checks passed')
