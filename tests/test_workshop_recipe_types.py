@@ -797,6 +797,157 @@ def test_reagent_entries_bag_and_bank():
     ''')
 
 
+def test_pending_learned_recipe_notice():
+    lua = client('PendingNotice', embedded=True)
+    tick(lua)
+    lua.execute('''
+        local printed = {}
+        local origPrint = print
+        print = function(...)
+            local parts = {}
+            for i = 1, select('#', ...) do parts[#parts + 1] = tostring(select(i, ...)) end
+            printed[#printed + 1] = table.concat(parts, ' ')
+        end
+
+        GetSpellInfo = function(id)
+            if id == 9701 then return 'Alchemy Potion' end
+            if id == 9702 then return 'Elixir Craft' end
+        end
+        GetProfessions = function() return 1, 2, 3 end
+        GetProfessionInfo = function(idx)
+            if idx == 1 then return 'Alchemy', 136240, 75, 150, 0, 0, 171 end
+            if idx == 2 then return 'Leatherworking', 136247, 50, 75, 0, 0, 165 end
+            if idx == 3 then return 'Skinning', 134366, 100, 150, 0, 0, 393 end
+        end
+        C_TradeSkillUI = {
+            GetRecipeInfo = function() return nil end,
+            IsTradeSkillLinked = function() return false end,
+            IsTradeSkillGuild = function() return false end,
+            IsNPCCrafting = function() return false end,
+            IsDataSourceChanging = function() return false end,
+            IsTradeSkillReady = function() return false end,
+        }
+
+        local function fireEvent(ev, arg)
+            for _, f in ipairs(frames) do
+                if type(f) == 'table' and type(f.events) == 'table' and f.events[ev] and type(f.scripts) == 'table' and type(f.scripts.OnEvent) == 'function' then
+                    f.scripts.OnEvent(f, ev, arg)
+                end
+            end
+        end
+
+        fireEvent('NEW_RECIPE_LEARNED', 9701)
+        fireEvent('NEW_RECIPE_LEARNED', 9702)
+        for _ = 1, 10 do
+            clock = clock + 4
+            for _, fn in ipairs(timers) do fn() end
+        end
+
+        assert(#printed == 1, 'batch of 2 pending recipes must produce 1 chat notice, got ' .. #printed)
+        local msg = printed[1]
+        assert(msg:find('Alchemy Potion', 1, true) and msg:find('Elixir Craft', 1, true), 'notice must include recipe names: ' .. msg)
+        assert(msg:find('Алхімія', 1, true) and msg:find('Шкірництво', 1, true), 'notice must include crafting professions: ' .. msg)
+        assert(not msg:find('Свіжування', 1, true), 'notice must not list gathering profession: ' .. msg)
+
+        -- Opening another profession must not trigger repeat warning spam for the same pending recipes
+        fireEvent('TRADE_SKILL_SHOW')
+        fireEvent('TRADE_SKILL_CLOSE')
+        for _ = 1, 12 do
+            clock = clock + 4
+            for _, fn in ipairs(timers) do fn() end
+        end
+        assert(#printed == 1, 'learnWarned must prevent duplicate chat warnings after TRADE_SKILL_SHOW, got ' .. #printed)
+
+        -- Repeated NEW_RECIPE_LEARNED for an already-warned recipe must re-warn after 10 ticks
+        fireEvent('NEW_RECIPE_LEARNED', 9701)
+        for _ = 1, 10 do
+            clock = clock + 4
+            for _, fn in ipairs(timers) do fn() end
+        end
+        assert(#printed == 2, 'repeated NEW_RECIPE_LEARNED must reset learnWarned and warn again, got ' .. #printed)
+        assert(printed[2]:find('Alchemy Potion', 1, true), 'repeat notice must include recipe name: ' .. printed[2])
+
+        -- Batch of 25 simultaneous recipes -> single summary notice with 3 names + (та ще 22)
+        local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        local pending = scope.pendingRecipes['PendingNotice Mon']
+        for k in pairs(pending) do pending[k] = nil end
+        GetSpellInfo = function(id)
+            if id >= 9710 and id <= 9734 then return string.format('Batch %02d', id - 9709) end
+        end
+        for id = 9710, 9734 do fireEvent('NEW_RECIPE_LEARNED', id) end
+        for _ = 1, 10 do
+            clock = clock + 4
+            for _, fn in ipairs(timers) do fn() end
+        end
+        assert(#printed == 3, '25 simultaneous pending recipes must produce 1 notice, got ' .. #printed)
+        assert(printed[3]:find('Batch 01', 1, true) and printed[3]:find('Batch 03', 1, true), '25-batch must show first 3 names: ' .. printed[3])
+        assert(printed[3]:find('(та ще 22)', 1, true), '25-batch must show (та ще 22): ' .. printed[3])
+
+        -- Mixed truncated + unnamed recipes AND all-unnamed recipes
+        GetSpellInfo = function(id)
+            if id >= 9740 and id <= 9743 then return 'Named ' .. (id - 9739) end
+            return nil
+        end
+        for id = 9740, 9745 do fireEvent('NEW_RECIPE_LEARNED', id) end
+        for _ = 1, 10 do
+            clock = clock + 4
+            for _, fn in ipairs(timers) do fn() end
+        end
+        assert(#printed == 4 and printed[4]:find('(та ще 3, з них 2 без назви)', 1, true),
+            'mixed named+unnamed must distinguish truncated vs unnamed: ' .. tostring(printed[4]))
+
+        for id = 9750, 9751 do fireEvent('NEW_RECIPE_LEARNED', id) end
+        for _ = 1, 10 do
+            clock = clock + 4
+            for _, fn in ipairs(timers) do fn() end
+        end
+        assert(#printed == 5 and printed[5]:find('(2 без назви)', 1, true),
+            'all-unnamed batch must show count without name: ' .. tostring(printed[5]))
+
+        -- Full sendQueue boundary (100 items): successful local scan must NOT emit a false warning
+        local printedBeforeQueue = #printed
+        OldKraken.Communication.queue = {1,2,3,4,5,6,7,8,9}
+        C_TradeSkillUI.GetRecipeInfo = function(id)
+            if id >= 9901 and id <= 10000 or id == 9850 then
+                return {learned = true, name = 'QueueRecipe ' .. id}
+            end
+        end
+        C_TradeSkillUI.GetProfessionInfoByRecipeID = function(id)
+            if id >= 9901 and id <= 10000 or id == 9850 then
+                return {professionID = 171}
+            end
+        end
+        for id = 9901, 10000 do fireEvent('NEW_RECIPE_LEARNED', id) end
+        for _ = 1, 2 do
+            clock = clock + 2
+            for _, fn in ipairs(timers) do fn() end
+        end
+        -- Now sendQueue is full at 100; learn recipe 9850 and tick 12 times while sendQueue cannot drain
+        fireEvent('NEW_RECIPE_LEARNED', 9850)
+        for _ = 1, 12 do
+            clock = clock + 2
+            for _, fn in ipairs(timers) do fn() end
+        end
+        assert(scope.recipes['PendingNotice Mon'][9850], 'recipe 9850 must still be saved locally when sendQueue is full')
+        assert(#printed == printedBeforeQueue, 'full sendQueue must NOT emit false pending warning for locally scanned recipe, got ' .. (#printed - printedBeforeQueue))
+
+        -- Drain comm queue and verify WRLEARN for 9850 sends exactly once
+        OldKraken.Communication.queue = {}
+        local sent9850Count = 0
+        for _ = 1, 120 do
+            clock = clock + 1
+            for _, fn in ipairs(timers) do fn() end
+        end
+        for _, msg in ipairs(outgoing) do
+            if msg[1] == 'WRLEARN' and msg[2]:find('QueueRecipe 9850', 1, true) then sent9850Count = sent9850Count + 1 end
+        end
+        assert(sent9850Count == 1, 'recipe 9850 WRLEARN must be sent exactly once, got ' .. sent9850Count)
+        assert(#printed == printedBeforeQueue, 'flushing after full queue must not print warnings')
+
+        print = origPrint
+    ''')
+
+
 if __name__ == '__main__':
     test_recipe_type_filter()
     test_standalone_type_filter()
@@ -806,4 +957,5 @@ if __name__ == '__main__':
     test_stale_cache_during_context_switch()
     test_recipe_master_picker_and_whisper()
     test_reagent_entries_bag_and_bank()
+    test_pending_learned_recipe_notice()
     print('Workshop recipe type filter checks passed')
