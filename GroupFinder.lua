@@ -102,6 +102,14 @@ local function countGroups(groups)
     return count
 end
 
+local function countActiveGroups(groups)
+    local count = 0
+    for _, group in pairs(groups) do
+        if not (group.closed and group.hidden) then count = count + 1 end
+    end
+    return count
+end
+
 -- Preserve unknown or externally joined players without guessing their role.
 function Finder:DungeonSlots(group, exclude)
     local slots, unassigned = {}, {}
@@ -160,7 +168,7 @@ function Finder:Create(title, category, description, maxSize, minLevel, maxLevel
         or maxSize < 1 or maxSize > 200 or not minLevel or not maxLevel
         or minLevel % 1 ~= 0 or maxLevel % 1 ~= 0 or minLevel < 1 or maxLevel > 255
         or minLevel > maxLevel or not roles[role] then return false, 'invalid' end
-    if countGroups(self.groups) >= MAX_GROUPS then return false, 'capacity' end
+    if countActiveGroups(self.groups) >= MAX_GROUPS then return false, 'capacity' end
     self.sequence = self.sequence + 1
     local id = tostring(GetServerTime()) .. '-' .. tostring(math.random(100000, 999999)) .. '-' .. self.sequence
     local group = { id=id, owner=self.identity, title=title, category=category,
@@ -334,7 +342,7 @@ function Finder:ReceiveGroup(sender, payload)
         if existing.revision == rev and self:EncodeGroup(existing) == payload then existing.seenAt = GetTime() end
         return false
     end
-    if not existing and countGroups(self.groups) >= MAX_GROUPS then return false end
+    if not existing and countActiveGroups(self.groups) >= MAX_GROUPS then return false end
     self.groups[key] = { id=id, owner=owner, revision=rev, closed=closed=='1', title=title,
         category=category, description=description, maxSize=maxSize, minLevel=minLevel,
         maxLevel=maxLevel, role=role, members=members, partyObserved=observed, memberRoles=memberRoles, dungeon=dungeon, seenAt=GetTime() }
@@ -352,9 +360,27 @@ end
 
 function Finder:Prune()
     local now, changed = GetTime(), false
+    local tombstones = {}
     for key, group in pairs(self.groups) do
         if group.owner ~= self.identity and now - group.seenAt > GROUP_TTL then
             self.groups[key] = nil
+        elseif group.owner == self.identity and group.closed and group.hidden then
+            if now - (group.seenAt or 0) > GROUP_TTL then
+                self.groups[key] = nil
+                changed = true
+            else
+                tombstones[#tombstones + 1] = {key = key, seenAt = group.seenAt or 0}
+            end
+        end
+    end
+    if #tombstones > MAX_GROUPS then
+        table.sort(tombstones, function(a, b)
+            if a.seenAt ~= b.seenAt then return a.seenAt < b.seenAt end
+            return a.key < b.key
+        end)
+        for i = 1, #tombstones - MAX_GROUPS do
+            self.groups[tombstones[i].key] = nil
+            changed = true
         end
     end
 
@@ -381,6 +407,20 @@ function Finder:Prune()
         local id = decisionKey:match('^([^\001]+)\001')
         local group = id and self.groups[self.identity .. '\001' .. id]
         if not group or group.closed then self.decisionSync[decisionKey] = nil; changed = true end
+    end
+    if self.roleCapabilities then
+        local activeNames = {[self.identity] = true}
+        for _, reqs in pairs(self.requests) do
+            for name in pairs(reqs) do activeNames[name] = true end
+        end
+        for _, group in pairs(self.groups) do
+            if not (group.closed and group.hidden) then
+                for _, member in ipairs(group.members) do activeNames[member] = true end
+            end
+        end
+        for name in pairs(self.roleCapabilities) do
+            if not activeNames[name] then self.roleCapabilities[name] = nil; changed = true end
+        end
     end
     return changed
 end
@@ -541,6 +581,7 @@ function Finder:Delete(id)
     if not group.closed and not self:Cancel(id) then return false end
     -- Keep the closed record as a synchronization tombstone, but hide it locally.
     group.hidden = true
+    group.seenAt = GetTime()
     return true
 end
 

@@ -322,6 +322,9 @@ local function CreateRosterWindow(parent)
     if rosterFrame then
         return rosterFrame
     end
+    if not GetSettings() then
+        settings = { status = "all", sort = "name", ascending = true, class = "", search = "" }
+    end
 
     local frame
     if parent then

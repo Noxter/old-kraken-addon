@@ -336,10 +336,11 @@ end
 function Events:InviteMember(key,name) return queueRaidInvites(key,{name}) end
 function Events:InviteAll(key)
     local e=events[key]; if not e then return false end
-    if window.filterEvent~=selected then window.filterEvent=selected; window.roleFilter=false end
-        local names={}; for name,role in pairs(e.people) do
-            if not window.roleFilter or role==window.roleFilter then names[#names+1]=name end
-        end; table.sort(names)
+    if window and window.filterEvent~=key then window.filterEvent=key; window.roleFilter=false end
+    local roleFilter=window and window.roleFilter or false
+    local names={}; for name,role in pairs(e.people) do
+        if not roleFilter or role==roleFilter then names[#names+1]=name end
+    end; table.sort(names)
     return queueRaidInvites(key,names)
 end
 local raidInviteFrame=CreateFrame('Frame')
@@ -525,7 +526,7 @@ local function selectMenu(parent,name,x,y,width,values,labels,get,set,allowed,me
     if menuFont and _G[name..'Text'] then _G[name..'Text']:SetFontObject(menuFont) end
     UIDropDownMenu_SetText(f,labels[get()]); return f
 end
-local function selectMinutes(parent,x,y,get,set)
+local function selectMinutes(parent,x,y,get,set,allowed)
     local f=CreateFrame('Frame','OldKrakenEventsMinute',parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
     f:SetPoint('TOPLEFT',parent,'TOPLEFT',x-16,y+3); UIDropDownMenu_SetWidth(f,56); UIDropDownMenu_JustifyText(f,'LEFT')
     UIDropDownMenu_Initialize(f,function(_,level,menuValue)
@@ -664,6 +665,7 @@ refresh=function()
     if window.creationMode then
         for _,control in ipairs(window.viewControls) do control:Hide() end
         for _,row in ipairs(rows) do row:Hide() end
+        if window.SyncAutoTitle then window:SyncAutoTitle() end
         if window.UpdateSummary then window:UpdateSummary() end
         if catalog[currentKind] then window:ShowActivityCards() else window.activityCards:Hide() end
         return
@@ -1095,6 +1097,7 @@ local function createWindow(parent)
         f.title:SetText(nextTitle)
         settingAutoTitle = false
     end
+    f.SyncAutoTitle = syncAutoTitle
 
     local function highlightDateMissing(missing)
         local colors = OldKraken.UIStyle.Colors or {}
@@ -1119,7 +1122,13 @@ local function createWindow(parent)
         self.summaryLine:SetText(string.format(T('%s · %s · %s · %d місць'), kindName, titleText, dateStr, sizeNum))
     end
 
-    f.title:SetScript('OnTextChanged', function() f:UpdateSummary() end)
+    f.title:SetScript('OnTextChanged', function(self)
+        if not settingAutoTitle then
+            local value = self:GetText() or ''
+            manualTitle = f.creationMode and value ~= '' and value ~= autoFilledTitle or false
+        end
+        f:UpdateSummary()
+    end)
 
     getDate, setDate = datePicker(f, function() f:UpdateSummary() end)
     f.SetDate = setDate

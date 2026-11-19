@@ -84,6 +84,12 @@ local function saveOwned()
             for applicant, version in pairs(decisions) do storage.decisions[id][applicant] = version end
         end
     end
+    if type(storage.lastBump) == 'table' then
+        for id in pairs(storage.lastBump) do
+            local group = finder.groups[finder.identity .. '\001' .. id]
+            if not group or (group.closed and group.hidden) then storage.lastBump[id] = nil end
+        end
+    end
 end
 
 function finder:GroupAlertsEnabled()
