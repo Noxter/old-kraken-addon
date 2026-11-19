@@ -393,14 +393,17 @@ function Finder:Prune()
     -- Keep replay fences for every live owner listing. Once its tombstone is
     -- closed (or the listing no longer exists), old JOIN packets cannot be
     -- applied because ReceiveJoin also requires an existing open group.
-    -- Preserve a per-group high-water mark while the closed group can still be reopened.
+    -- Preserve per-sender high-water marks while the closed group can still be reopened.
     self.reopenFloors = self.reopenFloors or {}
     for versionKey, ver in pairs(self.requestVersions) do
-        local id = versionKey:match('^([^\001]+)\001')
+        local id, sender = versionKey:match('^([^\001]+)\001(.+)$')
         local group = id and self.groups[self.identity .. '\001' .. id]
         if not group or group.closed then
-            if group and not group.hidden and ver > (self.reopenFloors[id] or 0) then
-                self.reopenFloors[id] = ver
+            if group and not group.hidden and sender then
+                self.reopenFloors[id] = self.reopenFloors[id] or {}
+                if ver > (self.reopenFloors[id][sender] or 0) then
+                    self.reopenFloors[id][sender] = ver
+                end
             end
             self.requestVersions[versionKey] = nil
             changed = true
@@ -503,7 +506,6 @@ function Finder:ReceiveJoin(sender, payload)
         or (action == 'apply' and role == '')
         or not version or version % 1 ~= 0 or version < 1 or version > 9000000000000000 then return false end
     local versionKey = id .. '\001' .. sender
-    if group.minRequestVersion and version <= group.minRequestVersion then return false end
     if self.requestVersions[versionKey] and self.requestVersions[versionKey] >= version then return false end
     if not self.requestVersions[versionKey] and countGroups(self.requestVersions) >= 2000 then return false end
     if f[6] and not f[6]:match('^[01][01][01]$') then return false end
@@ -586,17 +588,21 @@ end
 function Finder:Reopen(id)
     local group = self.groups[self.identity .. '\001' .. id]
     if not group or not group.closed or group.hidden then return false end
-    local floor = math.max(group.minRequestVersion or 0, (self.reopenFloors and self.reopenFloors[id]) or 0)
-    for versionKey, ver in pairs(self.requestVersions) do
-        if versionKey:sub(1, #id + 1) == id .. '\001' and ver > floor then floor = ver end
-    end
     group.closed, group.revision = false, group.revision + 1
     if not self.send('UPDATE', self:EncodeGroup(group)) then
         group.closed, group.revision = true, group.revision - 1
         return false
     end
-    if floor > 0 then group.minRequestVersion = floor end
-    if self.reopenFloors then self.reopenFloors[id] = nil end
+    local floors = self.reopenFloors and self.reopenFloors[id]
+    if type(floors) == 'table' then
+        for sender, ver in pairs(floors) do
+            local versionKey = id .. '\001' .. sender
+            if ver > (self.requestVersions[versionKey] or 0) then
+                self.requestVersions[versionKey] = ver
+            end
+        end
+        self.reopenFloors[id] = nil
+    end
     return true
 end
 

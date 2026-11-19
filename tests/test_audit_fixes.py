@@ -424,6 +424,44 @@ def run_task2_and_task6_group_finder():
             if gf._scripts.OnEvent then gf._scripts.OnEvent(gf, 'PLAYER_LOGIN') end
         end
         assert(not f:ReceiveGroup('Alice Sun', staleB), 'Old ANNOUNCE must remain rejected after Prune and reload')
+
+        -- Test per-sender reopen floor survival across SavedVariables reload while closed
+        local okC, idC = f:Create('Group C', 'other', '', 5, 1, 60, 'tank', '')
+        assert(okC)
+        assert(f:ReceiveJoin('App A', f._pack({'Alice Sun', idC, 'healer', 'apply', '100', '010'})))
+        assert(f:ReceiveJoin('App B', f._pack({'Alice Sun', idC, 'dps', 'apply', '200', '001'})))
+        assert(f:Cancel(idC))
+        f:Prune()
+        f:Changed()
+        for _, gf in ipairs(gfFrames) do
+            if gf._scripts.OnEvent then gf._scripts.OnEvent(gf, 'PLAYER_LOGIN') end
+        end
+        assert(f:Reopen(idC))
+        assert(not f:ReceiveJoin('App A', f._pack({'Alice Sun', idC, 'healer', 'apply', '100', '010'})), 'Old JOIN 100 from App A must be rejected after reload+Reopen')
+        assert(not f:ReceiveJoin('App B', f._pack({'Alice Sun', idC, 'dps', 'apply', '200', '001'})), 'Old JOIN 200 from App B must be rejected after reload+Reopen')
+        assert(f:ReceiveJoin('App A', f._pack({'Alice Sun', idC, 'healer', 'apply', '101', '010'})), 'New JOIN 101 from App A must be accepted despite App B having 200')
+        assert(f:ReceiveJoin('App B', f._pack({'Alice Sun', idC, 'dps', 'apply', '201', '001'})), 'New JOIN 201 from App B must be accepted')
+
+        -- Test MAX_DELETED_FENCE (500) eviction boundary
+        assert(f:Delete(idC))
+        local okFirst, firstId = f:Create('Fence 1', 'other', '', 5, 1, 60, 'dps', '')
+        assert(okFirst)
+        local firstAnnounce = f:EncodeGroup(f.groups['Alice Sun\001' .. firstId])
+        assert(f:Delete(firstId))
+        assert(not f:ReceiveGroup('Alice Sun', firstAnnounce), 'Deleted group must be blocked before Prune')
+        for i = 1, 500 do
+            serverNow = serverNow + 1
+            now = now + 1
+            local okN, idN = f:Create('Fence Extra ' .. i, 'other', '', 5, 1, 60, 'dps', '')
+            assert(okN)
+            assert(f:Delete(idN))
+        end
+        f:Prune()
+        local fenceCount = 0
+        for _ in pairs(f.deletedGroups) do fenceCount = fenceCount + 1 end
+        assert(fenceCount == 500, 'deletedGroups must stay bounded at MAX_DELETED_FENCE (500)')
+        -- Evicted oldest ID beyond 500 is documented as outside the bounded fence
+        assert(f:ReceiveGroup('Alice Sun', firstAnnounce), 'Evicted oldest ID beyond 500 is no longer in bounded fence')
         '''
     )
 

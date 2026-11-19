@@ -97,15 +97,16 @@ local function saveOwned()
         end
     end
     storage.reopenFloors = {}
-    for id, floor in pairs(finder.reopenFloors or {}) do
-        if type(id) == 'string' and type(floor) == 'number' then storage.reopenFloors[id] = floor end
-    end
-    storage.minRequestVersions = {}
-    for _, group in pairs(finder.groups) do
-        if group.owner == finder.identity and type(group.minRequestVersion) == 'number' then
-            storage.minRequestVersions[group.id] = group.minRequestVersion
+    for id, floors in pairs(finder.reopenFloors or {}) do
+        if type(id) == 'string' and type(floors) == 'table' then
+            local copy = {}
+            for sender, ver in pairs(floors) do
+                if type(sender) == 'string' and type(ver) == 'number' then copy[sender] = ver end
+            end
+            if next(copy) then storage.reopenFloors[id] = copy end
         end
     end
+    storage.minRequestVersions = nil
 end
 
 function finder:GroupAlertsEnabled()
@@ -420,17 +421,19 @@ frame:SetScript('OnEvent', function(_, event)
         end
     end
     if type(storage.reopenFloors) == 'table' then
-        for id, floor in pairs(storage.reopenFloors) do
-            if type(id) == 'string' and #id <= 64 and type(floor) == 'number' and floor > 0 and floor < 9000000000000000 then
-                finder.reopenFloors[id] = floor
-            end
-        end
-    end
-    if type(storage.minRequestVersions) == 'table' then
-        for id, floor in pairs(storage.minRequestVersions) do
-            local group = type(id) == 'string' and finder.groups[identity .. '\001' .. id]
-            if group and type(floor) == 'number' and floor > 0 and floor < 9000000000000000 then
-                group.minRequestVersion = floor
+        local total = 0
+        for id, floors in pairs(storage.reopenFloors) do
+            if type(id) == 'string' and #id <= 64 and type(floors) == 'table' then
+                local copy = {}
+                for sender, ver in pairs(floors) do
+                    if total >= 2000 then break end
+                    if type(sender) == 'string' and #sender <= 128 and type(ver) == 'number'
+                        and ver > 0 and ver < 9000000000000000 then
+                        copy[sender] = ver
+                        total = total + 1
+                    end
+                end
+                if next(copy) then finder.reopenFloors[id] = copy end
             end
         end
     end

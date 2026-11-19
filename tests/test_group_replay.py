@@ -64,13 +64,34 @@ assert(restarted:Prune())
 assert(restarted.requestVersions[id .. '\001' .. 'Applicant Realm'] == nil)
 assert(not restarted:ReceiveJoin('Applicant Realm', apply))
 
--- Reopening the same listing after Prune must keep rejecting pre-close JOIN packets,
--- while accepting newer JOIN packets.
+-- Reopening the same listing after Prune must keep rejecting pre-close JOIN packets
+-- per sender without letting one applicant's higher version block another's newer JOIN.
 assert(restarted:Reopen(id))
 assert(not restarted:ReceiveJoin('Applicant Realm', apply))
 local newerApply = model._pack({'Owner Realm', id, 'dps', 'apply', '1700000000003'})
 assert(restarted:ReceiveJoin('Applicant Realm', newerApply))
 assert(restarted.requests[id]['Applicant Realm'] == 'dps')
+
+-- Per-sender independence across Cancel -> Prune -> Reopen:
+assert(restarted:Create('Per Sender Test', 'other', '', 5, 1, 60, 'tank', ''))
+local psId
+for _, g in pairs(restarted.groups) do
+    if g.title == 'Per Sender Test' then psId = g.id break end
+end
+assert(psId)
+local joinA100 = model._pack({'Owner Realm', psId, 'healer', 'apply', '100'})
+local joinB200 = model._pack({'Owner Realm', psId, 'dps', 'apply', '200'})
+assert(restarted:ReceiveJoin('Applicant A', joinA100))
+assert(restarted:ReceiveJoin('Applicant B', joinB200))
+assert(restarted:Cancel(psId))
+assert(restarted:Prune())
+assert(restarted:Reopen(psId))
+assert(not restarted:ReceiveJoin('Applicant A', joinA100))
+assert(not restarted:ReceiveJoin('Applicant B', joinB200))
+local joinA101 = model._pack({'Owner Realm', psId, 'healer', 'apply', '101'})
+local joinB201 = model._pack({'Owner Realm', psId, 'dps', 'apply', '201'})
+assert(restarted:ReceiveJoin('Applicant A', joinA101))
+assert(restarted:ReceiveJoin('Applicant B', joinB201))
 
 """)
 print("Group Finder replay and sender checks passed")
