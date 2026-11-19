@@ -150,6 +150,24 @@ f.scripts.OnEvent(f,'PLAYER_LOGIN'); assert(calls[1]=='query' and calls[2]=='spe
 c.RequestRosterPresence,c.SendLocalSpec=req,send
 """)
 
+    def test_pending_force_survives_normal_call(self):
+        lua = runtime()
+        lua.execute(r"""
+local c=OldKraken.Communication; c.ready=true; c:HasRosterAddon('Me')
+local sent={}
+local sendFn=C_ChatInfo.SendAddonMessage
+C_ChatInfo.SendAddonMessage=function(_,msg) sent[#sent+1]=msg; return 0 end
+c.lastBroadcastSpecID=1485; c.lastSpecReply=95; now=100
+assert(not c:SendLocalSpec(true))
+assert(c.pendingSpecBroadcast and c.pendingSpecForce and #c.queue==0 and #sent==0)
+now=102; assert(not c:SendLocalSpec(false))
+assert(c.pendingSpecBroadcast and c.pendingSpecForce and #c.queue==0 and #sent==0)
+now=105; c:Pump()
+assert(#sent==1 and sent[1]=='OKP^SPEC^1485')
+assert(not c.pendingSpecBroadcast and not c.pendingSpecForce and c.lastSpecReply==105)
+C_ChatInfo.SendAddonMessage=sendFn
+""")
+
     def test_login_keeps_presence_throttle(self):
         lua = runtime()
         lua.execute(r"""

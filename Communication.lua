@@ -455,16 +455,28 @@ function Communication:SendLocalSpec(forceOnQuery)
     if not self.ready or not IsInGuild or not IsInGuild() then return false end
     local specID = self:GetLocalSpecID()
     if not specID then self.pendingSpecBroadcast, self.pendingSpecForce = false, false; return false end
-    if not forceOnQuery and specID == self.lastBroadcastSpecID then self.pendingSpecBroadcast, self.pendingSpecForce = false, false; return false end
-    if (self.lastSpecReply and GetTime() - self.lastSpecReply < 10) or #self.queue > 8 then
-        self.pendingSpecBroadcast = true; if forceOnQuery then self.pendingSpecForce = true end; return false
+    local force = forceOnQuery or self.pendingSpecForce
+    if not force and specID == self.lastBroadcastSpecID then
+        self.pendingSpecBroadcast, self.pendingSpecForce = false, false
+        return false
+    end
+    if self.lastSpecReply and GetTime() - self.lastSpecReply < 10 then
+        self.pendingSpecBroadcast = true
+        if force then self.pendingSpecForce = true end
+        return false
+    end
+    if #self.queue > 8 then
+        self.pendingSpecBroadcast = true
+        if force then self.pendingSpecForce = true end
+        return false
     end
     if self:QueueMessage('OKP^SPEC^' .. tostring(specID)) then
         self.lastSpecReply, self.lastBroadcastSpecID = GetTime(), specID
         self.pendingSpecBroadcast, self.pendingSpecForce = false, false
         return true
     end
-    self.pendingSpecBroadcast = true; if forceOnQuery then self.pendingSpecForce = true end
+    self.pendingSpecBroadcast = true
+    if force then self.pendingSpecForce = true end
     return false
 end
 
