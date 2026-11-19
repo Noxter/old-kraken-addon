@@ -62,6 +62,9 @@ OldKrakenDB = legacyDb
 OldKraken.Database.Initialize()
 assert(legacyDb.settings.smartNotifications == true, 'existing profile must receive smartNotifications = true')
 
+-- Test initial UI state when smartNotifications = false before opening settings
+OldKraken.DB.settings.smartNotifications = false
+OldKraken.UIHub.pages.settings.frame = nil
 OldKraken.UIHub:ShowPage('settings')
 local settingsPage = OldKraken.UIHub.pages.settings.frame
 local smartBtn
@@ -72,6 +75,16 @@ for _, frame in ipairs(createdFrames) do
     end
 end
 assert(smartBtn, 'UIHub settings page must contain Smart Notifications toggle button')
+assert(smartBtn.text == 'Розумні сповіщення: вимк.', 'initial button text must reflect saved false state without clicking, got: ' .. tostring(smartBtn.text))
+
+-- Set back to true and re-open/refresh settings page lifecycle
+OldKraken.DB.settings.smartNotifications = true
+OldKraken.UIHub:ShowPage('groups')
+OldKraken.UIHub:ShowPage('settings')
+if settingsPage.scripts and settingsPage.scripts.OnShow then settingsPage.scripts.OnShow(settingsPage) end
+assert(smartBtn.text == 'Розумні сповіщення: увімк.', 're-opening settings must reflect true state')
+
+-- Clicking toggles both directions
 smartBtn.scripts.OnClick(smartBtn)
 assert(OldKraken.DB.settings.smartNotifications == false, 'clicking UIHub toggle must disable smartNotifications')
 assert(smartBtn.text == 'Розумні сповіщення: вимк.')
