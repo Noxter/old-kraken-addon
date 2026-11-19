@@ -58,3 +58,13 @@
   - Ввести єдині хелпери виводу в [Core.lua](Core.lua) для інформаційних повідомлень (`|cff2ec4b6Old Kraken|r: ...`) і помилок (`|cffff5555Old Kraken|r: ...`), привівши всі модулі до спільного стандарту.
   - Оновити `logAlert` у [GroupFinderUI.lua](GroupFinderUI.lua): використовувати читабельну мітку модуля (`[Групи]`, `[Івенти]`, `[Майстерня]`) замість сирих команд `/okr ...`.
   - Оновити відповідні ключі в [Locale.lua](Locale.lua) та тести, які перевіряють точні рядки чату.
+
+## 9. Guild Events — display-локалізація авто-назв активностей у `event.title`
+- **Контекст:** в [GuildEvents.lua](GuildEvents.lua) заголовок події `e.title`, створеної з вибором підземелля/рейду іншою мовою (наприклад, `Курганні глибини (BD)`), зараз відображається мовою автора навіть коли в клієнта увімкнено `enUS` (тоді як `e.activity` вже перекладається).
+- **Що змінити:**
+  - Додати display-only хелпер `displayEventTitle(e)` через `ActivityCatalog.IsCanonicalTitle(e.activity, e.title)` (за аналогією з `displayGroupTitle` у [GroupFinderUI.lua](GroupFinderUI.lua)), не змінюючи `e.title` у моделі й мережевому payload.
+
+## 10. Guild Events — заміна дропдавну вибору ролі на сегментовані кнопки
+- **Контекст:** у нижній правій панелі запису на подію в [GuildEvents.lua](GuildEvents.lua) досі використовується системний `UIDropDownMenu` для вибору ролі, що візуально відрізняється від [GroupFinderUI.lua](GroupFinderUI.lua).
+- **Що змінити:**
+  - Замінити дропдавн ролей на сегментований селектор із іконками ролей (або бейдж однієї ролі, якщо клас має єдину доступну роль, за зразком `createRoleSelector` у [GroupFinderUI.lua](GroupFinderUI.lua)).
