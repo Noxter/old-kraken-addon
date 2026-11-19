@@ -1714,7 +1714,7 @@ local function createWindow(parent)
     picker.heading:SetPoint('TOPLEFT',picker,'TOPLEFT',10,-8)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(picker.heading, 14, true) end
     local hint=picker:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-    hint:SetPoint('TOPLEFT',picker,'TOPLEFT',160,-10)
+    hint:SetPoint('LEFT',picker.heading,'RIGHT',14,0)
     hint:SetText(T('Підсвічено під ваш рівень · прокрутка коліщатком'))
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(hint, 12) end
     if colors.mutedText then hint:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
@@ -1832,6 +1832,9 @@ local function createWindow(parent)
             picker.category=category
         end
         picker:ScrollTo(picker.offset)
+        if OldKraken.UIStyle and OldKraken.UIStyle.ApplySelection then
+            OldKraken.UIStyle.ApplySelection(picker.clear, dungeon == '')
+        end
     end
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText(T('Підземелля'))

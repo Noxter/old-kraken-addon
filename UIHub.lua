@@ -360,7 +360,14 @@ local function createSettings(parent)
         selected = language
         ukrainian:SetEnabled(language ~= 'ukUA')
         english:SetEnabled(language ~= 'enUS')
-        apply:SetEnabled(language ~= active and type(ReloadUI) == 'function')
+        local canApply = language ~= active and type(ReloadUI) == 'function'
+        apply:SetEnabled(canApply)
+        if apply.SetAlpha then apply:SetAlpha(canApply and 1 or 0.45) end
+        if OldKraken.UIStyle and OldKraken.UIStyle.ApplySelection then
+            OldKraken.UIStyle.ApplySelection(ukrainian, language == 'ukUA')
+            OldKraken.UIStyle.ApplySelection(english, language == 'enUS')
+            OldKraken.UIStyle.ApplySelection(apply, canApply)
+        end
     end
     ukrainian:SetScript('OnClick', function() selectLanguage('ukUA') end)
     english:SetScript('OnClick', function() selectLanguage('enUS') end)
