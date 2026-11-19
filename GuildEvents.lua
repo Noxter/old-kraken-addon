@@ -526,7 +526,7 @@ local function selectMenu(parent,name,x,y,width,values,labels,get,set,allowed,me
     if menuFont and _G[name..'Text'] then _G[name..'Text']:SetFontObject(menuFont) end
     UIDropDownMenu_SetText(f,labels[get()]); return f
 end
-local function selectMinutes(parent,x,y,get,set,allowed)
+local function selectMinutes(parent,x,y,get,set)
     local f=CreateFrame('Frame','OldKrakenEventsMinute',parent,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f)
     f:SetPoint('TOPLEFT',parent,'TOPLEFT',x-16,y+3); UIDropDownMenu_SetWidth(f,56); UIDropDownMenu_JustifyText(f,'LEFT')
     UIDropDownMenu_Initialize(f,function(_,level,menuValue)
@@ -553,8 +553,7 @@ local function selectMinutes(parent,x,y,get,set,allowed)
             if not start then return end
             for minute=start,start+14 do
                 local value=minute; local item=UIDropDownMenu_CreateInfo(); item.text=string.format('%02d',value); item.value=value; item.checked=get()==value
-                item.disabled=allowed and not allowed(value) or false
-            item.func=function() if allowed and not allowed(value) then return end; set(value); UIDropDownMenu_SetText(f,string.format('%02d',value)) end
+                item.func=function() set(value); UIDropDownMenu_SetText(f,string.format('%02d',value)) end
                 UIDropDownMenu_AddButton(item,level)
             end
         end
@@ -1347,8 +1346,19 @@ local function createWindow(parent)
         f.announceGuild:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     end
 
-    f.cancelCreate = action(f.summaryBar, T('Скасувати'), 593, -13, 110, function()
+    local function resetDraft()
+        autoFilledTitle = nil
+        manualTitle = false
+        settingAutoTitle = true
+        f.title:SetText('')
+        settingAutoTitle = false
+        f.description:SetText('')
+        if f.descriptionHint then f.descriptionHint:SetShown(false) end
         f.creationMode = false
+    end
+
+    f.cancelCreate = action(f.summaryBar, T('Скасувати'), 593, -13, 110, function()
+        resetDraft()
         refresh()
     end, nil, {rounded = true, height = 38})
 
@@ -1386,8 +1396,7 @@ local function createWindow(parent)
                     print(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
                 end
             end
-            autoFilledTitle = nil
-            f.title:SetText(''); f.description:SetText(''); f.creationMode = false; refresh()
+            resetDraft(); refresh()
             print(T('Old Kraken: подію збережено; синхронізацію поставлено в чергу.'))
         else
             showSubmitError(T('Перевірте назву, дату, кількість місць і належність до гільдії.'))

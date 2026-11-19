@@ -85,6 +85,7 @@ def run_task1_roster_uihub():
                 local t = {}
                 function t:SetAllPoints() end
                 function t:SetPoint() end
+                function t:ClearAllPoints() end
                 function t:SetSize() end
                 function t:SetWidth() end
                 function t:SetHeight() end
@@ -177,6 +178,7 @@ def run_task1_roster_uihub():
                 },
                 roster = { presence = {} },
             },
+            Communication = { QueryPresence = function() end },
             UIStyle = {
                 Colors = {
                     brandGold = {0.88, 0.69, 0.32, 1},
@@ -209,6 +211,23 @@ def run_task1_roster_uihub():
         assert(OldKrakenRosterSearchBox ~= nil, 'Roster frame must be created')
         assert(OldKrakenRosterSearchBox:GetText() == 'Thrall', 'Saved search setting must be preserved')
         assert(OldKraken.DB.settings.roster.search == 'Thrall', 'DB setting must remain intact')
+
+        -- Reopening must preserve settings
+        OldKraken.UIHub:ShowPage('group')
+        OldKraken.UIHub:ShowPage('roster')
+        assert(OldKraken.DB.settings.roster.search == 'Thrall', 'Reopening must not overwrite saved settings')
+
+        -- Missing DB.settings, missing roster, and partial roster must initialize in DB without overwriting
+        OldKraken.DB.settings = nil
+        assert(OldKraken.GuildRoster)
+        OldKraken.GuildRoster:Show()
+        assert(type(OldKraken.DB.settings) == 'table' and type(OldKraken.DB.settings.roster) == 'table', 'DB.settings.roster must be created')
+        assert(OldKraken.DB.settings.roster.status == 'all', 'Default status must be populated')
+
+        OldKraken.DB.settings = { roster = { search = 'Jaina' } }
+        OldKraken.GuildRoster:Show()
+        assert(OldKraken.DB.settings.roster.search == 'Jaina', 'Partial roster search must be preserved')
+        assert(OldKraken.DB.settings.roster.sort == 'name', 'Missing partial roster fields must be filled')
         '''
     )
 
@@ -297,7 +316,6 @@ def run_task2_and_task6_group_finder():
         assert(ok101 and id101, '101st group creation must not be blocked by tombstones')
 
         -- Receiving another player's group must still succeed
-        local remote = OldKraken.GroupFinder.New and nil
         local remotePayload = f:EncodeGroup({
             id = '1700000000-999999-1', owner = 'Bob Moon', revision = 1, closed = false,
             title = 'Remote Group', category = 'other', description = 'Hi',
@@ -308,9 +326,8 @@ def run_task2_and_task6_group_finder():
 
         -- Old ANNOUNCE for a deleted group must not resurrect it
         assert(not f:ReceiveGroup('Alice Sun', deletedPayloads[100]), 'Old ANNOUNCE must not resurrect deleted group')
-        local g100 = f.groups['Alice Sun\001' .. (deletedPayloads[100]:match('^%d+:([^:]+)') or '')]
 
-        -- Prune after GROUP_TTL removes expired tombstones
+        -- Prune after GROUP_TTL removes expired tombstones, while deletedGroups fence keeps blocking old ANNOUNCE
         local prevNow = GetTime()
         local t = prevNow + 3601
         GetTime = function() return t end
@@ -321,6 +338,25 @@ def run_task2_and_task6_group_finder():
             if g.owner == 'Alice Sun' and g.closed and g.hidden then count = count + 1 end
         end
         assert(count == 0, 'Expired owner tombstones must be pruned')
+        assert(not f:ReceiveGroup('Alice Sun', deletedPayloads[100]), 'Old ANNOUNCE must still be rejected after Prune')
+        assert(not f:ReceiveGroup('Alice Sun', deletedPayloads[1]), 'Old ANNOUNCE beyond MAX_GROUPS must still be rejected')
+
+        -- Stale/repeated CANCEL for deleted group is rejected, while new legitimate group with different ID is accepted
+        local staleCancel = f:EncodeGroup({
+            id = f._unpackFields(deletedPayloads[100], 215)[1],
+            owner = 'Alice Sun', revision = 2, closed = true,
+            title = 'Group 100', category = 'other', description = 'Desc',
+            maxSize = 5, minLevel = 1, maxLevel = 60, role = 'dps',
+            members = {'Alice Sun'}, memberRoles = {['Alice Sun'] = 'dps'}, dungeon = '',
+        })
+        assert(not f:ReceiveGroup('Alice Sun', staleCancel), 'Repeated/stale CANCEL must be rejected')
+        local newRemote = f:EncodeGroup({
+            id = '1700000000-888888-1', owner = 'Cara Sun', revision = 1, closed = false,
+            title = 'Fresh Group', category = 'other', description = '',
+            maxSize = 5, minLevel = 1, maxLevel = 60, role = 'healer',
+            members = {'Cara Sun'}, memberRoles = {['Cara Sun'] = 'healer'}, dungeon = '',
+        })
+        assert(f:ReceiveGroup('Cara Sun', newRemote), 'Legitimate new group with different ID must be accepted')
         '''
     )
 
@@ -375,6 +411,19 @@ def run_task2_and_task6_group_finder():
         end
         local restoredB = f.groups['Alice Sun\001' .. idB]
         assert(restoredB and restoredB.closed and restoredB.hidden, 'Deleted tombstone must remain closed and hidden after reload')
+        -- Even after Prune + reload, old ANNOUNCE for deleted idB must be rejected
+        local staleB = f:EncodeGroup({
+            id = idB, owner = 'Alice Sun', revision = 1, closed = false,
+            title = 'Group B', category = 'other', description = '',
+            maxSize = 5, minLevel = 1, maxLevel = 60, role = 'dps',
+            members = {'Alice Sun'}, memberRoles = {['Alice Sun'] = 'dps'}, dungeon = '',
+        })
+        now = now + 3601
+        f:Prune()
+        for _, gf in ipairs(gfFrames) do
+            if gf._scripts.OnEvent then gf._scripts.OnEvent(gf, 'PLAYER_LOGIN') end
+        end
+        assert(not f:ReceiveGroup('Alice Sun', staleB), 'Old ANNOUNCE must remain rejected after Prune and reload')
         '''
     )
 
@@ -461,6 +510,7 @@ def run_task3_4_5_guild_events():
                 local t = {}
                 function t:SetAllPoints() end
                 function t:SetPoint() end
+                function t:ClearAllPoints() end
                 function t:SetSize() end
                 function t:SetWidth() end
                 function t:SetHeight() end
@@ -678,6 +728,14 @@ def run_task3_4_5_guild_events():
         page:SetCreationMode(false)
         page:SetCreationMode(true)
         assert(page.title:GetText() ~= 'Old Custom Event' and page.title:GetText() ~= '', 'Re-opening after submit must reset manualTitle and fill auto-title')
+
+        -- Cancel creation draft must clear manualTitle/autoFilledTitle/title/description
+        page.title._text = 'Draft Before Cancel'
+        page.title:GetScript('OnTextChanged')(page.title)
+        page.cancelCreate:GetScript('OnClick')(page.cancelCreate)
+        assert(page.title:GetText() == '', 'Cancel must clear title field')
+        page:SetCreationMode(true)
+        assert(page.title:GetText() ~= 'Draft Before Cancel' and page.title:GetText() ~= '', 'Re-opening after Cancel must start with fresh auto-title')
         '''
     )
 

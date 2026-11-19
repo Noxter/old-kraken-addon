@@ -90,6 +90,22 @@ local function saveOwned()
             if not group or (group.closed and group.hidden) then storage.lastBump[id] = nil end
         end
     end
+    storage.deletedGroups = {}
+    for id, entry in pairs(finder.deletedGroups or {}) do
+        if type(id) == 'string' and type(entry) == 'table' and type(entry.rev) == 'number' then
+            storage.deletedGroups[id] = { rev = entry.rev, at = tonumber(entry.at) or 0 }
+        end
+    end
+    storage.reopenFloors = {}
+    for id, floor in pairs(finder.reopenFloors or {}) do
+        if type(id) == 'string' and type(floor) == 'number' then storage.reopenFloors[id] = floor end
+    end
+    storage.minRequestVersions = {}
+    for _, group in pairs(finder.groups) do
+        if group.owner == finder.identity and type(group.minRequestVersion) == 'number' then
+            storage.minRequestVersions[group.id] = group.minRequestVersion
+        end
+    end
 end
 
 function finder:GroupAlertsEnabled()
@@ -390,6 +406,32 @@ frame:SetScript('OnEvent', function(_, event)
         for id, hidden in pairs(storage.hiddenGroups) do
             local group = type(id) == 'string' and finder.groups[identity .. '\001' .. id]
             if group and group.closed and hidden == true then group.hidden = true end
+        end
+    end
+    if type(storage.deletedGroups) == 'table' then
+        local count = 0
+        for id, entry in pairs(storage.deletedGroups) do
+            if count >= 500 then break end
+            if type(id) == 'string' and #id <= 64 and type(entry) == 'table'
+                and type(entry.rev) == 'number' and entry.rev >= 1 and entry.rev % 1 == 0 then
+                finder.deletedGroups[id] = { rev = entry.rev, at = tonumber(entry.at) or 0 }
+                count = count + 1
+            end
+        end
+    end
+    if type(storage.reopenFloors) == 'table' then
+        for id, floor in pairs(storage.reopenFloors) do
+            if type(id) == 'string' and #id <= 64 and type(floor) == 'number' and floor > 0 and floor < 9000000000000000 then
+                finder.reopenFloors[id] = floor
+            end
+        end
+    end
+    if type(storage.minRequestVersions) == 'table' then
+        for id, floor in pairs(storage.minRequestVersions) do
+            local group = type(id) == 'string' and finder.groups[identity .. '\001' .. id]
+            if group and type(floor) == 'number' and floor > 0 and floor < 9000000000000000 then
+                group.minRequestVersion = floor
+            end
         end
     end
     if type(storage.observedParty) == 'table' then

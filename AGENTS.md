@@ -254,7 +254,6 @@ WorkshopDeliveries.lua  Minimap.lua
 - Запрошення: `C_PartyInfo.InviteUnit`, `C_PartyInfo.ConvertToRaid`, під гейтами `UnitIsGroupLeader`/`UnitIsGroupAssistant` + `InCombatLockdown`. Памп 0,8 с в `OnUpdate`, перезапуск по `GROUP_ROSTER_UPDATE`. Пакет `raidInvites` спливає через 300 с.
 - Каденс: `CEVQUERY` кожні 180 с, одна «брудна» подія на тік, релей пересилається поки `#comm.queue <= 8`.
 - **Діагностика:** `/run OldKraken.GuildEvents:PrintRelayDiagnostics()` (є також `GetRelayDiagnostics()`).
-- **Відома вада:** `InviteAll` у `GuildEvents.lua` — у тілі методу є рядки (одразу після `local e=events[key]`), які звертаються до **невизначених** `window` і `selected`; видно за збитим відступом. Це залишок від копіпасти з UI-коду, може кидати nil-index. Не «виправляй» наосліп: спершу з'ясуй, чи метод взагалі викликається, і покрий тестом (`tests/test_event_raid_invites.py` поруч).
 
 ---
 
@@ -368,7 +367,7 @@ cd ~/Projects/old-kraken-alpha
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-- **29 файлів** `tests/test_*.py`, ~3192 рядки.
+- **35 файлів** `tests/test_*.py`.
 - Рантайм: `lupa==2.8`, `from lupa.lua51 import LuaRuntime` — **Lua 5.1**.
 - **`.venv` не потрібен**: системний Python 3.14.5 має `lupa 2.8`; `lua`/`lua5.1`/`luac` у системі **немає**.
 - **Немає pytest/unittest/conftest/Makefile/requirements** — це прості скрипти з Lua-`assert` усередині `lua.execute('''…''')`, успіх = `print('PASS: …')`.

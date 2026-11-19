@@ -64,5 +64,13 @@ assert(restarted:Prune())
 assert(restarted.requestVersions[id .. '\001' .. 'Applicant Realm'] == nil)
 assert(not restarted:ReceiveJoin('Applicant Realm', apply))
 
+-- Reopening the same listing after Prune must keep rejecting pre-close JOIN packets,
+-- while accepting newer JOIN packets.
+assert(restarted:Reopen(id))
+assert(not restarted:ReceiveJoin('Applicant Realm', apply))
+local newerApply = model._pack({'Owner Realm', id, 'dps', 'apply', '1700000000003'})
+assert(restarted:ReceiveJoin('Applicant Realm', newerApply))
+assert(restarted.requests[id]['Applicant Realm'] == 'dps')
+
 """)
 print("Group Finder replay and sender checks passed")

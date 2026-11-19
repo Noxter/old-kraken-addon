@@ -126,12 +126,26 @@ local function ShowMemberMenu(row)
     end
 end
 
+local ROSTER_DEFAULTS = { status = "all", sort = "name", ascending = true, class = "", search = "" }
+
 local function GetSettings()
     if not OldKraken.DB then
         return nil
     end
 
-    settings = OldKraken.DB.settings.roster
+    if type(OldKraken.DB.settings) ~= "table" then
+        OldKraken.DB.settings = {}
+    end
+    if type(OldKraken.DB.settings.roster) ~= "table" then
+        OldKraken.DB.settings.roster = {}
+    end
+    local target = OldKraken.DB.settings.roster
+    for key, value in pairs(ROSTER_DEFAULTS) do
+        if target[key] == nil then
+            target[key] = value
+        end
+    end
+    settings = target
     return settings
 end
 

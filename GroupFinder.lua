@@ -43,6 +43,7 @@ local roleCode = { ['']='U', tank='T', healer='H', dps='D', flex='F' }
 local codeRole = { U='', T='tank', H='healer', D='dps', F='flex' }
 local MAX_GROUPS = 100
 local GROUP_TTL = 3600
+local MAX_DELETED_FENCE = 500
 local function roleResult(ok,tank,healer,dps)
     for _,value in pairs({tank=tank,healer=healer,dps=dps}) do
         if type(issecretvalue)=='function' and issecretvalue(value) then return nil end
@@ -150,6 +151,7 @@ function Finder:Initialize(identity, send)
     self.identity, self.send = identity, send
     self.groups, self.requests, self.pending, self.syncPending, self.requestVersions = {}, {}, {}, {}, {}
     self.pendingVersions, self.pendingRoles, self.decisions, self.decisionSync = {}, {}, {}, {}
+    self.deletedGroups, self.reopenFloors = {}, {}
     self.retryKeys, self.retryIndex = nil, nil
     self.sequence = 0
     self.requestSequence = GetServerTime() * 1000
@@ -337,6 +339,10 @@ function Finder:ReceiveGroup(sender, payload)
         for i = 2, count do if states:sub(i, i) == 'P' then observed[members[i]] = true end end
     end
     local key = owner .. '\001' .. id
+    if owner == self.identity and self.deletedGroups and self.deletedGroups[id]
+        and rev <= self.deletedGroups[id].rev then
+        return false
+    end
     local existing = self.groups[key]
     if existing and existing.revision >= rev then
         if existing.revision == rev and self:EncodeGroup(existing) == payload then existing.seenAt = GetTime() end
@@ -387,12 +393,40 @@ function Finder:Prune()
     -- Keep replay fences for every live owner listing. Once its tombstone is
     -- closed (or the listing no longer exists), old JOIN packets cannot be
     -- applied because ReceiveJoin also requires an existing open group.
-    for versionKey in pairs(self.requestVersions) do
+    -- Preserve a per-group high-water mark while the closed group can still be reopened.
+    self.reopenFloors = self.reopenFloors or {}
+    for versionKey, ver in pairs(self.requestVersions) do
         local id = versionKey:match('^([^\001]+)\001')
         local group = id and self.groups[self.identity .. '\001' .. id]
         if not group or group.closed then
+            if group and not group.hidden and ver > (self.reopenFloors[id] or 0) then
+                self.reopenFloors[id] = ver
+            end
             self.requestVersions[versionKey] = nil
             changed = true
+        end
+    end
+    for id in pairs(self.reopenFloors) do
+        local group = self.groups[self.identity .. '\001' .. id]
+        if not group or (group.closed and group.hidden) then
+            self.reopenFloors[id] = nil
+            changed = true
+        end
+    end
+    if self.deletedGroups then
+        local deletedList = {}
+        for id, entry in pairs(self.deletedGroups) do
+            deletedList[#deletedList + 1] = {id = id, at = entry.at or 0}
+        end
+        if #deletedList > MAX_DELETED_FENCE then
+            table.sort(deletedList, function(a, b)
+                if a.at ~= b.at then return a.at < b.at end
+                return a.id < b.id
+            end)
+            for i = 1, #deletedList - MAX_DELETED_FENCE do
+                self.deletedGroups[deletedList[i].id] = nil
+                changed = true
+            end
         end
     end
     for id in pairs(self.requests) do
@@ -469,6 +503,7 @@ function Finder:ReceiveJoin(sender, payload)
         or (action == 'apply' and role == '')
         or not version or version % 1 ~= 0 or version < 1 or version > 9000000000000000 then return false end
     local versionKey = id .. '\001' .. sender
+    if group.minRequestVersion and version <= group.minRequestVersion then return false end
     if self.requestVersions[versionKey] and self.requestVersions[versionKey] >= version then return false end
     if not self.requestVersions[versionKey] and countGroups(self.requestVersions) >= 2000 then return false end
     if f[6] and not f[6]:match('^[01][01][01]$') then return false end
@@ -551,11 +586,17 @@ end
 function Finder:Reopen(id)
     local group = self.groups[self.identity .. '\001' .. id]
     if not group or not group.closed or group.hidden then return false end
+    local floor = math.max(group.minRequestVersion or 0, (self.reopenFloors and self.reopenFloors[id]) or 0)
+    for versionKey, ver in pairs(self.requestVersions) do
+        if versionKey:sub(1, #id + 1) == id .. '\001' and ver > floor then floor = ver end
+    end
     group.closed, group.revision = false, group.revision + 1
     if not self.send('UPDATE', self:EncodeGroup(group)) then
         group.closed, group.revision = true, group.revision - 1
         return false
     end
+    if floor > 0 then group.minRequestVersion = floor end
+    if self.reopenFloors then self.reopenFloors[id] = nil end
     return true
 end
 
@@ -582,6 +623,9 @@ function Finder:Delete(id)
     -- Keep the closed record as a synchronization tombstone, but hide it locally.
     group.hidden = true
     group.seenAt = GetTime()
+    self.deletedGroups = self.deletedGroups or {}
+    self.deletedGroups[id] = { rev = group.revision, at = GetServerTime() }
+    if self.reopenFloors then self.reopenFloors[id] = nil end
     return true
 end
 
