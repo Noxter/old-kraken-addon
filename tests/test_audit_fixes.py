@@ -199,6 +199,7 @@ def run_task1_roster_uihub():
         }
         '''
     )
+    lua.execute((root / 'Database.lua').read_text(encoding='utf-8'))
     lua.execute((root / 'UIHub.lua').read_text(encoding='utf-8'))
     lua.execute((root / 'GuildRoster.lua').read_text(encoding='utf-8'))
     lua.execute(
@@ -223,11 +224,38 @@ def run_task1_roster_uihub():
         OldKraken.GuildRoster:Show()
         assert(type(OldKraken.DB.settings) == 'table' and type(OldKraken.DB.settings.roster) == 'table', 'DB.settings.roster must be created')
         assert(OldKraken.DB.settings.roster.status == 'all', 'Default status must be populated')
+        assert(OldKraken.DB.settings.roster.class == 'ALL', 'Default class must be ALL')
+        assert(OldKraken.DB.settings.roster.sort == 'level', 'Default sort must be level')
 
-        OldKraken.DB.settings = { roster = { search = 'Jaina' } }
+        OldKraken.DB.settings = { roster = { search = 'Jaina', class = '', sort = 'name' } }
         OldKraken.GuildRoster:Show()
         assert(OldKraken.DB.settings.roster.search == 'Jaina', 'Partial roster search must be preserved')
-        assert(OldKraken.DB.settings.roster.sort == 'name', 'Missing partial roster fields must be filled')
+        assert(OldKraken.DB.settings.roster.class == 'ALL', 'Empty class must normalize to ALL')
+        assert(OldKraken.DB.settings.roster.sort == 'name', 'Valid user sort must be preserved')
+
+        -- Newer schemaVersion > SCHEMA_VERSION skips Database normalization; GuildRoster must still normalize empty class
+        OldKrakenDB = {
+            schemaVersion = 999,
+            settings = { roster = { status = 'all', sort = 'name', ascending = true, class = '', search = '' } },
+        }
+        OldKraken.Database.Initialize()
+        assert(OldKraken.DB.settings.roster.class == '', 'Database.Initialize must not touch schemaVersion > SCHEMA_VERSION')
+        OldKraken.GuildRoster:Show()
+        assert(OldKraken.DB.settings.roster.class == 'ALL', 'GuildRoster must normalize empty class even when Database skipped normalization')
+
+        -- Verify MatchesFilters via Load/Render with multiple classes
+        local mockRoster = {
+            { 'Thrall', 'Warchief', 0, 60, 'Warrior', 'Orgrimmar', '', '', true, 0, 'WARRIOR' },
+            { 'Jaina', 'Archmage', 1, 60, 'Mage', 'Theramore', '', '', true, 0, 'MAGE' },
+        }
+        GetNumGuildMembers = function() return #mockRoster end
+        GetGuildRosterInfo = function(i) return unpack(mockRoster[i]) end
+        OldKraken.DB.settings.roster.class = 'ALL'
+        OldKraken.GuildRoster:Load()
+        assert(OldKrakenRosterFrame.shownChip.label:GetText():find('2'), 'ALL class filter must show both classes')
+        OldKraken.DB.settings.roster.class = 'MAGE'
+        OldKraken.GuildRoster:Render()
+        assert(OldKrakenRosterFrame.shownChip.label:GetText():find('1'), 'Specific class filter must show only matching class')
         '''
     )
 

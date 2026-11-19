@@ -126,7 +126,7 @@ local function ShowMemberMenu(row)
     end
 end
 
-local ROSTER_DEFAULTS = { status = "all", sort = "name", ascending = true, class = "", search = "" }
+local ROSTER_DEFAULTS = { status = "all", sort = "level", ascending = true, class = "ALL", search = "" }
 
 local function GetSettings()
     if not OldKraken.DB then
@@ -144,6 +144,12 @@ local function GetSettings()
         if target[key] == nil then
             target[key] = value
         end
+    end
+    if target.class == "" then
+        target.class = "ALL"
+    end
+    if target.sort == "" then
+        target.sort = "level"
     end
     settings = target
     return settings
@@ -337,7 +343,7 @@ local function CreateRosterWindow(parent)
         return rosterFrame
     end
     if not GetSettings() then
-        settings = { status = "all", sort = "name", ascending = true, class = "", search = "" }
+        settings = { status = "all", sort = "level", ascending = true, class = "ALL", search = "" }
     end
 
     local frame
