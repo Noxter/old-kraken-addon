@@ -30,7 +30,7 @@ assert counter, "the applications counter no longer has a per-application condit
 counter_expr = counter.group(1)
 
 # The extracted decision must be the one that paints the label, not a leftover.
-assert "b.status:SetText(offline and 'ОФЛАЙН' or badge.text)" in ui, \
+assert "b.status:SetText(offline and T('ОФЛАЙН') or badge.text)" in ui, \
     "the offline label is no longer driven by the `offline` decision"
 
 lua = LuaRuntime(unpack_returned_tuples=True)

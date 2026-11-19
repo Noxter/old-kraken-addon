@@ -1,3 +1,4 @@
+local T = OldKraken.Translate or function(text) return text end
 -- Experimental integration; requires validation against the target client.
 local finder = OldKraken.GroupFinder
 local comm = OldKraken.Communication
@@ -282,7 +283,7 @@ local function reconcileParty(additionsOnly)
     local complete, changed, reason = finder:SyncPartyMembers(party, partyRoles)
     partyDirty = not complete
     if reason == 'payload' and diagnostics.partySyncError ~= 'payload' then
-        print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
+        print(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
     end
     diagnostics.partySyncError = reason
     if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
@@ -291,26 +292,26 @@ end
 function finder:PrintSyncStatus()
     local total = 0
     for _ in pairs(self.groups or {}) do total = total + 1 end
-    local realm = GetRealmName and GetRealmName() or 'невідомо'
-    print('|cff2ec4b6Old Kraken|r: Group Finder: ' .. (active and 'активний' or 'не ініціалізований') ..
-        '; гравець: ' .. tostring(self.identity or '-') .. '; realm: ' .. tostring(realm) .. '; груп: ' .. total)
-    print('|cff2ec4b6Old Kraken|r: отримано оголошень: ' .. diagnostics.received ..
-        '; додано/оновлено: ' .. diagnostics.accepted .. '; не додано (включно з повторами): ' .. diagnostics.rejected)
-    print('|cff2ec4b6Old Kraken|r: останній sender: ' .. tostring(diagnostics.lastSender or '-') ..
-        '; після перевірки: ' .. tostring(diagnostics.lastNormalized or 'не визначено'))
+    local realm = GetRealmName and GetRealmName() or T('невідомо')
+    print('|cff2ec4b6Old Kraken|r: Group Finder: ' .. (active and T('активний') or T('не ініціалізований')) ..
+        T('; гравець: ') .. tostring(self.identity or '-') .. '; realm: ' .. tostring(realm) .. T('; груп: ') .. total)
+    print(T('|cff2ec4b6Old Kraken|r: отримано оголошень: ') .. diagnostics.received ..
+        T('; додано/оновлено: ') .. diagnostics.accepted .. T('; не додано (включно з повторами): ') .. diagnostics.rejected)
+    print(T('|cff2ec4b6Old Kraken|r: останній sender: ') .. tostring(diagnostics.lastSender or '-') ..
+        T('; після перевірки: ') .. tostring(diagnostics.lastNormalized or T('не визначено')))
     if diagnostics.partySyncError == 'payload' then
-        print('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.')
+        print(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
     elseif diagnostics.partySyncError == 'unavailable' then
-        print('|cffff5555Old Kraken|r: Гра не повернула повний склад паті або рейду; аддон повторить перевірку.')
+        print(T('|cffff5555Old Kraken|r: Гра не повернула повний склад паті або рейду; аддон повторить перевірку.'))
     end
 end
 
 function finder:RequestSyncNow()
-    if not active then print('|cffff5555Old Kraken|r: Group Finder не ініціалізований.'); return false end
+    if not active then print(T('|cffff5555Old Kraken|r: Group Finder не ініціалізований.')); return false end
     if C_GuildInfo and type(C_GuildInfo.GuildRoster) == 'function' then pcall(C_GuildInfo.GuildRoster) end
-    if not comm:RequestSync() then print('|cffff5555Old Kraken|r: не вдалося додати запит синхронізації до черги.'); return false end
+    if not comm:RequestSync() then print(T('|cffff5555Old Kraken|r: не вдалося додати запит синхронізації до черги.')); return false end
     self:OnQuery()
-    print('|cff2ec4b6Old Kraken|r: запит синхронізації додано до черги.')
+    print(T('|cff2ec4b6Old Kraken|r: запит синхронізації додано до черги.'))
     return true
 end
 

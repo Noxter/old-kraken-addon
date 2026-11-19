@@ -30,6 +30,7 @@ end
 local DEFAULTS = {
     settings = {
         uiScale = 1,
+        language = 'ukUA',
         roster = {
             status = "all",
             sort = "level",

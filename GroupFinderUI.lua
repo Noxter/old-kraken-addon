@@ -1,3 +1,4 @@
+local T = OldKraken.Translate or function(text) return text end
 -- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
 local window, selected, requestsWindow
@@ -19,10 +20,10 @@ local function UpdateReannounceButton(control)
     local group = selected and Finder.groups[selected]
     local remaining = group and Finder.GetReannounceRemaining and Finder:GetReannounceRemaining(group.id)
     if remaining and remaining > 0 then
-        control:SetText(string.format('Анонс через %02d:%02d', math.floor(remaining / 60), remaining % 60))
+        control:SetText(string.format(T('Анонс через %02d:%02d'), math.floor(remaining / 60), remaining % 60))
         control:SetEnabled(false)
     else
-        control:SetText('Оновити набір')
+        control:SetText(T('Оновити набір'))
         control:SetEnabled(remaining == 0)
     end
 end
@@ -218,7 +219,7 @@ local function playerLabel(name)
 end
 
 local function roleLabel(value)
-    return '|c' .. (roleColors[value] or roleColors['']) .. (roleLabels[value] or 'Невідома') .. '|r'
+    return '|c' .. (roleColors[value] or roleColors['']) .. (roleLabels[value] or T('Невідома')) .. '|r'
 end
 local function roleChoiceLabel(value)
     local icon = (catalog and catalog.roleIcons and catalog.roleIcons[value]) or ''
@@ -366,7 +367,7 @@ local function createRoleSelector(parent, x, y, width)
         else
             self.mode = 'none'
             for i = 1, 4 do self.buttons[i].role = nil; self.buttons[i]:Hide() end
-            self.badge.text:SetText('|cff9aa5b1Немає доступної ролі|r')
+            self.badge.text:SetText(T('|cff9aa5b1Немає доступної ролі|r'))
             self.badge:Show()
         end
     end
@@ -421,13 +422,13 @@ local function refreshRequests()
     if requestOffset >= #entries then requestOffset = math.max(0, math.floor((#entries - 1) / REQUESTS_PER_PAGE) * REQUESTS_PER_PAGE) end
     requestsWindow.entries = entries
     requestsWindow.empty:SetShown(#entries == 0)
-    requestsWindow.count:SetText('Вхідні заявки (' .. #entries .. ')')
+    requestsWindow.count:SetText(T('Вхідні заявки (') .. #entries .. ')')
     for i, row in ipairs(requestsWindow.rows) do
         local entry = entries[requestOffset + i]
         row.entry = entry
         if entry then
             row.name:SetText(playerLabel(entry.name))
-            row.roleStatus:SetText(roleLabel(entry.role or '') .. ' |cff9ba9bc·|r |cffffc36bОчікує|r')
+            row.roleStatus:SetText(roleLabel(entry.role or '') .. T(' |cff9ba9bc·|r |cffffc36bОчікує|r'))
             row.accept:SetEnabled(Finder:CanPerformRole(entry.name,entry.role))
             row.group:SetText(entry.title)
             row.name:Show(); row.roleStatus:Show(); row.group:Show(); row.hover:Show(); row.accept:Show(); row.reject:Show()
@@ -441,7 +442,7 @@ local function refreshRequests()
 end
 
 local function showRequests()
-    if not Finder.active then print('Old Kraken: пошук груп не ініціалізовано.'); return end
+    if not Finder.active then print(T('Old Kraken: пошук груп не ініціалізовано.')); return end
     if not window or not window:IsShown() then Finder:Show() end
     if not window or not window:IsShown() then return end
     if tab == 'create' then tab='mine'; selected=nil end
@@ -465,7 +466,7 @@ local function showRequests()
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.count, 14, true) end
         if colors.brandGold then f.count:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
         f.empty = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-        f.empty:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -32); f.empty:SetWidth(290); f.empty:SetJustifyH('LEFT'); f.empty:SetText('Нових заявок немає. Поверніться до деталей оголошення.')
+        f.empty:SetPoint('TOPLEFT', f, 'TOPLEFT', 0, -32); f.empty:SetWidth(290); f.empty:SetJustifyH('LEFT'); f.empty:SetText(T('Нових заявок немає. Поверніться до деталей оголошення.'))
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.empty, 13) end
         if colors.mutedText then f.empty:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
         f.rows = {}
@@ -490,9 +491,9 @@ local function showRequests()
                 if not row.entry then return end
                 GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
                 GameTooltip:SetText(playerLabel(row.entry.name) .. ' · ' .. roleLabel(row.entry.role))
-                GameTooltip:AddLine('|cffffc36bОчікує|r', 1, 1, 1)
+                GameTooltip:AddLine(T('|cffffc36bОчікує|r'), 1, 1, 1)
                 GameTooltip:AddLine(row.entry.title, 1, 1, 1, true)
-                GameTooltip:AddLine('|cff68d98cНатисніть, щоб шепнути|r', 1, 1, 1)
+                GameTooltip:AddLine(T('|cff68d98cНатисніть, щоб шепнути|r'), 1, 1, 1)
                 GameTooltip:Show()
             end)
             row.hover:SetScript('OnLeave', function() GameTooltip:Hide() end)
@@ -510,16 +511,16 @@ local function showRequests()
                     Finder:Changed()
                     if accept then invitePlayer(entry.name) end
                     refreshRequests()
-                else print('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.') end
+                else print(T('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.')) end
             end
-            row.accept = button(f, 'Прийняти', 142, y - 12, 74, function() decide(true) end, 26, 'primary', {rounded = true})
-            row.reject = button(f, 'Відхилити', 222, y - 12, 76, function() decide(false) end, 26, 'danger', {rounded = true})
+            row.accept = button(f, T('Прийняти'), 142, y - 12, 74, function() decide(true) end, 26, 'primary', {rounded = true})
+            row.reject = button(f, T('Відхилити'), 222, y - 12, 76, function() decide(false) end, 26, 'danger', {rounded = true})
             for _, btn in ipairs({row.accept, row.reject}) do
                 local lbl = type(btn.GetFontString) == 'function' and btn:GetFontString()
                 if type(lbl) == 'table' and OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(lbl, 12) end
             end
-            row.accept:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(row.entry and not Finder:CanPerformRole(row.entry.name,row.entry.role) and 'Клас учасника не може виконувати цю роль або ще невідомий.' or 'Прийняти заявку'); GameTooltip:Show() end end)
-            row.reject:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Відхилити заявку'); GameTooltip:Show() end end)
+            row.accept:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(row.entry and not Finder:CanPerformRole(row.entry.name,row.entry.role) and T('Клас учасника не може виконувати цю роль або ще невідомий.') or T('Прийняти заявку')); GameTooltip:Show() end end)
+            row.reject:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(T('Відхилити заявку')); GameTooltip:Show() end end)
             row.accept:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
             row.reject:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
             f.rows[i] = row
@@ -590,7 +591,7 @@ local function ensureGroupCard(f, index)
     card:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
 
     if OldKraken.UIStyle.PillBadge then
-        card.statusPill = OldKraken.UIStyle.PillBadge(card, 'Відкрито', 'success', {width = 80, height = 19, fontSize = 11, bold = true, rounded = true, customColors = {success = STATUS_GREEN}})
+        card.statusPill = OldKraken.UIStyle.PillBadge(card, T('Відкрито'), 'success', {width = 80, height = 19, fontSize = 11, bold = true, rounded = true, customColors = {success = STATUS_GREEN}})
         card.statusPill:SetPoint('BOTTOMRIGHT', card, 'BOTTOMRIGHT', -11, 14)
         card.statusBackground = card.statusPill.fill
         card.status = card.statusPill.label
@@ -629,20 +630,20 @@ local function ensureGroupCard(f, index)
             GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
             if self.member then
                 GameTooltip:SetText(playerLabel(self.member))
-                GameTooltip:AddLine('Роль: ' .. roleLabel(self.memberRole), 1, 1, 1)
+                GameTooltip:AddLine(T('Роль: ') .. roleLabel(self.memberRole), 1, 1, 1)
                 local group = self.groupKey and Finder.groups[self.groupKey]
                 if group and self.member ~= group.owner then
-                    GameTooltip:AddLine(not group.partyObserved and 'Стан невідомий' or (group.partyObserved[self.member] and 'У паті' or 'Резерв'), 1, 1, 1)
+                    GameTooltip:AddLine(not group.partyObserved and T('Стан невідомий') or (group.partyObserved[self.member] and T('У паті') or T('Резерв')), 1, 1, 1)
                 end
             else
-                GameTooltip:SetText('Вільне місце' .. (self.requiredRole and (': ' .. roleLabel(self.requiredRole)) or ''))
+                GameTooltip:SetText(T('Вільне місце') .. (self.requiredRole and (': ' .. roleLabel(self.requiredRole)) or ''))
                 local group = self.groupKey and Finder.groups[self.groupKey]
                 if group and group.owner == Finder.identity then
-                    GameTooltip:AddLine('Це ваше оголошення', 1, 1, 1, true)
+                    GameTooltip:AddLine(T('Це ваше оголошення'), 1, 1, 1, true)
                 elseif Finder.pending[self.groupKey] == 'pending' then
-                    GameTooltip:AddLine('Заявка вже очікує відповіді', 1, 1, 1, true)
+                    GameTooltip:AddLine(T('Заявка вже очікує відповіді'), 1, 1, 1, true)
                 else
-                    GameTooltip:AddLine(self.requiredRole and 'Натисніть, щоб подати заявку на цю роль' or 'Натисніть, щоб вибрати роль і подати заявку', 1, 1, 1, true)
+                    GameTooltip:AddLine(self.requiredRole and T('Натисніть, щоб подати заявку на цю роль') or T('Натисніть, щоб вибрати роль і подати заявку'), 1, 1, 1, true)
                 end
             end
             GameTooltip:Show()
@@ -655,7 +656,7 @@ local function ensureGroupCard(f, index)
             for _, name in ipairs(group.members) do if name == Finder.identity then return end end
             if self.requiredRole then
                 if Finder:Apply(group.owner, group.id, self.requiredRole) then Finder:Changed(); refresh()
-                else print('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.') end
+                else print(T('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.')) end
                 return
             end
             f.slotMenu.groupKey = self.groupKey
@@ -692,7 +693,7 @@ local function ensureGroupCard(f, index)
             if Finder:DismissApplication(group.owner, group.id) then
                 if selected == entry.key then selected = nil end
                 Finder:Changed(); refresh()
-            else print('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.') end
+            else print(T('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.')) end
             return
         end
         if not group or group.owner ~= Finder.identity then return end
@@ -701,15 +702,15 @@ local function ensureGroupCard(f, index)
             Finder:Changed()
             refresh()
         else
-            print('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.')
+            print(T('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.'))
         end
     end)
     remove:SetScript('OnEnter', function(self)
         if GameTooltip then
             local entry = card.entry or (f.visible and f.visible[index])
             local status = entry and tab == 'applications' and Finder.pending[entry.key]
-            local label = status == 'pending' and 'Відкликати заявку'
-                or (status and 'Прибрати заявку зі списку' or 'Видалити групу')
+            local label = status == 'pending' and T('Відкликати заявку')
+                or (status and T('Прибрати заявку зі списку') or T('Видалити групу'))
             GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(label); GameTooltip:Show()
         end
     end)
@@ -735,7 +736,7 @@ refresh=function()
     local roleCategory = tab == 'create' and category or (selected and Finder.groups[selected] and Finder.groups[selected].category or category)
     if window.roleButton and window.roleButton.Update then window.roleButton:Update(roleCategory) end
     local alertsOn = Finder:GroupAlertsEnabled()
-    window.alertButton:SetText(alertsOn and 'Сповіщення: увімк.' or 'Сповіщення: вимк.')
+    window.alertButton:SetText(alertsOn and T('Сповіщення: увімк.') or T('Сповіщення: вимк.'))
     if window.alertDot then
         local c = alertsOn and STATUS_GREEN or (OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.neutral) or {0.63, 0.67, 0.73, 1}
         window.alertDot:SetColorTexture(c[1], c[2], c[3], 1)
@@ -792,16 +793,16 @@ refresh=function()
     local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= ''
         or searchText ~= '' or minText ~= '' or maxText ~= ''
     if tab == 'applications' then
-        window.emptyList:SetText('Ви ще не подали жодної заявки.')
+        window.emptyList:SetText(T('Ви ще не подали жодної заявки.'))
     elseif tab == 'mine' then
-        window.emptyList:SetText('У вас ще немає оголошень.')
+        window.emptyList:SetText(T('У вас ще немає оголошень.'))
     elseif hasFilters and totalOpenGroups > 0 then
-        window.emptyList:SetText('За обраними фільтрами груп не знайдено.\nСкиньте фільтри або створіть власне оголошення.')
+        window.emptyList:SetText(T('За обраними фільтрами груп не знайдено.\nСкиньте фільтри або створіть власне оголошення.'))
     else
-        window.emptyList:SetText('Доступних груп поки немає.\nСтворіть перше оголошення для гільдії.')
+        window.emptyList:SetText(T('Доступних груп поки немає.\nСтворіть перше оголошення для гільдії.'))
     end
     window.emptyList:SetShown(empty)
-    window.emptyAction:SetText(tab == 'applications' and 'Знайти групу' or (tab == 'all' and hasFilters and 'Скинути фільтри' or 'Створити оголошення'))
+    window.emptyAction:SetText(tab == 'applications' and T('Знайти групу') or (tab == 'all' and hasFilters and T('Скинути фільтри') or T('Створити оголошення')))
     window.emptyAction:SetShown(empty)
     for _, item in ipairs(window.tabs) do
         item.button.activeMark:SetShown(item.key == tab)
@@ -815,8 +816,15 @@ refresh=function()
     window.listSummary:SetShown(tab ~= 'create' and (#lines > 0 or tab == 'all'))
     local n = #lines
     local mod100, mod10 = n % 100, n % 10
-    local word = (mod100 >= 11 and mod100 <= 14) and 'груп' or (mod10 == 1 and 'групу' or (mod10 >= 2 and mod10 <= 4 and 'групи' or 'груп'))
-    window.listSummary:SetText(string.format('Показано %d %s · список оновлюється автоматично', n, word))
+    local word
+    if OldKraken.GetLanguage and OldKraken.GetLanguage() == 'enUS' then
+        word = n == 1 and 'group' or 'groups'
+    elseif mod100 >= 11 and mod100 <= 14 then
+        word = 'груп'
+    else
+        word = (mod10 == 1 and 'групу') or (mod10 >= 2 and mod10 <= 4 and 'групи') or 'груп'
+    end
+    window.listSummary:SetText(string.format(T('Показано %d %s · список оновлюється автоматично'), n, word))
     local listViewport = tonumber((window.listScroll:GetHeight())) or 400
     if listViewport <= 0 then listViewport = 400 end
     local fullListHeight = math.max(1, #lines * CARD_STEP - 8)
@@ -849,7 +857,7 @@ refresh=function()
                     if g.partyObserved[name] then present[#present + 1] = name else reserved = reserved + 1 end
                 end
             end
-            b.meta:SetText(string.format('%s  ·  рівні %d–%d  ·  місць %d/%d%s', playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (' · резерв ' .. reserved) or ''))
+            b.meta:SetText(string.format(T('%s  ·  рівні %d–%d  ·  місць %d/%d%s'), playerLabel(g.owner), g.minLevel, g.maxLevel, #g.members, g.maxSize, reserved > 0 and (T(' · резерв ') .. reserved) or ''))
             local badge = tab == 'applications' and applicationBadges[status]
             if badge then
                 local offline = isOwnerOffline(g.owner)
@@ -857,13 +865,13 @@ refresh=function()
                     local pillKind = offline and 'neutral' or (status == 'reject' and 'danger' or (status == 'closed' and 'neutral' or 'warning'))
                     b.statusPill:SetKind(pillKind)
                 end
-                b.status:SetText(offline and 'ОФЛАЙН' or badge.text)
+                b.status:SetText(offline and T('ОФЛАЙН') or badge.text)
                 if offline then b.status:SetTextColor(0.68, 0.72, 0.78) else b.status:SetTextColor(unpack(badge.color)) end
                 b.status:Show(); b.statusBackground:Show()
                 if b.statusPill then b.statusPill:Show() end
             else
                 local openKind = g.closed and 'neutral' or (#g.members >= g.maxSize and 'warning' or 'success')
-                local openLabel = g.closed and 'Закрито' or (#g.members >= g.maxSize and 'Заповнено' or 'Відкрито')
+                local openLabel = g.closed and T('Закрито') or (#g.members >= g.maxSize and T('Заповнено') or T('Відкрито'))
                 if b.statusPill and b.statusPill.SetKind then
                     b.statusPill:SetKind(openKind)
                     b.statusPill:SetLabel(openLabel)
@@ -876,9 +884,9 @@ refresh=function()
             if g.partyObserved and #present > 0 then
                 local preview = {playerLabel(g.owner)}
                 for memberIndex = 1, math.min(#present, 2) do preview[#preview + 1] = playerLabel(present[memberIndex]) end
-                partyLine = 'У паті: ' .. table.concat(preview, ', ') .. (#present > 2 and ('  +' .. (#present - 2)) or '')
+                partyLine = T('У паті: ') .. table.concat(preview, ', ') .. (#present > 2 and ('  +' .. (#present - 2)) or '')
             else
-                partyLine = g.partyObserved and 'Автор поки без паті' or 'Склад паті не підтверджено'
+                partyLine = g.partyObserved and T('Автор поки без паті') or T('Склад паті не підтверджено')
             end
             b.members:SetText(g.description ~= '' and g.description or partyLine)
             b.tooltipTitle = g.title
@@ -954,10 +962,10 @@ refresh=function()
         local applicationStatus = Finder.pending[selected]
         local activity = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category]
         local activityLine = activity and activity ~= g.title and ('\n|cff9ba9bc' .. activity .. '|r') or ''
-        local status = g.closed and '|cffb5b5b5Закрито|r' or '|cff59e680Відкрито|r'
-        local application = applicationStatus and ('\n|cff9ba9bcЗаявка:|r |c' .. (pendingColors[applicationStatus] or 'ffb5b5b5') .. (pendingLabels[applicationStatus] or applicationStatus) .. '|r') or ''
-        local description = g.description ~= '' and ('\n\n|cff9ba9bcОпис:|r ' .. g.description) or ''
-        window.details:SetText(string.format('|cffffd35a%s|r%s\n\n|cff9ba9bcАвтор:|r   |cff9bcaff%s|r\n|cff9ba9bcРівні:|r   |cff9bcaff%d–%d|r\n|cff9ba9bcРоль:|r    %s\n|cff9ba9bcСтатус:|r  %s%s%s\n\n|cffffd35aСклад групи:|r',
+        local status = g.closed and T('|cffb5b5b5Закрито|r') or T('|cff59e680Відкрито|r')
+        local application = applicationStatus and (T('\n|cff9ba9bcЗаявка:|r |c') .. (pendingColors[applicationStatus] or 'ffb5b5b5') .. (pendingLabels[applicationStatus] or applicationStatus) .. '|r') or ''
+        local description = g.description ~= '' and (T('\n\n|cff9ba9bcОпис:|r ') .. g.description) or ''
+        window.details:SetText(string.format(T('|cffffd35a%s|r%s\n\n|cff9ba9bcАвтор:|r   |cff9bcaff%s|r\n|cff9ba9bcРівні:|r   |cff9bcaff%d–%d|r\n|cff9ba9bcРоль:|r    %s\n|cff9ba9bcСтатус:|r  %s%s%s\n\n|cffffd35aСклад групи:|r'),
             g.title, activityLine, playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role), status, application, description))
         window.details:SetAlpha(0)
         window.detailsHeading:SetText(g.title)
@@ -979,7 +987,7 @@ refresh=function()
         if window.detailsDivider then window.detailsDivider:Show() end
         if window.detailsRosterHeader then window.detailsRosterHeader:Show() end
     else
-        window.details:SetText('Виберіть оголошення у списку.')
+        window.details:SetText(T('Виберіть оголошення у списку.'))
         window.details:SetAlpha(1)
         if window.detailsHeading then window.detailsHeading:Hide() end
         for _, kv in ipairs(window.detailsKV or {}) do kv.key:Hide(); kv.val:Hide() end
@@ -1037,7 +1045,7 @@ refresh=function()
                 row.hover:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
                 row.invite = CreateFrame('Button', nil, window.detailsContent, 'UIPanelButtonTemplate')
                 OldKraken.UIStyle.Button(row.invite, 'primary', {rounded = true})
-                row.invite:SetSize(76, 22); row.invite:SetText('Запросити')
+                row.invite:SetSize(76, 22); row.invite:SetText(T('Запросити'))
                 row.invite:SetScript('OnClick', function(self)
                     local current = selected and Finder.groups[selected]
                     local name = self.memberName
@@ -1050,7 +1058,7 @@ refresh=function()
                 OldKraken.UIStyle.Button(row.remove, nil, {rounded = true})
                 row.remove:SetSize(24, 22); row.remove:SetText('×')
                 row.remove:SetScript('OnEnter', function(self)
-                    if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText('Видалити з оголошення або виключити з паті'); GameTooltip:Show() end
+                    if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(T('Видалити з оголошення або виключити з паті')); GameTooltip:Show() end
                 end)
                 row.remove:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
                 row.remove:SetScript('OnClick', function(self)
@@ -1063,24 +1071,24 @@ refresh=function()
                     for j = 2, #current.members do if current.members[j] == name then present = true; break end end
                     if not present then return end
                     if not current.partyObserved then
-                        print('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.')
+                        print(T('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.'))
                     elseif current.partyObserved[name] then
                         if type(UnitIsGroupLeader) == 'function' and not UnitIsGroupLeader('player') then
-                            print('|cffff5555Old Kraken|r: Для виключення гравця потрібні права лідера групи.')
+                            print(T('|cffff5555Old Kraken|r: Для виключення гравця потрібні права лідера групи.'))
                         elseif not C_PartyInfo or type(C_PartyInfo.UninviteUnit) ~= 'function' then
-                            print('|cffff5555Old Kraken|r: API виключення недоступний. Видаліть гравця з паті вручну.')
+                            print(T('|cffff5555Old Kraken|r: API виключення недоступний. Видаліть гравця з паті вручну.'))
                         else
                             local ok, result = pcall(C_PartyInfo.UninviteUnit, name)
                             if ok and result ~= false then
-                                print('|cff2ec4b6Old Kraken|r: Спроба виключити ' .. name .. ' з паті. Перевірте повідомлення гри.')
+                                print(T('|cff2ec4b6Old Kraken|r: Спроба виключити ') .. name .. T(' з паті. Перевірте повідомлення гри.'))
                             else
-                                print('|cffff5555Old Kraken|r: Не вдалося виключити ' .. name .. ' з паті.')
+                                print(T('|cffff5555Old Kraken|r: Не вдалося виключити ') .. name .. T(' з паті.'))
                             end
                         end
                     elseif Finder:RemoveMember(current.id, name) then
                         Finder:Changed(); refresh()
                     else
-                        print('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.')
+                        print(T('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.'))
                     end
                     end
                     local popup = StaticPopup_Show('OLDKRAKEN_REMOVE_MEMBER', name, nil, remove)
@@ -1105,7 +1113,7 @@ refresh=function()
                 (not g.partyObserved and 'невідомо' or (g.partyObserved[name] and 'у групі' or 'резерв'))
             local memberRole=dataIndex==1 and g.role or (g.memberRoles and g.memberRoles[name])
             local coloredRole=roleLabel(memberRole or '')
-            local coloredState='|c' .. memberStateColors[state] .. state .. '|r'
+            local coloredState='|c' .. memberStateColors[state] .. T(state) .. '|r'
 
             local rowY = -top - (dataIndex - 1) * 36
             local isAuthor = dataIndex == 1
@@ -1158,7 +1166,7 @@ refresh=function()
             row.hover:ClearAllPoints()
             row.hover:SetPoint('LEFT', window.detailsContent, 'TOPLEFT', 0, rowY)
             row.hover:SetSize(canInvite and 180 or (canRemove and 240 or 276), 24)
-            row.hover.memberLabel = name .. '\nРоль: ' .. coloredRole .. '\nСтатус: ' .. coloredState
+            row.hover.memberLabel = name .. T('\nРоль: ') .. coloredRole .. T('\nСтатус: ') .. coloredState
             row.hover:Show()
         elseif row then
             row.name:Hide(); row.state:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
@@ -1188,7 +1196,7 @@ refresh=function()
         window.applicationActionButton:SetSize(296, 40)
         window.applicationActionButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -550)
     end
-    window.applicationActionButton:SetText(pending == 'pending' and 'Відкликати' or 'Прибрати заявку')
+    window.applicationActionButton:SetText(pending == 'pending' and T('Відкликати') or T('Прибрати заявку'))
     window.applicationActionButton:SetShown(showAppAction)
     local canReopen = tab ~= 'create' and g and g.owner == Finder.identity and g.closed and not g.hidden and not showingRequests
     window.cancelButton:SetShown(canManage and not showingRequests)
@@ -1209,7 +1217,7 @@ refresh=function()
         if own and not own.closed and not own.hidden then for _ in pairs(applicants) do requestCount = requestCount + 1 end end
     end
     local hasNewRequests = not showingRequests and requestCount > 0
-    window.requestsButton:SetText(showingRequests and 'До деталей' or (hasNewRequests and ('|cff69dc8c•|r  Вхідні заявки: ' .. requestCount) or ('Заявки: ' .. requestCount)))
+    window.requestsButton:SetText(showingRequests and T('До деталей') or (hasNewRequests and (T('|cff69dc8c•|r  Вхідні заявки: ') .. requestCount) or (T('Заявки: ') .. requestCount)))
     local colors = OldKraken.UIStyle.Colors
     if colors and type(window.requestsButton.fillParts) == 'table' then
         local fill = hasNewRequests and colors.primaryButton or colors.button
@@ -1238,9 +1246,9 @@ refresh=function()
     if window.commentHint then window.commentHint:SetShown(tab=='create' and (window.descriptionBox:GetText() or '')=='') end
     window.categoryButton:SetShown(advanced); window.categoryLabel:SetShown(advanced)
     window.dungeonLabel:Hide()
-    window.maxBox.label:SetText(category=='dungeon' and 'Місць (5)' or 'Місць')
+    window.maxBox.label:SetText(category=='dungeon' and T('Місць (5)') or T('Місць'))
     window.createButton:SetShown(tab=='create')
-    window.createButton:SetText('Зібрати групу')
+    window.createButton:SetText(T('Зібрати групу'))
     local colors = OldKraken.UIStyle.Colors or {}
     for _,control in ipairs(window.creationRoles) do
         local allowed = Finder:CanPerformRole(Finder.identity,control.role)
@@ -1265,9 +1273,9 @@ refresh=function()
             label:SetAlpha(allowed and 1 or 0.4)
         end
     end
-    window.creationOptionsButton:SetText(window.advancedCreation and 'Параметри -' or 'Параметри +')
+    window.creationOptionsButton:SetText(window.advancedCreation and T('Параметри -') or T('Параметри +'))
     local selectedActivity=dungeon~='' and dungeonLabels[dungeon] or nil
-    window.dungeonSelection:SetText(selectedActivity or ((category=='dungeon' or category=='raid') and 'Оберіть картку вище' or categoryLabels[category]))
+    window.dungeonSelection:SetText(selectedActivity or ((category=='dungeon' or category=='raid') and T('Оберіть картку вище') or categoryLabels[category]))
     catalog.SetArtwork(window.creationArt,dungeon)
 end
 
@@ -1292,14 +1300,14 @@ local function createWindow(parent)
     f:SetClampedToScreen(true); f:Hide()
     if not parent then OldKraken.UIStyle.Window(f) end
     f:HookScript('OnHide', function() if requestsWindow then requestsWindow:Hide() end end)
-    if f.TitleText then f.TitleText:SetText('Old Kraken — Пошук груп') end
+    if OldKraken.BindGuildTitle then OldKraken.BindGuildTitle(f, T('Пошук груп')) end
 
     -- Segmented tabs block (at y = -47)
     local tabItems = {
-        {key='all', label='Усі групи', width=96},
-        {key='create', label='Створити', width=96},
-        {key='applications', label='Мої заявки', width=138},
-        {key='mine', label='Мої оголошення', width=148},
+        {key='all', label=T('Усі групи'), width=96},
+        {key='create', label=T('Створити'), width=96},
+        {key='applications', label=T('Мої заявки'), width=138},
+        {key='mine', label=T('Мої оголошення'), width=148},
     }
     local function switchTab(nextTab)
         if requestsWindow then requestsWindow:Hide() end
@@ -1334,9 +1342,9 @@ local function createWindow(parent)
     end
 
     -- Header notification chip (right side of the shared header row)
-    f.alertButton = button(f, 'Сповіщення: увімк.', 732, 0, 168, function()
+    f.alertButton = button(f, T('Сповіщення: увімк.'), 732, 0, 168, function()
         if Finder:SetGroupAlertsEnabled(not Finder:GroupAlertsEnabled()) then refresh()
-        else print('Old Kraken: не вдалося зберегти налаштування сповіщень.') end
+        else print(T('Old Kraken: не вдалося зберегти налаштування сповіщень.')) end
     end, 31)
     local alertLabel = f.alertButton:GetFontString()
     if alertLabel then
@@ -1359,7 +1367,7 @@ local function createWindow(parent)
         for _, candidate in ipairs(roles) do
             local choice = candidate
             local info = UIDropDownMenu_CreateInfo()
-            info.text = 'Подати заявку: ' .. roleLabel(choice)
+            info.text = T('Подати заявку: ') .. roleLabel(choice)
             info.disabled = not Finder:CanPerformRole(Finder.identity,choice)
             info.notCheckable = true
             info.func = function()
@@ -1369,7 +1377,7 @@ local function createWindow(parent)
                     or Finder.pending[key] == 'pending' then return end
                 for _, name in ipairs(group.members) do if name == Finder.identity then return end end
                 if Finder:Apply(group.owner, group.id, choice) then Finder:Changed(); refresh()
-                else print('Old Kraken: не вдалося подати заявку. Перевірте зв’язок.') end
+                else print(T('Old Kraken: не вдалося подати заявку. Перевірте зв’язок.')) end
             end
             UIDropDownMenu_AddButton(info, level)
         end
@@ -1408,10 +1416,10 @@ local function createWindow(parent)
         f.searchFilter:SetText('')
         f.minLevelFilter:SetText('')
         f.maxLevelFilter:SetText('')
-        UIDropDownMenu_SetText(f.categoryFilter, 'Категорія: усі')
-        UIDropDownMenu_SetText(f.roleFilter, 'Роль: усі')
-        UIDropDownMenu_SetText(f.freeFilter, 'Усі групи')
-        UIDropDownMenu_SetText(f.dungeonFilter, dungeonLabels[''] or 'Підземелля: усі')
+        UIDropDownMenu_SetText(f.categoryFilter, T('Категорія: усі'))
+        UIDropDownMenu_SetText(f.roleFilter, T('Роль: усі'))
+        UIDropDownMenu_SetText(f.freeFilter, T('Усі групи'))
+        UIDropDownMenu_SetText(f.dungeonFilter, dungeonLabels[''] or T('Підземелля: усі'))
         offset = 0
         refresh()
     end
@@ -1421,8 +1429,8 @@ local function createWindow(parent)
     f.emptyList:SetWidth(460); f.emptyList:SetJustifyH('CENTER')
     if type(f.emptyList.SetSpacing) == 'function' then f.emptyList:SetSpacing(5) end
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.emptyList, 14) end
-    f.emptyList:SetText('Доступних груп поки немає.\nСтворіть перше оголошення для гільдії.')
-    f.emptyAction = button(f, 'Створити оголошення', 182, -365, 190, function()
+    f.emptyList:SetText(T('Доступних груп поки немає.\nСтворіть перше оголошення для гільдії.'))
+    f.emptyAction = button(f, T('Створити оголошення'), 182, -365, 190, function()
         local hasFilters = filterCategory ~= 'all' or filterRole ~= '' or filterFree or filterDungeon ~= ''
             or (f.searchFilter:GetText() or '') ~= '' or (f.minLevelFilter:GetText() or '') ~= '' or (f.maxLevelFilter:GetText() or '') ~= ''
         if tab == 'all' and hasFilters then
@@ -1474,7 +1482,7 @@ local function createWindow(parent)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.detailsHeading, 16, true) end
     f.detailsHeading:Hide()
     f.detailsKV = {}
-    for idx, labelText in ipairs({'Автор', 'Рівні', 'Роль', 'Статус', 'Опис'}) do
+    for idx, labelText in ipairs({T('Автор'), T('Рівні'), T('Роль'), T('Статус'), T('Опис')}) do
         local rowY = -30 - (idx - 1) * 26
         local k = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
         k:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 0, rowY)
@@ -1489,7 +1497,7 @@ local function createWindow(parent)
         v:Hide()
         f.detailsKV[idx] = {key = k, val = v}
     end
-    f.editDescButton = button(f.detailsContent, 'Змінити', 206, -132, 70, function()
+    f.editDescButton = button(f.detailsContent, T('Змінити'), 206, -132, 70, function()
         local g = selected and Finder.groups[selected]
         if not g or g.owner ~= Finder.identity or g.closed then return end
         editingDescriptionKey = selected
@@ -1514,14 +1522,14 @@ local function createWindow(parent)
             Finder:Changed()
             refresh()
         else
-            print('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.')
+            print(T('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.'))
         end
     end
     f.editDescBox:SetScript('OnEnterPressed', saveEditedDescription)
     f.editDescBox:SetScript('OnEscapePressed', function(self) self:ClearFocus(); editingDescriptionKey = nil; refresh() end)
     f.editDescBox:Hide()
 
-    f.saveDescButton = button(f.detailsContent, 'Ок', 208, -130, 38, saveEditedDescription, 22, 'primary', {rounded = true})
+    f.saveDescButton = button(f.detailsContent, T('Ок'), 208, -130, 38, saveEditedDescription, 22, 'primary', {rounded = true})
     f.saveDescButton:Hide()
     f.cancelDescButton = button(f.detailsContent, '×', 250, -130, 26, function() editingDescriptionKey = nil; refresh() end, 22, nil, {rounded = true})
     f.cancelDescButton:Hide()
@@ -1536,9 +1544,9 @@ local function createWindow(parent)
     f.detailsRosterHeader:SetWidth(276); f.detailsRosterHeader:SetJustifyH('LEFT')
     if goldColor then f.detailsRosterHeader:SetTextColor(goldColor[1], goldColor[2], goldColor[3]) end
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.detailsRosterHeader, 13, true) end
-    f.detailsRosterHeader:SetText('Склад групи'); f.detailsRosterHeader:Hide()
+    f.detailsRosterHeader:SetText(T('Склад групи')); f.detailsRosterHeader:Hide()
     f.memberRows = {}
-    f.requestsButton = button(f, 'Заявки', 587, -514, 296, function()
+    f.requestsButton = button(f, T('Заявки'), 587, -514, 296, function()
         if requestsWindow and requestsWindow:IsShown() then requestsWindow:Hide(); refresh() else showRequests() end
     end, 30, nil, {rounded = true})
     if type(f.requestsButton.SetFrameLevel) == 'function' then
@@ -1563,7 +1571,7 @@ local function createWindow(parent)
     f.searchFilter.label:Hide()
     f.searchHint = f.searchFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.searchHint:SetPoint('LEFT', f.searchFilter, 'LEFT', 10, 0)
-    f.searchHint:SetText('Пошук групи')
+    f.searchHint:SetText(T('Пошук групи'))
     if muted then f.searchHint:SetTextColor(muted[1], muted[2], muted[3]) end
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.searchHint, 13) end
     f.searchFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
@@ -1577,21 +1585,21 @@ local function createWindow(parent)
 
     f.dungeonFilter = dropdown(f, 193, -117, 170, activityOptions,
         function() return filterDungeon end, function(value) filterDungeon=value; offset=0; refresh() end)
-    UIDropDownMenu_SetText(f.dungeonFilter, 'Підземелля: усі')
+    UIDropDownMenu_SetText(f.dungeonFilter, T('Підземелля: усі'))
     f.dungeonFilterLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     f.dungeonFilterLabel:Hide()
 
-    f.categoryFilter = dropdown(f, 373, -117, 156, choices(categories, categoryLabels, {value='all', label='Категорія: усі'}),
+    f.categoryFilter = dropdown(f, 373, -117, 156, choices(categories, categoryLabels, {value='all', label=T('Категорія: усі')}),
         function() return filterCategory end, function(value) filterCategory=value; offset=0; refresh() end)
-    f.roleFilter = dropdown(f, 539, -117, 110, choices({'tank','healer','dps'}, coloredRoleLabels, {value='', label='Роль: усі'}),
+    f.roleFilter = dropdown(f, 539, -117, 110, choices({'tank','healer','dps'}, coloredRoleLabels, {value='', label=T('Роль: усі')}),
         function() return filterRole end, function(value) filterRole=value; offset=0; refresh() end)
-    f.freeFilter = dropdown(f, 539, -117, 110, {{value=false, label='Усі групи'}, {value=true, label='Є місця'}},
+    f.freeFilter = dropdown(f, 539, -117, 110, {{value=false, label=T('Усі групи')}, {value=true, label=T('Є місця')}},
         function() return filterFree end, function(value) filterFree=value; offset=0; refresh() end)
     f.freeFilter:Hide()
 
     f.levelRangeLabel = f.filterPanel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     f.levelRangeLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 659, -127)
-    f.levelRangeLabel:SetText('Рівень')
+    f.levelRangeLabel:SetText(T('Рівень'))
     if muted then f.levelRangeLabel:SetTextColor(muted[1], muted[2], muted[3]) end
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.levelRangeLabel, 12) end
 
@@ -1601,7 +1609,7 @@ local function createWindow(parent)
     f.minLevelFilter:SetAutoFocus(false); f.minLevelFilter:SetTextInsets(6, 6, 0, 0); f.minLevelFilter:SetText('')
     f.minLevelFilter.label = f.levelRangeLabel
     f.minLevelHint = f.minLevelFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.minLevelHint:SetPoint('CENTER', f.minLevelFilter, 'CENTER', 0, 0); f.minLevelHint:SetText('від')
+    f.minLevelHint:SetPoint('CENTER', f.minLevelFilter, 'CENTER', 0, 0); f.minLevelHint:SetText(T('від'))
     if muted then f.minLevelHint:SetTextColor(muted[1], muted[2], muted[3]) end
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.minLevelHint, 13) end
     f.minLevelFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
@@ -1623,7 +1631,7 @@ local function createWindow(parent)
     f.maxLevelFilter:SetSize(44, 34); f.maxLevelFilter:SetPoint('TOPLEFT', f, 'TOPLEFT', 767, -116)
     f.maxLevelFilter:SetAutoFocus(false); f.maxLevelFilter:SetTextInsets(6, 6, 0, 0); f.maxLevelFilter:SetText('')
     f.maxLevelHint = f.maxLevelFilter:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    f.maxLevelHint:SetPoint('CENTER', f.maxLevelFilter, 'CENTER', 0, 0); f.maxLevelHint:SetText('до')
+    f.maxLevelHint:SetPoint('CENTER', f.maxLevelFilter, 'CENTER', 0, 0); f.maxLevelHint:SetText(T('до'))
     if muted then f.maxLevelHint:SetTextColor(muted[1], muted[2], muted[3]) end
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.maxLevelHint, 13) end
     f.maxLevelFilter:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
@@ -1637,7 +1645,7 @@ local function createWindow(parent)
     -- Backward-compatible alias for single-input callers
     f.levelFilter = f.minLevelFilter
 
-    f.resetFilterButton = button(f, 'Скинути', 824, -119, 63, resetAllFilters, 28)
+    f.resetFilterButton = button(f, T('Скинути'), 824, -119, 63, resetAllFilters, 28)
     local resetText = f.resetFilterButton:GetFontString()
     local gold = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.brandGold
     if resetText and gold then resetText:SetTextColor(gold[1], gold[2], gold[3]) end
@@ -1647,11 +1655,11 @@ local function createWindow(parent)
         f.levelRangeLabel, f.minLevelFilter, f.levelDash, f.maxLevelFilter,
         f.categoryFilter, f.roleFilter, f.resetFilterButton,
     }
-    f.titleBox = input(f, 'Назва', 20, -330, 240, '')
-    f.descriptionBox = input(f, 'Опис', 275, -330, 250, '')
-    f.maxBox = input(f, 'Місць', 20, -385, 65, '5')
-    f.minBox = input(f, 'Мін. рівень', 105, -385, 80, '1')
-    f.maxLevelBox = input(f, 'Макс. рівень', 205, -385, 80, '60')
+    f.titleBox = input(f, T('Назва'), 20, -330, 240, '')
+    f.descriptionBox = input(f, T('Опис'), 275, -330, 250, '')
+    f.maxBox = input(f, T('Місць'), 20, -385, 65, '5')
+    f.minBox = input(f, T('Мін. рівень'), 105, -385, 80, '1')
+    f.maxLevelBox = input(f, T('Макс. рівень'), 205, -385, 80, '60')
     f.createFields = {f.titleBox, f.descriptionBox, f.maxBox, f.minBox, f.maxLevelBox}
     local autoDungeonTitle
     f.categoryButton = dropdown(f, 305, -408, 140, choices(categories, categoryLabels),
@@ -1661,7 +1669,7 @@ local function createWindow(parent)
             if category ~= previousCategory then
                 if autoDungeonTitle and f.titleBox:GetText() == autoDungeonTitle then f.titleBox:SetText('') end
                 autoDungeonTitle=nil
-                dungeon=''; f.dungeonSelection:SetText('Без конкретного підземелля')
+                dungeon=''; f.dungeonSelection:SetText(T('Без конкретного підземелля'))
             end
             if category == 'dungeon' then
                 f.maxBox:SetText('5')
@@ -1670,14 +1678,14 @@ local function createWindow(parent)
             refresh()
         end)
     f.categoryLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText('Категорія')
+    f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText(T('Категорія'))
     f.roleButton = createRoleSelector(f, 587, -502, 296)
     f.roleButton:Update(category)
     f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.roleLabel, 13, true) end
     local roleLabelMuted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
     if roleLabelMuted then f.roleLabel:SetTextColor(roleLabelMuted[1], roleLabelMuted[2], roleLabelMuted[3]) end
-    f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 587, -484); f.roleLabel:SetText('Ваша роль у групі:')
+    f.roleLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 587, -484); f.roleLabel:SetText(T('Ваша роль у групі:'))
     local function selectActivity(value)
         local title = f.titleBox:GetText()
         local replaceTitle = title == '' or (autoDungeonTitle and title == autoDungeonTitle)
@@ -1690,7 +1698,7 @@ local function createWindow(parent)
         if recommended then
             f.minBox:SetText(tostring(recommended.min)); f.maxLevelBox:SetText(tostring(recommended.max))
         end
-        f.dungeonSelection:SetText(value~='' and dungeonLabels[value] or 'Без конкретного підземелля')
+        f.dungeonSelection:SetText(value~='' and dungeonLabels[value] or T('Без конкретного підземелля'))
         f.UpdateActivityCards()
         refresh()
     end
@@ -1707,10 +1715,10 @@ local function createWindow(parent)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(picker.heading, 14, true) end
     local hint=picker:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
     hint:SetPoint('TOPLEFT',picker,'TOPLEFT',160,-10)
-    hint:SetText('Підсвічено під ваш рівень · прокрутка коліщатком')
+    hint:SetText(T('Підсвічено під ваш рівень · прокрутка коліщатком'))
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(hint, 12) end
     if colors.mutedText then hint:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
-    picker.clear=button(picker,'Без конкретного підземелля',605,-4,225,function() selectActivity('') end)
+    picker.clear=button(picker,T('Без конкретного підземелля'),605,-4,225,function() selectActivity('') end)
     local clip=CreateFrame('Frame',nil,picker)
     clip:SetPoint('TOPLEFT',picker,'TOPLEFT',6,-36); clip:SetSize(808,396)
     if clip.SetClipsChildren then pcall(clip.SetClipsChildren,clip,true) end
@@ -1733,9 +1741,9 @@ local function createWindow(parent)
     f.dungeonSelection=f:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
     f.dungeonSelection:SetPoint('TOPLEFT',f,'TOPLEFT',460,-408)
     f.dungeonSelection:SetSize(350,30); f.dungeonSelection:SetJustifyH('LEFT')
-    f.dungeonSelection:SetText('Без конкретного підземелля')
+    f.dungeonSelection:SetText(T('Без конкретного підземелля'))
     f.UpdateActivityCards=function()
-        picker.heading:SetText(category=='raid' and 'Оберіть рейд' or 'Куди йдемо?')
+        picker.heading:SetText(category=='raid' and T('Оберіть рейд') or T('Куди йдемо?'))
         local level=type(UnitLevel)=='function' and tonumber((UnitLevel('player'))) or 0
         level=level or 0
         local count=0
@@ -1771,7 +1779,7 @@ local function createWindow(parent)
                     card:SetScript('OnEnter',function(self)
                         if GameTooltip and self.entry then
                             GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.entry.label)
-                            GameTooltip:AddLine('Рекомендовані рівні: '..self.entry.min..'–'..self.entry.max,1,1,1,true)
+                            GameTooltip:AddLine(T('Рекомендовані рівні: ')..self.entry.min..'–'..self.entry.max,1,1,1,true)
                             if self.levelNote then GameTooltip:AddLine(self.levelNote,self.levelColor[1],self.levelColor[2],self.levelColor[3],true) end
                             GameTooltip:Show()
                         end
@@ -1786,9 +1794,9 @@ local function createWindow(parent)
                 if entry.value==dungeon then selectedIndex=count end
                 card.entry=entry; card.fitsLevel=fits and true or false
                 if tooLow then
-                    card.levelNote='Ваш рівень нижчий за рекомендований'; card.levelColor={1,0.48,0.43}
+                    card.levelNote=T('Ваш рівень нижчий за рекомендований'); card.levelColor={1,0.48,0.43}
                 elseif tooHigh then
-                    card.levelNote='Ваш рівень вищий за рекомендований'; card.levelColor={0.61,0.66,0.74}
+                    card.levelNote=T('Ваш рівень вищий за рекомендований'); card.levelColor={0.61,0.66,0.74}
                 else
                     card.levelNote=nil; card.levelColor=nil
                 end
@@ -1802,7 +1810,7 @@ local function createWindow(parent)
                     card.title:SetTextColor(fits and 1 or 0.8,fits and 0.91 or 0.8,fits and 0.65 or 0.8)
                     card.fill:SetColorTexture(fits and 0.14 or 0.06,fits and 0.11 or 0.065,0.06,1)
                 end
-                local levelBadge = fits and '  |cff69dc8cпід ваш рівень|r' or (tooLow and '  |cffff7a6eнизький рівень|r' or (tooHigh and '  |cff9ba9bcвище рівня|r' or ''))
+                local levelBadge = fits and T('  |cff69dc8cпід ваш рівень|r') or (tooLow and T('  |cffff7a6eнизький рівень|r') or (tooHigh and T('  |cff9ba9bcвище рівня|r') or ''))
                 card.levels:SetText(entry.min..'–'..entry.max..levelBadge)
                 local r,g,b=0.23,0.25,0.28
                 local thickness=1
@@ -1826,7 +1834,7 @@ local function createWindow(parent)
         picker:ScrollTo(picker.offset)
     end
     f.dungeonLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
-    f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText('Підземелля')
+    f.dungeonLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 460, -389); f.dungeonLabel:SetText(T('Підземелля'))
     local function truncateUtf8Bytes(text, limit)
         if type(text) ~= 'string' or #text <= limit then return text or '' end
         if limit <= 0 then return '' end
@@ -1846,16 +1854,16 @@ local function createWindow(parent)
         local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
             or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
         if not sendChat then
-            print('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.')
+            print(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
             return
         end
         local metaParts = {(currentCount or 1) .. '/' .. (maxPlayers or 5)}
         if minLv and maxLv and minLv > 0 and maxLv > 0 then
-            metaParts[#metaParts + 1] = 'рівні ' .. minLv .. '–' .. maxLv
+            metaParts[#metaParts + 1] = T('рівні ') .. minLv .. '–' .. maxLv
         end
         local cleanActivity = tostring(activityName or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
-        local prefix = '[Old Kraken] Збір групи: ' .. cleanActivity .. ' (' .. table.concat(metaParts, ', ') .. ')'
-        local suffix = ' — запис у вкладці «Групи» (/okr).'
+        local prefix = T('[Old Kraken] Збір групи: ') .. cleanActivity .. ' (' .. table.concat(metaParts, ', ') .. ')'
+        local suffix = T(' — запис у вкладці «Групи» (/okr).')
         local note = ((descText or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')):match('^%s*(.-)%s*$')
         local maxBytes = 255
         if #prefix + #suffix > maxBytes then
@@ -1876,19 +1884,19 @@ local function createWindow(parent)
         end
         local msg = prefix .. notePart .. suffix
         local sent, err = pcall(sendChat, msg, 'GUILD')
-        if not sent then print('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ' .. tostring(err)) end
+        if not sent then print(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
     end
     f.announceGuildEnabled = true
-    f.createButton = button(f, 'Створити', 550, -455, 150, function()
+    f.createButton = button(f, T('Створити'), 550, -455, 150, function()
         local titleText = (f.titleBox:GetText() or ''):match('^%s*(.-)%s*$')
         local ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then
             if f.announceGuildEnabled then
-                local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or 'Група')
+                local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or T('Група'))
                 announceGroupInGuildChat(activityName, 1, tonumber(f.maxBox:GetText()) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
             end
             Finder:Changed(); tab='mine'; refresh()
-        else print('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.') end
+        else print(T('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.')) end
     end, nil, 'primary')
     f.advancedCreation=false
     local colors = OldKraken.UIStyle.Colors or {}
@@ -1902,7 +1910,7 @@ local function createWindow(parent)
     f.dungeonSelection:SetPoint('TOPLEFT',footer,'TOPLEFT',43,-7); f.dungeonSelection:SetSize(145,32)
     f.creationRoles={}
     local roleChipWidths = {tank = 52, healer = 56, dps = 48, flex = 64}
-    local roleChipTitles = {tank = 'Танк', healer = 'Лікар', dps = 'DPS', flex = 'Гнучка'}
+    local roleChipTitles = {tank = T('Танк'), healer = T('Лікар'), dps = 'DPS', flex = T('Гнучка')}
     local chipX = 194
     for i,value in ipairs({'tank','healer','dps'}) do
         local chosen=value
@@ -1921,27 +1929,27 @@ local function createWindow(parent)
     f.descriptionBox:SetParent(footer); f.descriptionBox:ClearAllPoints()
     f.descriptionBox:SetPoint('TOPLEFT',footer,'TOPLEFT',364,-8); f.descriptionBox:SetSize(124,28)
     f.commentHint=footer:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-    f.commentHint:SetPoint('LEFT',f.descriptionBox,'LEFT',8,0); f.commentHint:SetText('Коментар')
+    f.commentHint:SetPoint('LEFT',f.descriptionBox,'LEFT',8,0); f.commentHint:SetText(T('Коментар'))
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.commentHint, 12) end
     if muted then f.commentHint:SetTextColor(muted[1], muted[2], muted[3]) end
     f.descriptionBox:SetScript('OnTextChanged',function(self) f.commentHint:SetShown(self:GetText()=='') end)
     if OldKraken.UIStyle.Chip then
-        f.announceGuild = OldKraken.UIStyle.Chip(footer, 'У чат', {dot = 'success', active = true, width = 78, height = 28, rounded = true})
+        f.announceGuild = OldKraken.UIStyle.Chip(footer, T('У чат'), {dot = 'success', active = true, width = 78, height = 28, rounded = true})
         f.announceGuild:SetPoint('TOPLEFT', footer, 'TOPLEFT', 494, -8)
         f.announceGuild:SetScript('OnClick', function(self)
             f.announceGuildEnabled = not f.announceGuildEnabled
             self:SetActive(f.announceGuildEnabled)
             if self.SetDotColor then self:SetDotColor(f.announceGuildEnabled and 'success' or 'neutral') end
         end)
-        f.announceGuild:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_TOP'); GameTooltip:SetText('Повідомити в гільд-чат про нову групу'); GameTooltip:Show() end end)
+        f.announceGuild:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_TOP'); GameTooltip:SetText(T('Повідомити в гільд-чат про нову групу')); GameTooltip:Show() end end)
         f.announceGuild:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     end
-    f.creationOptionsButton=button(footer,'Параметри +',578,-8,104,function() f.advancedCreation=not f.advancedCreation; refresh() end,28,nil,{rounded=true})
+    f.creationOptionsButton=button(footer,T('Параметри +'),578,-8,104,function() f.advancedCreation=not f.advancedCreation; refresh() end,28,nil,{rounded=true})
     f.creationOptionsButton:SetScript('OnEnter',function(self)
         if GameTooltip then
             GameTooltip:SetOwner(self,'ANCHOR_TOP')
-            GameTooltip:SetText('Параметри групи')
-            GameTooltip:AddLine('Назва, категорія (рейд, PvP, квести), кількість місць та рівні.',1,1,1,true)
+            GameTooltip:SetText(T('Параметри групи'))
+            GameTooltip:AddLine(T('Назва, категорія (рейд, PvP, квести), кількість місць та рівні.'),1,1,1,true)
             GameTooltip:Show()
         end
     end)
@@ -1966,43 +1974,43 @@ local function createWindow(parent)
         clip:SetHeight(picker.viewportHeight); picker:ScrollTo(picker.offset)
     end
     options:Hide(); footer:Hide()
-    f.applyButton = button(f, 'Подати заявку', 587, -550, 296, function()
+    f.applyButton = button(f, T('Подати заявку'), 587, -550, 296, function()
         local g=selected and Finder.groups[selected]
         if role == '' or not Finder:CanPerformRole(Finder.identity, role) then
-            print('Old Kraken: оберіть доступну роль для подачі заявки.')
+            print(T('Old Kraken: оберіть доступну роль для подачі заявки.'))
             return
         end
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
-        elseif g then print('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.') end
+        elseif g then print(T('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.')) end
     end, 40, 'primary')
-    f.applicationActionButton = button(f, 'Відкликати', 739, -550, 144, function()
+    f.applicationActionButton = button(f, T('Відкликати'), 739, -550, 144, function()
         local g=selected and Finder.groups[selected]
         if not g or g.owner == Finder.identity or not Finder.pending[selected] then return end
         if Finder:DismissApplication(g.owner, g.id) then
             Finder:Changed(); selected=nil; refresh()
-        else print('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.') end
+        else print(T('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.')) end
     end, 40)
-    f.cancelButton = button(f, 'Закрити набір', 587, -554, 144, function()
+    f.cancelButton = button(f, T('Закрити набір'), 587, -554, 144, function()
         local g=selected and Finder.groups[selected]
         if g and g.owner==Finder.identity and Finder:Cancel(g.id) then Finder:Changed(); refresh() end
     end, 36)
-    f.bumpButton = button(f, 'Оновити набір', 739, -554, 144, function()
+    f.bumpButton = button(f, T('Оновити набір'), 739, -554, 144, function()
         local group = selected and Finder.groups[selected]
         if not group or group.owner ~= Finder.identity or group.closed then return end
         local ok, reason, seconds = Finder:Reannounce(group.id)
         if ok then
-            local activityName = (group.title and group.title ~= '' and group.title) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or 'Група'
+            local activityName = (group.title and group.title ~= '' and group.title) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or T('Група')
             announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description)
-            print('Old Kraken: повторне оголошення додано до черги гільдії.')
-        elseif reason == 'cooldown' then print('Old Kraken: повторити оголошення можна через ' .. seconds .. ' с.')
-        else print('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.') end
+            print(T('Old Kraken: повторне оголошення додано до черги гільдії.'))
+        elseif reason == 'cooldown' then print(T('Old Kraken: повторити оголошення можна через ') .. seconds .. T(' с.'))
+        else print(T('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.')) end
         UpdateReannounceButton(f.bumpButton)
     end, 36)
-    f.reopenButton = button(f, 'Відкрити набір знову', 587, -550, 296, function()
+    f.reopenButton = button(f, T('Відкрити набір знову'), 587, -550, 296, function()
         local group = selected and Finder.groups[selected]
         if not group or group.owner ~= Finder.identity or not group.closed or group.hidden then return end
         if Finder:Reopen(group.id) then Finder:Changed(); refresh()
-        else print('Old Kraken: не вдалося відкрити набір знову. Перевірте зв’язок.') end
+        else print(T('Old Kraken: не вдалося відкрити набір знову. Перевірте зв’язок.')) end
     end, 40, 'primary', {rounded = true})
     f.bumpButton:SetScript('OnUpdate', function(self, elapsed)
         self.countdownElapsed = (self.countdownElapsed or 0) + elapsed
@@ -2010,7 +2018,7 @@ local function createWindow(parent)
         self.countdownElapsed = 0
         UpdateReannounceButton(self)
     end)
-    for _, item in ipairs({{f.cancelButton, 'Закрити набір: оголошення зникне з відкритих груп.'}, {f.bumpButton, 'Повторно сповістити гільдію про набір. Інтервал — 5 хвилин.'}}) do
+    for _, item in ipairs({{f.cancelButton, T('Закрити набір: оголошення зникне з відкритих груп.')}, {f.bumpButton, T('Повторно сповістити гільдію про набір. Інтервал — 5 хвилин.')}}) do
         local control, help = item[1], item[2]
         control:SetScript('OnEnter', function(self) if GameTooltip then GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(help); GameTooltip:Show() end end)
         control:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
@@ -2019,7 +2027,7 @@ local function createWindow(parent)
 end
 
 function Finder:Show()
-    if not self.active then print('Old Kraken: пошук груп не ініціалізовано.') return end
+    if not self.active then print(T('Old Kraken: пошук груп не ініціалізовано.')) return end
     refreshPeople()
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('groups')
@@ -2107,7 +2115,7 @@ local function paintAlertRoster(group)
             control.vacancy=control:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(control.vacancy, 11, false) end
             control.vacancy:SetPoint('TOPLEFT',control,'TOPLEFT',0,-70); control.vacancy:SetSize(92,18)
-            control.vacancy:SetJustifyH('CENTER'); control.vacancy:SetText('|cffbfc3caВільне місце|r')
+            control.vacancy:SetJustifyH('CENTER'); control.vacancy:SetText(T('|cffbfc3caВільне місце|r'))
             control:RegisterForClicks('LeftButtonUp','RightButtonUp')
             control:SetScript('OnClick',function(self,mouseButton)
                 if GameTooltip then GameTooltip:Hide() end
@@ -2120,27 +2128,27 @@ local function paintAlertRoster(group)
                     local current=key and Finder.groups[key]
                     if not current or current.closed then
                         groupAlert:Hide()
-                        print('Old Kraken: набір уже недоступний.'); return
+                        print(T('Old Kraken: набір уже недоступний.')); return
                     end
                     if current.category=='dungeon' and current.maxSize==5 then
                         local live=Finder:DungeonSlots(current)[self.slotIndex]
                         if not live or live.member or live.role~=self.role then
                             paintAlertRoster(current)
                             if refreshAlertRoster then refreshAlertRoster() end
-                            print('Old Kraken: це місце вже зайняте.'); return
+                            print(T('Old Kraken: це місце вже зайняте.')); return
                         end
                     elseif #current.members>=current.maxSize then
                         if refreshAlertRoster then refreshAlertRoster() end
-                        print('Old Kraken: групу вже зібрано.'); return
+                        print(T('Old Kraken: групу вже зібрано.')); return
                     end
                     if Finder.pending[key]=='pending' then
-                        print('Old Kraken: заявку вже подано; очікуйте рішення автора.'); return
+                        print(T('Old Kraken: заявку вже подано; очікуйте рішення автора.')); return
                     end
                     if Finder:Apply(current.owner,current.id,self.role) then
                         Finder:Changed()
                         groupAlert:Hide()
                     else
-                        print('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.')
+                        print(T('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.'))
                     end
                     return
                 end
@@ -2166,23 +2174,23 @@ local function paintAlertRoster(group)
                 control.icon:SetTexture(coords and 'Interface\\LFGFrame\\UI-LFG-ICON-ROLES' or 'Interface\\Icons\\INV_Misc_QuestionMark')
                 if coords then control.icon:SetTexCoord(unpack(coords)) else control.icon:SetTexCoord(0,1,0,1) end
                 control.icon:SetDesaturated(not member); control.icon:SetAlpha(member and 1 or 0.4)
-                local state=not member and 'Вільне місце' or (member==group.owner and 'Автор збору' or (group.partyObserved and (group.partyObserved[member] and 'У групі' or 'Резерв') or 'Стан групи невідомий'))
+                local state=not member and T('Вільне місце') or (member==group.owner and T('Автор збору') or (group.partyObserved and (group.partyObserved[member] and T('У групі') or T('Резерв')) or T('Стан групи невідомий')))
                 if not member then control.ring:SetVertexColor(0.4,0.44,0.5)
                 elseif group.partyObserved and member~=group.owner and not group.partyObserved[member] then control.ring:SetVertexColor(1,0.72,0.25)
                 else control.ring:SetVertexColor(0.3,1,0.55) end
                 control.label:SetText(member and ('|cffffd36b'..member..'|r') or roleLabel(slot.role))
                 control.vacancy:SetShown(not member)
                 control.label:SetTextColor(member and 1 or 0.85,member and 1 or 0.88,member and 1 or 0.93)
-                control.tooltipText=(member or 'Вільне місце')..'\n'..roleLabel(displayedRole)..' · '..state
-                if not member then control.tooltipText=control.tooltipText..(Finder:CanPerformRole(Finder.identity,displayedRole) and '\nЛівий клік — подати заявку на цю роль.' or '\nЦя роль недоступна вашому класу.') end
+                control.tooltipText=(member or T('Вільне місце'))..'\n'..roleLabel(displayedRole)..' · '..state
+                if not member then control.tooltipText=control.tooltipText..(Finder:CanPerformRole(Finder.identity,displayedRole) and T('\nЛівий клік — подати заявку на цю роль.') or T('\nЦя роль недоступна вашому класу.')) end
             end
         end
     end
 end
 
 local function alertCompositionText(group)
-    local extra=#group.members>5 and (' · ще учасників: '..(#group.members-5)) or ''
-    return '|cffffd36bУ складі: '..#group.members..' із '..group.maxSize..'|r  ·  |cff69dc8cВільних місць: '..math.max(0,group.maxSize-#group.members)..'|r'..extra
+    local extra=#group.members>5 and (T(' · ще учасників: ')..(#group.members-5)) or ''
+    return T('|cffffd36bУ складі: ')..#group.members..T(' із ')..group.maxSize..T('|r  ·  |cff69dc8cВільних місць: ')..math.max(0,group.maxSize-#group.members)..'|r'..extra
 end
 refreshAlertRoster=function()
     if not groupAlert or not groupAlert:IsShown() or groupAlert.kind~='group' or not groupAlert.groupKey then return end
@@ -2357,7 +2365,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup)
     groupAlert.alertHint:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft,12)
     groupAlert.alertHint:SetPoint('RIGHT',groupAlert,'RIGHT',-12,0)
     groupAlert.alertHint:SetHeight(16)
-    groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or 'Клік — відкрити')..'|r  |cffb0baca· перетягніть, щоб перемістити|r')
+    groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or T('Клік — відкрити'))..T('|r  |cffb0baca· перетягніть, щоб перемістити|r'))
     groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,12)
     if graphical then
         paintAlertRoster(rosterGroup)
@@ -2384,13 +2392,13 @@ end
 
 function Finder:PreviewAlert(kind)
     if kind == 'group' then
-        showAlert('Гравець збирає: Назва групи', 'Склад 2/5 · Вільно місць: 3', 'group',nil,'rfc',{category='dungeon',maxSize=5,owner='Танк',role='tank',members={'Танк','Лікар'},memberRoles={['Лікар']='healer'}})
+        showAlert(T('Гравець збирає: Назва групи'), T('Склад 2/5 · Вільно місць: 3'), 'group',nil,'rfc',{category='dungeon',maxSize=5,owner=T('Танк'),role='tank',members={T('Танк'),T('Лікар')},memberRoles={[T('Лікар')]='healer'}})
     elseif kind == 'request' then
-        showAlert('Нова заявка від гравця', 'Танк · Назва групи', 'request')
+        showAlert(T('Нова заявка від гравця'), T('Танк · Назва групи'), 'request')
     elseif kind == 'event' then
-        showAlert('Назва події', 'Організатор · сьогодні о 20:00', 'event')
+        showAlert(T('Назва події'), T('Організатор · сьогодні о 20:00'), 'event')
     elseif kind == 'workshop' then
-        showAlert('Замовлення', 'Приклад сповіщення Майстерні', 'workshop')
+        showAlert(T('Замовлення'), T('Приклад сповіщення Майстерні'), 'workshop')
     end
 end
 
@@ -2401,15 +2409,15 @@ end)
 OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
     if not OldKraken.GuildEvents or not OldKraken.GuildEvents:AlertsEnabled() then return end
     local subtitle = event.owner .. ' · ' .. date('%d.%m.%Y %H:%M', event.when)
-    showAlert('Нова подія: ' .. event.title, subtitle, 'event', key)
+    showAlert(T('Нова подія: ') .. event.title, subtitle, 'event', key)
 end)
 OldKraken:On('GUILD_EVENTS_NEW_SIGNUP', function(key, event, name, role)
     refreshPeople()
-    local signupRole=role=='flex' and 'Учасник' or roleLabel(role)
-    showAlert('Новий запис: ' .. playerLabel(name), signupRole .. ' · ' .. event.title, 'event_signup', key)
+    local signupRole=role=='flex' and T('Учасник') or roleLabel(role)
+    showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. event.title, 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_CANCELLED', function(key, event)
-    showAlert('Подію скасовано', event.title .. ' · Автор: ' .. event.owner, 'event_signup', key)
+    showAlert(T('Подію скасовано'), event.title .. T(' · Автор: ') .. event.owner, 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
     if groupAlert and groupAlert.kind=='event' and not OldKraken.GuildEvents:AlertsEnabled() then groupAlert:Hide() end
@@ -2427,21 +2435,21 @@ OldKraken:On('GROUP_FINDER_NEW', function(group)
     for i, name in ipairs(group.members) do
         if actual and i > 1 and group.partyObserved[name] then actual = actual + 1 end
     end
-    local presence = actual and ('у групі ' .. actual .. ', резерв ' .. (#group.members - actual)) or 'стан групи невідомий'
-    local summary = 'Склад ' .. #group.members .. '/' .. group.maxSize .. ' · ' .. presence
-    local needed = 'Вільно місць: ' .. free .. ' · склад гнучкий'
+    local presence = actual and (T('у групі ') .. actual .. T(', резерв ') .. (#group.members - actual)) or T('стан групи невідомий')
+    local summary = T('Склад ') .. #group.members .. '/' .. group.maxSize .. ' · ' .. presence
+    local needed = T('Вільно місць: ') .. free .. T(' · склад гнучкий')
     if group.category == 'dungeon' and group.maxSize == 5 then
         local missing = {tank=0, healer=0, dps=0}
         for _, slot in ipairs(Finder:DungeonSlots(group)) do if not slot.member then missing[slot.role] = missing[slot.role] + 1 end end
-        needed = 'Вільні ролі: ' .. roleLabel('tank') .. ' ' .. missing.tank .. ', ' .. roleLabel('healer') .. ' ' .. missing.healer .. ', ' .. roleLabel('dps') .. ' ' .. missing.dps
+        needed = T('Вільні ролі: ') .. roleLabel('tank') .. ' ' .. missing.tank .. ', ' .. roleLabel('healer') .. ' ' .. missing.healer .. ', ' .. roleLabel('dps') .. ' ' .. missing.dps
     end
     local groupKey = group.owner .. '\001' .. group.id
-    showAlert(playerLabel(group.owner) .. ' збирає: ' .. group.title, summary .. ' · ' .. needed, 'group', groupKey, group.dungeon, group)
+    showAlert(playerLabel(group.owner) .. T(' збирає: ') .. group.title, summary .. ' · ' .. needed, 'group', groupKey, group.dungeon, group)
 end)
 
 OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
     refreshPeople()
-    showAlert('Нова заявка від ' .. playerLabel(name), roleLabel(role) .. '  |cff9ba9bc·|r  |cffffd36b' .. group.title .. '|r',
+    showAlert(T('Нова заявка від ') .. playerLabel(name), roleLabel(role) .. '  |cff9ba9bc·|r  |cffffd36b' .. group.title .. '|r',
         'request', group.owner .. '\001' .. group.id)
     refreshRequests()
 end)
@@ -2449,5 +2457,19 @@ end)
 OldKraken:On('GROUP_FINDER_APPLICATION_STATUS', function(group, status)
     if not group or status ~= 'reject' then return end
     refreshPeople()
-    showAlert('Заявку відхилив ' .. playerLabel(group.owner), group.title, 'decision', group.owner .. '\001' .. group.id)
+    showAlert(T('Заявку відхилив ') .. playerLabel(group.owner), group.title, 'decision', group.owner .. '\001' .. group.id)
 end)
+
+if OldKraken.LocalizeTable then
+    OldKraken.LocalizeTable(categoryLabels)
+    OldKraken.LocalizeTable(roleLabels)
+    OldKraken.LocalizeTable(pendingLabels)
+    OldKraken.LocalizeTable(applicationBadges, 'text')
+    OldKraken.LocalizeTable(alertCaptions)
+    OldKraken.LocalizeTable(alertActions)
+    OldKraken.LocalizeTable(StaticPopupDialogs.OLDKRAKEN_REMOVE_MEMBER)
+    OldKraken.LocalizeTable(dungeonLabels)
+    OldKraken:On('INITIALIZED', function()
+        for _, value in ipairs(roles) do coloredRoleLabels[value] = roleLabel(value) end
+    end)
+end

@@ -1,3 +1,4 @@
+local T = OldKraken.Translate or function(text) return text end
 -- Minimap shortcut; its angle is stored in the addon's existing settings.
 local button
 
@@ -56,10 +57,10 @@ OldKraken:On('INITIALIZED', function(db)
     button:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_LEFT')
         local gold = OldKraken.UIStyle.Colors.brandGold
-        GameTooltip:SetText('Old Kraken', gold[1], gold[2], gold[3])
-        GameTooltip:AddLine('Ліва кнопка: відкрити / закрити Old Kraken', 1, 1, 1)
-        GameTooltip:AddLine('Права кнопка: відкрити / закрити групи', 1, 1, 1)
-        GameTooltip:AddLine('Перетягніть, щоб перемістити', 0.75, 0.75, 0.75)
+        GameTooltip:SetText(OldKraken.GetGuildDisplayName and OldKraken.GetGuildDisplayName() or 'Old Kraken', gold[1], gold[2], gold[3])
+        GameTooltip:AddLine(T('Ліва кнопка: відкрити / закрити Old Kraken'), 1, 1, 1)
+        GameTooltip:AddLine(T('Права кнопка: відкрити / закрити групи'), 1, 1, 1)
+        GameTooltip:AddLine(T('Перетягніть, щоб перемістити'), 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
     button:SetScript('OnLeave', function() GameTooltip:Hide() end)

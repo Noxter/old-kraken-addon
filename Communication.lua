@@ -1,4 +1,5 @@
 OldKraken = OldKraken or {}
+local T = OldKraken.Translate or function(text) return text end
 
 local Communication = {}
 OldKraken.Communication = Communication
@@ -194,17 +195,17 @@ end
 
 function Communication:PrintStatus()
     local status = self:GetStatus()
-    Print("Діагностика обміну повідомленнями:")
-    Print("  SendAddonMessage: " .. (status.apiAvailable and "доступний" or "недоступний"))
-    Print("  RegisterAddonMessagePrefix: " .. (status.registerAvailable and "доступний" or "недоступний"))
-    Print("  Префікс OLDKRKN: " .. (status.registered and "зареєстрований" or "не зареєстрований"))
-    Print("  Обмеження вихідних повідомлень: " ..
-        (status.restricted == nil and "невідомо" or (status.restricted and "так" or "ні")))
-    Print("  Гільдія: " .. (status.inGuild and "так" or "ні") ..
-        "; повідомлень у черзі: " .. status.queued)
-    Print('  Очікування повтору: '..status.retryIn..' с.; об’єднано повторів: '..self.stats.deduplicated..'; черга зайнята: '..self.stats.backpressure)
-    Print("  Надіслано: " .. self.stats.sent .. "; повторів: " .. self.stats.retried ..
-        "; відкинуто: " .. self.stats.dropped .. "; некоректних: " .. self.stats.invalid)
+    Print(T("Діагностика обміну повідомленнями:"))
+    Print("  SendAddonMessage: " .. (status.apiAvailable and T("доступний") or T("недоступний")))
+    Print("  RegisterAddonMessagePrefix: " .. (status.registerAvailable and T("доступний") or T("недоступний")))
+    Print(T("  Префікс OLDKRKN: ") .. (status.registered and T("зареєстрований") or T("не зареєстрований")))
+    Print(T("  Обмеження вихідних повідомлень: ") ..
+        (status.restricted == nil and T("невідомо") or (status.restricted and T("так") or T("ні"))))
+    Print(T("  Гільдія: ") .. (status.inGuild and T("так") or T("ні")) ..
+        T("; повідомлень у черзі: ") .. status.queued)
+    Print(T('  Очікування повтору: ')..status.retryIn..T(' с.; об’єднано повторів: ')..self.stats.deduplicated..T('; черга зайнята: ')..self.stats.backpressure)
+    Print(T("  Надіслано: ") .. self.stats.sent .. T("; повторів: ") .. self.stats.retried ..
+        T("; відкинуто: ") .. self.stats.dropped .. T("; некоректних: ") .. self.stats.invalid)
 end
 
 function Communication:QueueMessage(message,job,part)
@@ -293,18 +294,18 @@ end
 
 function Communication:SendTest()
     if not IsInGuild or not IsInGuild() then
-        Print("Для тесту персонаж має перебувати в гільдії.")
+        Print(T("Для тесту персонаж має перебувати в гільдії."))
         return
     end
 
     if not self.ready then
-        Print("Префікс ще не зареєстрований. Перевір після входу в гру.")
+        Print(T("Префікс ще не зареєстрований. Перевір після входу в гру."))
         return
     end
 
     local name = PlayerName()
     if not name then
-        Print("Не вдалося визначити ім'я персонажа.")
+        Print(T("Не вдалося визначити ім'я персонажа."))
         return
     end
 
@@ -312,7 +313,7 @@ function Communication:SendTest()
     self.lastTestID = id
 
     if self:QueueMessage(table.concat({ "TEST", id, name, name }, "^")) then
-        Print("Тестове повідомлення додано до черги GUILD. Попроси іншого члена гільдії виконати /okr comm status і перевірити отримання.")
+        Print(T("Тестове повідомлення додано до черги GUILD. Попроси іншого члена гільдії виконати /okr comm status і перевірити отримання."))
     end
 end
 
@@ -457,7 +458,7 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
             local ok, err = pcall(handler, sender, id, payload)
             if not ok then
                 self.stats.invalid = self.stats.invalid + 1
-                Print("Помилка обробника протоколу: " .. tostring(err))
+                Print(T("Помилка обробника протоколу: ") .. tostring(err))
                 return
             end
         end
@@ -473,10 +474,10 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     end
 
     if kind == "TEST" then
-        Print("Отримано TEST від " .. sender .. ". Надсилаю ACK у GUILD.")
+        Print(T("Отримано TEST від ") .. sender .. T(". Надсилаю ACK у GUILD."))
         self:QueueMessage(table.concat({ "ACK", id or "", target or "", me }, "^"))
     elseif kind == "ACK" and target == me and id == self.lastTestID then
-        Print("Отримано ACK від " .. sender .. ". Двосторонній обмін працює.")
+        Print(T("Отримано ACK від ") .. sender .. T(". Двосторонній обмін працює."))
     end
 end
 
@@ -498,7 +499,7 @@ function Communication:HandleCommand(command)
     elseif subcommand == "test" then
         self:SendTest()
     else
-        Print("Використання: /okr comm status або /okr comm test")
+        Print(T("Використання: /okr comm status або /okr comm test"))
     end
 
     return true
@@ -512,17 +513,17 @@ frame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
         local chatInfo = C_ChatInfo
         if not chatInfo or type(chatInfo.RegisterAddonMessagePrefix) ~= "function" then
-            Print("RegisterAddonMessagePrefix недоступний у цьому клієнті.")
+            Print(T("RegisterAddonMessagePrefix недоступний у цьому клієнті."))
             return
         end
 
         local ok, registered = pcall(chatInfo.RegisterAddonMessagePrefix, Communication.PREFIX)
         Communication.ready = ok and registered ~= false
         if Communication.ready then
-            Print("Префікс OLDKRKN зареєстровано.")
+            Print(T("Префікс OLDKRKN зареєстровано."))
             Communication:RequestRosterPresence()
         else
-            Print("Не вдалося зареєструвати префікс OLDKRKN: " .. tostring(registered))
+            Print(T("Не вдалося зареєструвати префікс OLDKRKN: ") .. tostring(registered))
         end
 
         if C_Timer and C_Timer.NewTicker then

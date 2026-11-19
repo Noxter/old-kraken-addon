@@ -5,7 +5,7 @@ from lupa.lua51 import LuaRuntime
 
 root = Path(__file__).resolve().parents[1]
 lua = LuaRuntime(unpack_returned_tuples=True)
-lua.execute('''
+ui_mocks = '''
 OldKraken = {name = 'OldKraken', UIStyle = {
     Colors = {
         brandGold = {0.88, 0.69, 0.32, 1},
@@ -33,6 +33,9 @@ function methods:SetWidth(value) self.width = value end
 function methods:SetJustifyH(value) self.justifyH = value end
 function methods:ClearAllPoints() self.point = nil end
 function methods:SetText(value) self.text = value end
+function methods:SetEnabled(value) self.enabled = value end
+function methods:RegisterEvent(name) self.events[name] = true end
+function methods:UnregisterEvent(name) self.events[name] = nil end
 function methods:SetTextColor(...) self.textColor = {...} end
 function methods:SetColorTexture(...) self.color = {...} end
 function methods:SetTexture(value) self.texture = value end
@@ -61,12 +64,16 @@ local meta = {__index=function(_, key)
     if key == 'TitleText' or key == 'CloseButton' then return nil end
     return methods[key] or function() end
 end}
+createdFrames = {}
 function CreateFrame(_, name, parent)
-    local frame = setmetatable({scripts = {}, hooks = {}, parent = parent, shown = false}, meta)
+    local frame = setmetatable({scripts = {}, hooks = {}, events = {}, parent = parent, shown = false}, meta)
+    createdFrames[#createdFrames + 1] = frame
     if name then _G[name] = frame end
+    if name == 'OldKrakenHubFrame' then frame.TitleText = CreateFrame() end
     return frame
 end
-''')
+'''
+lua.execute(ui_mocks)
 lua.execute((root / 'UIHub.lua').read_text(encoding='utf-8'))
 lua.execute('''
 local built = {}
@@ -172,4 +179,91 @@ assert(OldKraken.UIHub:HandleScaleWheel(1) == true)
 assert(OldKraken.DB.settings.uiScale == 1.4, 'scale wheel should clamp at 1.4')
 for _ = 1, 6 do OldKraken.UIHub:HandleScaleWheel(-1) end
 assert(OldKraken.DB.settings.uiScale == 0.85, 'scale wheel should clamp at 0.85')
+''')
+
+
+def load_localized_addon(saved_language=None):
+    runtime = LuaRuntime(unpack_returned_tuples=True)
+    runtime.execute(ui_mocks)
+    runtime.execute('''
+        local language = ...
+        OldKrakenDB = {settings = {language = language}}
+        StaticPopupDialogs = {}
+        SlashCmdList = {}
+        mockStyle = OldKraken.UIStyle
+        reloads = 0
+        function ReloadUI() reloads = reloads + 1 end
+        function GetServerTime() return 2000000000 end
+        function GetTime() return 1 end
+        function GetGuildInfo(unit)
+            assert(unit == 'player')
+            return guildName
+        end
+    ''', saved_language)
+    for entry in (root / 'OldKraken.toc').read_text(encoding='utf-8').splitlines():
+        if entry.endswith('.lua'):
+            runtime.execute((root / entry).read_text(encoding='utf-8'), 'OldKraken')
+            if entry == 'Core.lua':
+                runtime.execute('OldKraken.UIStyle = mockStyle')
+    runtime.execute('''
+        for _, frame in ipairs(createdFrames) do
+            if frame.events.ADDON_LOADED and frame.events.PLAYER_GUILD_UPDATE then
+                addonEvents = frame
+                break
+            end
+        end
+        assert(addonEvents)
+        addonEvents.scripts.OnEvent(addonEvents, 'ADDON_LOADED', 'OldKraken')
+        function settingsControl(text)
+            local page = OldKraken.UIHub.pages.settings.frame
+            for _, frame in ipairs(createdFrames) do
+                if frame.parent == page and frame.text == text then return frame end
+            end
+            error('Settings control not found: ' .. text)
+        end
+    ''')
+    return runtime
+
+
+ukrainian = load_localized_addon()
+ukrainian.execute('''
+    assert(OldKraken.GetLanguage() == 'ukUA')
+    local hub = OldKraken.UIHub
+    hub:ShowPage('settings')
+    assert(hub.contentTitle.text == 'Налаштування')
+    assert(hub.frame.TitleText.text == 'Old Kraken')
+    guildName = 'Морські вовки'
+    addonEvents.scripts.OnEvent(addonEvents, 'PLAYER_GUILD_UPDATE', 'player')
+    assert(hub.frame.TitleText.text == guildName)
+    guildName = nil
+    addonEvents.scripts.OnEvent(addonEvents, 'PLAYER_GUILD_UPDATE', 'player')
+    assert(hub.frame.TitleText.text == 'Old Kraken')
+    local apply = settingsControl('Застосувати й перезавантажити')
+    assert(not apply.enabled and not settingsControl('Українська').enabled)
+    settingsControl('English').scripts.OnClick()
+    assert(apply.enabled and OldKrakenDB.settings.language == 'ukUA')
+    apply.scripts.OnClick()
+    assert(reloads == 1 and OldKrakenDB.settings.language == 'enUS')
+''')
+
+english = load_localized_addon(ukrainian.eval('OldKrakenDB.settings.language'))
+english.execute('''
+    assert(OldKraken.GetLanguage() == 'enUS')
+    local hub = OldKraken.UIHub
+    guildName = 'Sea Wolves'
+    hub:ShowPage('settings')
+    assert(hub.contentTitle.text == 'Settings')
+    assert(hub.buttons.roster.label.text == 'Roster')
+    assert(hub.buttons.groups.label.text == 'Groups')
+    assert(hub.buttons.events.label.text == 'Events')
+    assert(hub.buttons.workshop.label.text == 'Workshop')
+    assert(hub.frame.TitleText.text == 'Sea Wolves')
+    assert(OldKraken.ActivityCatalog.dungeon[2].label == 'Ragefire Chasm (RFC)')
+    assert(OldKraken.Workshop:ProfessionInfo(171) == 'Alchemy')
+    assert(StaticPopupDialogs.OLDKRAKEN_REMOVE_MEMBER.button1 == 'Delete')
+    assert(StaticPopupDialogs.OLDKRAKEN_EVENT_DELETE.button2 == 'Back')
+    assert(StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_CANCEL.button1 == 'Cancel')
+    settingsControl('Українська').scripts.OnClick()
+    settingsControl('Apply and reload').scripts.OnClick()
+    assert(reloads == 1 and OldKrakenDB.settings.language == 'ukUA')
 ''')

@@ -17,7 +17,7 @@
 - **Runtime:** **Lua 5.1**. Заборонено: `goto`, `continue`, побітові оператори (`&`, `|`, `<<`, `>>`, `~`), `//`, `table.pack`/`table.unpack` (тільки `unpack`), `#`-оператор на nil-таблицях, конструкції з 5.2+.
 - Доступні хелпери WoW: `strsplit`, `strjoin`, `tinsert`, `tremove`, `wipe`, `format`, `pcall`, `C_Timer.After/NewTicker`, `GetTime`, `GetServerTime`, `hooksecurefunc`.
 - **Без XML** — весь UI будується кодом. **Без зовнішніх бібліотек** (жодного LibStub/Ace3). **Без `TODO`/`FIXME`/`XXX`/`HACK`** — їх у репо немає ніде (ні `.lua`, ні `.py`, `.md`, `.yml`); обмеження описані прозою в коментарях і документації. Не додавай цих маркерів — пиши пояснення коментарем.
-- **Мова:** усі рядки для користувача — **українською**; коментарі, ідентифікатори, назви функцій — **англійською**.
+- **Мова:** українська за замовчуванням, англійська через налаштування. Для нового тексту інтерфейсу додавай англійський відповідник у `Locale.lua`. Коментарі, ідентифікатори й назви функцій — англійською.
 
 ### Розмір коду
 
@@ -44,7 +44,7 @@
 `OldKraken.toc` вантажить файли **строго** в цьому порядку:
 
 ```
-Database.lua          Core.lua            UIHub.lua
+Database.lua          Locale.lua          Core.lua            UIHub.lua
 Communication.lua     GuildRoster.lua     ActivityCatalog.lua
 GroupFinder.lua       GroupFinderIntegration.lua   GroupFinderUI.lua
 GroupFinderAPI.lua    GuildEvents.lua     Workshop.lua

@@ -51,7 +51,10 @@ ui=(root/'GroupFinderUI.lua').read_text(encoding='utf-8')
 lua.execute('assert(loadstring(...))',ui)
 countdown=ui.split('local function UpdateReannounceButton(control)',1)[1].split('local dungeonOptions',1)[0]
 view=LuaRuntime(unpack_returned_tuples=True)
+view.execute('OldKraken = {}')
+view.execute((root/'Locale.lua').read_text(encoding='utf-8'))
 view.execute('''
+local T = OldKraken.Translate
 local selected='group'
 local seconds=300
 local Finder={groups={group={id='id'}},GetReannounceRemaining=function() return seconds end}
@@ -64,5 +67,11 @@ seconds=61; UpdateReannounceButton(control); assert(control.text=='Анонс ч
 seconds=1; UpdateReannounceButton(control); assert(control.text=='Анонс через 00:01' and not control.enabled)
 seconds=0; UpdateReannounceButton(control); assert(control.text=='Оновити набір' and control.enabled)
 selected=nil; UpdateReannounceButton(control); assert(not control.enabled)
+OldKraken.InitializeLocale({settings={language='enUS'}})
+selected='group'
+seconds=61; UpdateReannounceButton(control)
+assert(control.text=='Announce in 01:01')
+seconds=0; UpdateReannounceButton(control)
+assert(control.text=='Refresh listing' and control.enabled)
 ''')
 print('PASS: UI countdown 05:00 / 01:01 / 00:01, button enabled at zero, cleared selection')

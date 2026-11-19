@@ -1,3 +1,4 @@
+local T = OldKraken.Translate or function(text) return text end
 local Hub = {pages = {}, pageOrder = {}, buttons = {}, currentPage = nil}
 OldKraken.UIHub = Hub
 local colors = OldKraken.UIStyle.Colors
@@ -103,7 +104,7 @@ local function createPageButton(page)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(button.label, 14) end
     button.label:SetPoint('LEFT', button, 'LEFT', 38, 0)
     button.label:SetJustifyH('LEFT')
-    button.label:SetText(page.title)
+    button.label:SetText(T(page.title))
 
     Hub.buttons[page.key] = button
     updateButtons()
@@ -169,7 +170,6 @@ local function createWindow()
     frame:SetScript('OnDragStop', frame.StopMovingOrSizing)
     frame:SetClampedToScreen(true)
     OldKraken.UIStyle.Window(frame)
-    if frame.TitleText then frame.TitleText:SetText('Old Kraken') end
     local scaleBtn = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
     OldKraken.UIStyle.Button(scaleBtn, nil, {rounded = true})
     scaleBtn:SetSize(48, 22)
@@ -198,10 +198,10 @@ local function createWindow()
     scaleBtn:SetScript('OnEnter', function(self)
         if GameTooltip then
             GameTooltip:SetOwner(self, 'ANCHOR_BOTTOM')
-            GameTooltip:SetText('Масштаб вікна: ' .. math.floor(savedScale() * 100 + 0.5) .. '%')
-            GameTooltip:AddLine('Лівий клік — змінити (85%–140%)', 1, 1, 1, true)
-            GameTooltip:AddLine('Правий клік — скинути на 100%', 0.75, 0.82, 0.9, true)
-            GameTooltip:AddLine('Ctrl + скрол — змінити масштаб', 0.75, 0.82, 0.9, true)
+            GameTooltip:SetText(T('Масштаб вікна: ') .. math.floor(savedScale() * 100 + 0.5) .. '%')
+            GameTooltip:AddLine(T('Лівий клік — змінити (85%–140%)'), 1, 1, 1, true)
+            GameTooltip:AddLine(T('Правий клік — скинути на 100%'), 0.75, 0.82, 0.9, true)
+            GameTooltip:AddLine(T('Ctrl + скрол — змінити масштаб'), 0.75, 0.82, 0.9, true)
             GameTooltip:Show()
         end
     end)
@@ -228,13 +228,20 @@ local function createWindow()
     local brand = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(brand, 15, true) end
     brand:SetPoint('TOPLEFT', frame, 'TOPLEFT', 64, -(HEADER_HEIGHT + 20))
-    brand:SetText('OLD KRAKEN')
+    brand:SetWidth(112)
+    brand:SetJustifyH('LEFT')
+    brand:SetWordWrap(false)
+    if OldKraken.BindGuildTitle then
+        OldKraken.BindGuildTitle(frame, nil, brand)
+    else
+        brand:SetText('Old Kraken')
+    end
     brand:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3])
 
     local subtitle = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(subtitle, 11) end
     subtitle:SetPoint('TOPLEFT', brand, 'BOTTOMLEFT', 0, -3)
-    subtitle:SetText('ГІЛЬДІЙНИЙ ЦЕНТР')
+    subtitle:SetText(T('ГІЛЬДІЙНИЙ ЦЕНТР'))
     subtitle:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3])
 
     Hub.content = CreateFrame('Frame', nil, frame)
@@ -268,8 +275,7 @@ function Hub:ShowPage(key)
     end
 
     self.currentPage = key
-    if self.frame.TitleText then self.frame.TitleText:SetText('Old Kraken') end
-    self.contentTitle:SetText(page.title)
+    self.contentTitle:SetText(T(page.title))
     for _, item in ipairs(self.pageOrder) do
         if item.frame then item.frame:SetShown(item == page) end
     end
@@ -288,4 +294,57 @@ function Hub:Toggle(key)
     else
         self:ShowPage(key)
     end
+end
+
+local function createSettings(parent)
+    local page = CreateFrame('Frame', nil, parent)
+    page:SetSize(PAGE_WIDTH, PAGE_HEIGHT)
+
+    local label = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    label:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -55)
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(label, 15, true) end
+    label:SetText(T('Мова інтерфейсу'))
+
+    local function button(text, x, y, width)
+        local control = CreateFrame('Button', nil, page, 'UIPanelButtonTemplate')
+        OldKraken.UIStyle.Button(control, nil, {rounded = true})
+        control:SetSize(width, 34)
+        control:SetPoint('TOPLEFT', page, 'TOPLEFT', x, y)
+        control:SetText(text)
+        return control
+    end
+
+    local ukrainian = button('Українська', 0, -82, 136)
+    local english = button('English', 146, -82, 136)
+    local apply = button(T('Застосувати й перезавантажити'), 0, -155, 280)
+    local hint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    hint:SetPoint('TOPLEFT', page, 'TOPLEFT', 0, -129)
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(hint, 13) end
+    hint:SetText(T('Зміна мови перезавантажить інтерфейс WoW.'))
+
+    local active = OldKraken.GetLanguage()
+    local selected = active
+    local function selectLanguage(language)
+        selected = language
+        ukrainian:SetEnabled(language ~= 'ukUA')
+        english:SetEnabled(language ~= 'enUS')
+        apply:SetEnabled(language ~= active and type(ReloadUI) == 'function')
+    end
+    ukrainian:SetScript('OnClick', function() selectLanguage('ukUA') end)
+    english:SetScript('OnClick', function() selectLanguage('enUS') end)
+    apply:SetScript('OnClick', function()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        if type(settings) ~= 'table' or selected == active or type(ReloadUI) ~= 'function' then return end
+        settings.language = selected
+        ReloadUI()
+    end)
+    page:SetScript('OnShow', function() selectLanguage(active) end)
+    selectLanguage(active)
+    return page
+end
+
+if OldKraken.GetLanguage then
+    OldKraken:On('INITIALIZED', function()
+        Hub:RegisterPage('settings', 'Налаштування', '05', createSettings)
+    end)
 end

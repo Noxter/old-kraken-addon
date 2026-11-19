@@ -4,6 +4,7 @@ OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
 OldKraken.version = "0.5.3-alpha.1"
 OldKraken._listeners = OldKraken._listeners or {}
+local T = OldKraken.Translate or function(text) return text end
 
 -- Shared dark theme for the addon's native controls.
 OldKraken.UIStyle = {}
@@ -1202,15 +1203,15 @@ end
 function OldKraken:InvitePlayer(name)
     if type(name) ~= 'string' or name == '' then return false end
     if not C_PartyInfo or type(C_PartyInfo.InviteUnit) ~= 'function' then
-        print('|cffff5555Old Kraken|r: API запрошення недоступний. Запросіть ' .. name .. ' вручну.')
+        print(T('|cffff5555Old Kraken|r: API запрошення недоступний. Запросіть ') .. name .. T(' вручну.'))
         return false
     end
     local ok, result = pcall(C_PartyInfo.InviteUnit, name)
     if ok and result ~= false then
-        print('|cff2ec4b6Old Kraken|r: Спроба запросити ' .. name .. ' у паті. Перевірте повідомлення гри.')
+        print(T('|cff2ec4b6Old Kraken|r: Спроба запросити ') .. name .. T(' у паті. Перевірте повідомлення гри.'))
         return true
     end
-    print('|cffff5555Old Kraken|r: Не вдалося запросити ' .. name .. '. Запросіть гравця вручну.')
+    print(T('|cffff5555Old Kraken|r: Не вдалося запросити ') .. name .. T('. Запросіть гравця вручну.'))
     return false
 end
 
@@ -1234,23 +1235,53 @@ function OldKraken:Fire(eventName, ...)
     end
 end
 
+function OldKraken.GetGuildDisplayName()
+    local name = GetGuildInfo and GetGuildInfo('player')
+    if type(issecretvalue) == 'function' and issecretvalue(name) then return 'Old Kraken' end
+    if type(name) == 'string' and name ~= '' then return name end
+    return 'Old Kraken'
+end
+
+local guildTitles = setmetatable({}, {__mode = 'k'})
+
+local function updateGuildTitle(window, title, name)
+    if window.TitleText then
+        window.TitleText:SetText(title.suffix and (name .. ' — ' .. title.suffix) or name)
+    end
+    if title.sidebar then title.sidebar:SetText(name) end
+end
+
+function OldKraken.BindGuildTitle(window, suffix, sidebar)
+    local title = {suffix = suffix, sidebar = sidebar}
+    guildTitles[window] = title
+    updateGuildTitle(window, title, OldKraken.GetGuildDisplayName())
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+frame:RegisterEvent("PLAYER_GUILD_UPDATE")
 
 frame:SetScript("OnEvent", function(self, event, loadedAddon)
+    if event ~= "ADDON_LOADED" then
+        local name = OldKraken.GetGuildDisplayName()
+        for window, title in pairs(guildTitles) do updateGuildTitle(window, title, name) end
+        return
+    end
     if loadedAddon ~= ADDON_NAME then
         return
     end
 
     if not OldKraken.Database or not OldKraken.Database.Initialize then
-        print("|cffff5555Old Kraken|r: помилка ініціалізації бази даних.")
+        print(T("|cffff5555Old Kraken|r: помилка ініціалізації бази даних."))
         self:UnregisterEvent("ADDON_LOADED")
         return
     end
 
     OldKraken.Database.Initialize()
+    if OldKraken.InitializeLocale then OldKraken.InitializeLocale(OldKraken.DB) end
     OldKraken:Fire("INITIALIZED", OldKraken.DB)
 
-    print("|cff2ec4b6Old Kraken|r: аддон завантажено.")
+    print(T("|cff2ec4b6Old Kraken|r: аддон завантажено."))
     self:UnregisterEvent("ADDON_LOADED")
 end)

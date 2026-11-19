@@ -65,3 +65,8 @@ function OldKraken.ActivityCatalog.SetArtwork(texture, activity)
     if art>=7000000 then texture:SetTexCoord(0.22,0.78,0.22,0.78)
     else texture:SetTexCoord(0.225,0.775,0.25,0.80) end
 end
+
+if OldKraken.LocalizeTable then
+    OldKraken.LocalizeTable(dungeons, 'label')
+    OldKraken.LocalizeTable(raids, 'label')
+end

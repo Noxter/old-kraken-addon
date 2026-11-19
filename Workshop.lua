@@ -1,3 +1,4 @@
+local T = OldKraken.Translate or function(text) return text end
 -- Guild profession directory. Each character publishes only their own snapshot.
 local Workshop = {currentView='professions', navigationStack={}}
 OldKraken.Workshop = Workshop
@@ -233,7 +234,7 @@ function Workshop:GetMemberProfessions(name)
 end
 function Workshop:ProfessionInfo(id)
     local entry=byID[id]; local art=professionArt[id]
-    return entry and entry.name or 'Невідома професія', art and art[1] or 134400
+    return entry and entry.name or T('Невідома професія'), art and art[1] or 134400
 end
 function Workshop:GetProfessionMasters(id)
     if not active or not byID[id] then return {} end
@@ -325,6 +326,9 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then
 end
 
 local function pluralUk(n, one, few, many)
+    if OldKraken.GetLanguage and OldKraken.GetLanguage() == 'enUS' then
+        return n == 1 and one or many
+    end
     local mod100, mod10 = n % 100, n % 10
     if mod100 >= 11 and mod100 <= 14 then return many end
     if mod10 == 1 then return one end
@@ -343,19 +347,19 @@ local function button(parent,text,x,y,width,callback,variant,options)
 end
 render=function()
     if not frame or not frame:IsShown() or (frame.professionView and not frame.professionView:IsShown()) then return end
-    frame.heading:SetText(scanState=='checking' and 'Перевіряємо зміни професій…' or (scanState==false and 'Власні дані професій не отримано. Відкрийте професію у грі.' or 'Оберіть професію, щоб переглянути майстрів і рецепти.'))
+    frame.heading:SetText(scanState=='checking' and T('Перевіряємо зміни професій…') or (scanState==false and T('Власні дані професій не отримано. Відкрийте професію у грі.') or T('Оберіть професію, щоб переглянути майстрів і рецепти.')))
     local summaries=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:GetProfessionSummaries() or {}
     local online = OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.GetRosterPresentation and OldKraken.WorkshopRecipes:GetRosterPresentation() or {}
     local totalRecipes, onlineMastersMap = 0, {}
     for _,card in ipairs(frame.professionCards) do
         local summary=summaries[card.profession]
         if summary then
-            local rWord = pluralUk(summary.recipes, 'рецепт', 'рецепти', 'рецептів')
-            local mWord = pluralUk(summary.members, 'майстер', 'майстри', 'майстрів')
+            local rWord = pluralUk(summary.recipes, T('рецепт'), T('рецепти'), T('рецептів'))
+            local mWord = pluralUk(summary.members, T('майстер'), T('майстри'), T('майстрів'))
             card.detail:SetText(summary.recipes..' '..rWord..' · '..summary.members..' '..mWord)
             totalRecipes = totalRecipes + (summary.recipes or 0)
         else
-            card.detail:SetText('Немає збережених рецептів')
+            card.detail:SetText(T('Немає збережених рецептів'))
         end
         if card.online then
             local onCount = 0
@@ -366,9 +370,9 @@ render=function()
                 end
             end
             if onCount > 0 then
-                card.online:SetText('|cff68d98c• ' .. onCount .. ' онлайн|r')
+                card.online:SetText('|cff68d98c• ' .. onCount .. T(' онлайн|r'))
             else
-                card.online:SetText('|cff9ba9bcНемає майстрів онлайн|r')
+                card.online:SetText(T('|cff9ba9bcНемає майстрів онлайн|r'))
             end
         end
     end
@@ -377,17 +381,17 @@ render=function()
         if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders.GetOpenCounts then
             openCount, availableCount = OldKraken.WorkshopOrders:GetOpenCounts()
         end
-        local oWord = pluralUk(openCount, 'відкрите замовлення', 'відкритих замовлення', 'відкритих замовлень')
-        frame.ordersSummaryLine1:SetText('У гільдії зараз |cffffd35a' .. openCount .. '|r ' .. oWord .. '.')
-        frame.ordersSummaryLine2:SetText('Доступно вам для виконання: |cff68d98c' .. availableCount .. '|r.')
+        local oWord = pluralUk(openCount, T('відкрите замовлення'), T('відкритих замовлення'), T('відкритих замовлень'))
+        frame.ordersSummaryLine1:SetText(T('У гільдії зараз |cffffd35a') .. openCount .. '|r ' .. oWord .. '.')
+        frame.ordersSummaryLine2:SetText(T('Доступно вам для виконання: |cff68d98c') .. availableCount .. '|r.')
     end
     if type(frame.recipesSummaryLine1) == 'table' then
         local onlineMasters = 0
         for _ in pairs(onlineMastersMap) do onlineMasters = onlineMasters + 1 end
-        local rWord = pluralUk(totalRecipes, 'рецепт', 'рецепти', 'рецептів')
-        local mWord = pluralUk(onlineMasters, 'майстер онлайн', 'майстри онлайн', 'майстрів онлайн')
-        frame.recipesSummaryLine1:SetText('У базі гільдії збережено |cffffd35a' .. totalRecipes .. '|r ' .. rWord .. '.')
-        frame.recipesSummaryLine2:SetText('Зараз у мережі |cff68d98c' .. onlineMasters .. '|r ' .. mWord .. '.')
+        local rWord = pluralUk(totalRecipes, T('рецепт'), T('рецепти'), T('рецептів'))
+        local mWord = pluralUk(onlineMasters, T('майстер онлайн'), T('майстри онлайн'), T('майстрів онлайн'))
+        frame.recipesSummaryLine1:SetText(T('У базі гільдії збережено |cffffd35a') .. totalRecipes .. '|r ' .. rWord .. '.')
+        frame.recipesSummaryLine2:SetText(T('Зараз у мережі |cff68d98c') .. onlineMasters .. '|r ' .. mWord .. '.')
     end
 end
 local function createWindow(parent)
@@ -404,7 +408,7 @@ local function createWindow(parent)
     end
     local embedded=parent~=nil
     f:SetSize(embedded and 900 or 780,embedded and 608 or 520); f:SetPoint('CENTER',parent or UIParent,'CENTER'); f:SetClampedToScreen(true); f:EnableMouse(true)
-    if f.TitleText then f.TitleText:SetText('Old Kraken — Майстерня') end
+    if OldKraken.BindGuildTitle then OldKraken.BindGuildTitle(f, T('Майстерня')) end
     local colors = OldKraken.UIStyle.Colors or {}
     local content=f
     local verticalShift=embedded and 32 or 0
@@ -424,10 +428,10 @@ local function createWindow(parent)
         end
         if OldKraken.UIStyle.SegmentedTabs then
             f.tabBar = OldKraken.UIStyle.SegmentedTabs(f, {
-                {key = 'professions', label = 'Професії', width = 102},
-                {key = 'recipes', label = 'Рецепти', width = 96},
-                {key = 'masters', label = 'Майстри', width = 96},
-                {key = 'orders', label = 'Замовлення', width = 112},
+                {key = 'professions', label = T('Професії'), width = 102},
+                {key = 'recipes', label = T('Рецепти'), width = 96},
+                {key = 'masters', label = T('Майстри'), width = 96},
+                {key = 'orders', label = T('Замовлення'), width = 112},
             }, function(key)
                 if key == 'professions' then Workshop:Show('professions')
                 elseif key == 'recipes' or key == 'masters' then
@@ -448,22 +452,22 @@ local function createWindow(parent)
                 b.activeBar=b:CreateTexture(nil,'OVERLAY'); b.activeBar:SetHeight(2); b.activeBar:SetPoint('BOTTOMLEFT',b,'BOTTOMLEFT',2,1); b.activeBar:SetPoint('BOTTOMRIGHT',b,'BOTTOMRIGHT',-2,1); b.activeBar:Hide()
                 return b
             end
-            f.professionTab=legacyTab('Професії',0,function() Workshop:Show('professions') end)
-            f.recipeTab=legacyTab('Рецепти',110,function()
+            f.professionTab=legacyTab(T('Професії'),0,function() Workshop:Show('professions') end)
+            f.recipeTab=legacyTab(T('Рецепти'),110,function()
                 if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('recipes') end
             end)
-            f.masterTab=legacyTab('Майстри',214,function()
+            f.masterTab=legacyTab(T('Майстри'),214,function()
                 if OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes.SelectTab then OldKraken.WorkshopRecipes:SelectTab('masters') end
             end)
-            f.ordersTab=legacyTab('Замовлення',318,function()
+            f.ordersTab=legacyTab(T('Замовлення'),318,function()
                 if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
             end)
         end
-        f.newOrder=button(f.ordersView or f,'Нове замовлення',750,-50,150,function()
+        f.newOrder=button(f.ordersView or f,T('Нове замовлення'),750,-50,150,function()
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:OpenCreateForm() end
         end,'primary',{rounded=true,height=34})
         f.newOrder:Hide()
-        f.back=button(f,'‹ Назад',770,-50,130,function() Workshop:Back() end,nil,{rounded=true,height=34})
+        f.back=button(f,T('‹ Назад'),770,-50,130,function() Workshop:Back() end,nil,{rounded=true,height=34})
         if type(f.back.SetFrameLevel)=='function' then f.back:SetFrameLevel(((type(f.GetFrameLevel)=='function' and f:GetFrameLevel()) or 1)+10) end
         f.back:Hide()
         f:HookScript('OnHide',function()
@@ -473,7 +477,7 @@ local function createWindow(parent)
             end
         end)
     end
-    button(content,'Оновити',embedded and 770 or 590,embedded and -50 or y(-43),embedded and 130 or 120,function() forceBroadcast=true; nextScan=0; queryPending=true; print('Old Kraken: запит професій поставлено в чергу.') end,nil,{rounded=true,height=34})
+    button(content,T('Оновити'),embedded and 770 or 590,embedded and -50 or y(-43),embedded and 130 or 120,function() forceBroadcast=true; nextScan=0; queryPending=true; print(T('Old Kraken: запит професій поставлено в чергу.')) end,nil,{rounded=true,height=34})
     f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlight')
     f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 0 or 20,embedded and -104 or y(-52))
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.heading, 13) end
@@ -527,7 +531,7 @@ local function createWindow(parent)
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(onLine, 12) end
             card.online=onLine
         end
-        card:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(entry.name); GameTooltip:AddLine('Натисніть, щоб переглянути майстрів і рецепти'); GameTooltip:Show() end end)
+        card:SetScript('OnEnter',function(self) if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(entry.name); GameTooltip:AddLine(T('Натисніть, щоб переглянути майстрів і рецепти')); GameTooltip:Show() end end)
         card:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
         f.professionCards[i]=card
     end
@@ -553,30 +557,30 @@ local function createWindow(parent)
             hint:SetText(hintText)
             return p, line1, line2
         end
-        local op, o1, o2 = makeSummaryPanel(0, 'Активні замовлення', 'Оберіть або створіть запит на крафт для учасників гільдії.')
+        local op, o1, o2 = makeSummaryPanel(0, T('Активні замовлення'), T('Оберіть або створіть запит на крафт для учасників гільдії.'))
         f.ordersSummaryPanel, f.ordersSummaryLine1, f.ordersSummaryLine2 = op, o1, o2
-        button(op, 'Відкрити замовлення', 18, -158, 185, function()
+        button(op, T('Відкрити замовлення'), 18, -158, 185, function()
             if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
         end, 'primary', {rounded=true, height=34})
-        button(op, 'Створити', 213, -158, 115, function()
+        button(op, T('Створити'), 213, -158, 115, function()
             if OldKraken.WorkshopOrders then
                 OldKraken.WorkshopOrders:Show()
                 OldKraken.WorkshopOrders:OpenCreateForm()
             end
         end, nil, {rounded=true, height=34})
-        local rp, r1, r2 = makeSummaryPanel(460, 'Пошук рецептів і майстри', 'Шукайте потрібний предмет за назвою або перегляньте список майстрів.')
+        local rp, r1, r2 = makeSummaryPanel(460, T('Пошук рецептів і майстри'), T('Шукайте потрібний предмет за назвою або перегляньте список майстрів.'))
         f.recipesSummaryPanel, f.recipesSummaryLine1, f.recipesSummaryLine2 = rp, r1, r2
-        button(rp, 'Знайти рецепт', 18, -158, 155, function()
+        button(rp, T('Знайти рецепт'), 18, -158, 155, function()
             if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:SelectTab('recipes') end
         end, 'primary', {rounded=true, height=34})
-        button(rp, 'Усі майстри', 183, -158, 140, function()
+        button(rp, T('Усі майстри'), 183, -158, 140, function()
             if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:SelectTab('masters') end
         end, nil, {rounded=true, height=34})
     end
     if not embedded then
-        button(content,'Замовлення',20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
-        button(content,'Пошук рецептів',175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
-        local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',200,y(-321)); note:SetText('Відкрийте професії, щоб переглянути майстрів.')
+        button(content,T('Замовлення'),20,-472,145,function() if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end end)
+        button(content,T('Пошук рецептів'),175,y(-315),155,function() if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:Show() end end)
+        local note=content:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',content,'TOPLEFT',200,y(-321)); note:SetText(T('Відкрийте професії, щоб переглянути майстрів.'))
     end
     content:HookScript('OnShow',render)
     f:Hide(); return f
@@ -639,7 +643,7 @@ function Workshop:Back()
     if entry.recipes and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:RestoreView(entry.recipes) end
 end
 function Workshop:Show(view)
-    connect(); if not active then print('Old Kraken: майстерня доступна після входу до гільдії.'); return end
+    connect(); if not active then print(T('Old Kraken: майстерня доступна після входу до гільдії.')); return end
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('workshop')
         self.navigationStack={}
@@ -678,4 +682,8 @@ function Workshop:HasProfession(id)
     if type(record)~='table' or type(record.list)~='table' then return false end
     for _,entry in ipairs(record.list) do if type(entry)=='table' and entry.id==id then return true end end
     return false
+end
+
+if OldKraken.LocalizeTable then
+    OldKraken.LocalizeTable(professions, 'name')
 end

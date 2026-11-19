@@ -1,3 +1,4 @@
+local T = OldKraken.Translate or function(text) return text end
 -- Read-only capability probe for the native WoW Group Finder API.
 -- This module deliberately does not start searches or create/update listings.
 OldKraken = OldKraken or {}
@@ -25,7 +26,7 @@ local MAX_PREVIEW = 24
 local function collectIDs(namespace, methodName)
     local method = namespace and namespace[methodName]
     if type(method) ~= "function" then
-        return nil, "недоступний"
+        return nil, T("недоступний")
     end
 
     local ok, result = pcall(method)
@@ -33,7 +34,7 @@ local function collectIDs(namespace, methodName)
         return nil, tostring(result)
     end
     if type(result) ~= "table" then
-        return nil, "повернув " .. type(result)
+        return nil, T("повернув ") .. type(result)
     end
 
     local ids = {}
@@ -97,7 +98,7 @@ function API:PrintStatus()
         print("|cff2ec4b6Old Kraken|r: " .. message)
     end
 
-    line("Native Group Finder API — лише діагностика; пошук і створення не запускаються.")
+    line(T("Native Group Finder API — лише діагностика; пошук і створення не запускаються."))
     line("C_LFGList: " .. status.namespace
         .. "; C_LFGInfo: " .. status.infoNamespace
         .. "; LFGListFrame: " .. status.frame)
@@ -108,28 +109,28 @@ function API:PrintStatus()
         end
 
         if status.categories then
-            line("Категорії: " .. #status.categories .. " [" .. previewIDs(status.categories) .. "]")
+            line(T("Категорії: ") .. #status.categories .. " [" .. previewIDs(status.categories) .. "]")
         else
-            line("Категорії: " .. (status.categoryError or "не перевірено"))
+            line(T("Категорії: ") .. (status.categoryError or T("не перевірено")))
         end
 
         if status.activities then
-            line("Активності: " .. #status.activities .. " [" .. previewIDs(status.activities) .. "]")
+            line(T("Активності: ") .. #status.activities .. " [" .. previewIDs(status.activities) .. "]")
         else
-            line("Активності: " .. (status.activityError or "не перевірено"))
+            line(T("Активності: ") .. (status.activityError or T("не перевірено")))
         end
     end
 
     local restriction
     if status.addonMessagesRestricted == nil then
-        restriction = "невідомо"
+        restriction = T("невідомо")
     elseif status.addonMessagesRestricted then
-        restriction = "так"
+        restriction = T("так")
     else
-        restriction = "ні"
+        restriction = T("ні")
     end
     line("AreOutgoingAddonChatMessagesRestricted: " .. restriction)
-    line("Search / CreateListing / UpdateListing не викликалися.")
+    line(T("Search / CreateListing / UpdateListing не викликалися."))
     return status
 end
 
