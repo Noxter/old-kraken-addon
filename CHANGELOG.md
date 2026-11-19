@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.3 (Release Candidate, `alpha`)
+## 0.5.3
 
 ### Smart Notifications
 - Додано систему розумних сповіщень (`smartNotifications = true` у налаштуваннях за замовчуванням).
