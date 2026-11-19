@@ -3,6 +3,11 @@ local T = OldKraken.Translate or function(text) return text end
 local Events = {}
 OldKraken.GuildEvents = Events
 local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
+local function memberSpecText(name)
+    local transport = OldKraken.Communication
+    local spec = name and transport and transport.GetRosterSpec and transport:GetRosterSpec(name)
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+end
 local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
 local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}
 local statuses = {pending='Очікує', accepted='Прийнято', reserve='Резерв', rejected='Відхилено'}
@@ -851,7 +856,8 @@ refresh=function()
                 row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(largeRoleIcon(role,26))
                 local tint=statusColors[st] or statusColors.pending
                 row.stateText:SetText('|c'..tint..(statuses[st] or st)..'|r')
-                row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
+                local specText=memberSpecText(name)
+                row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])..(specText and (T('\nСпеціалізація: ')..specText) or '')
                 row.invite:SetShown(own and e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
                 row.accept:SetEnabled(canDecideRole(name,role)); row.reserve:SetEnabled(canDecideRole(name,role))
                 row.accept:SetShown(own and name~=identity); row.reserve:SetShown(own and name~=identity); row.reject:SetShown(own and name~=identity); row:Show()

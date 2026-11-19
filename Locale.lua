@@ -1,5 +1,12 @@
 -- English translations keyed by the original Ukrainian UI text.
 local english = {
+    ["р"] = "y",
+    ["міс"] = "mo",
+    ["д"] = "d",
+    ["год"] = "h",
+    ["< 1 год"] = "< 1 h",
+    ["\nСпеціалізація: "] = "\nSpecialization: ",
+    ["Спеціалізація: "] = "Specialization: ",
     ["|cff9aa5b1Немає доступної ролі|r"] = "|cff9aa5b1No available role|r",
     ["Old Kraken: оберіть доступну роль для подачі заявки."] = "Old Kraken: Choose an available role to apply.",
     ["Усі типи"] = "All types",

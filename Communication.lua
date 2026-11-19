@@ -7,6 +7,9 @@ OldKraken.Communication = Communication
 Communication.PREFIX = "OLDKRKN"
 Communication.queue = {}
 Communication.ready = false
+Communication.rosterPresence, Communication.rosterVersions, Communication.rosterSpecs = {}, {}, {}
+Communication.lastSpecReply, Communication.lastBroadcastSpecID = nil, nil
+Communication.pendingSpecBroadcast, Communication.pendingSpecForce = false, false
 Communication.lastTestID = nil
 Communication.handlers = {}
 Communication.stats = { sent = 0, retried = 0, dropped = 0, received = 0, invalid = 0 }
@@ -29,6 +32,22 @@ local messageSequence = 0
 local sessionID = tostring(GetServerTime()) .. "-" .. tostring(math.random(100000, 999999))
 local assemblies, completed = {}, {}
 local nextPrune=0
+
+local function EnsurePresenceGuild(self)
+    local guild = GetGuildInfo and GetGuildInfo('player') or ''
+    if self.presenceGuild ~= guild or guild == '' then
+        self.rosterPresence, self.rosterVersions, self.rosterSpecs = {}, {}, {}
+        self.presenceGuild = guild
+        self.lastPresenceQuery, self.lastSpecReply, self.lastBroadcastSpecID = nil, nil, nil
+        self.pendingSpecBroadcast, self.pendingSpecForce = false, false
+    end
+end
+local function Secret(value)
+    return type(issecretvalue) == 'function' and issecretvalue(value)
+end
+local function ValidSpecID(value)
+    return not Secret(value) and type(value) == 'number' and value >= 1 and value <= 9999999 and math.floor(value) == value
+end
 
 local function Count(t)
     local n = 0
@@ -161,6 +180,13 @@ local function PlayerName()
     local name = UnitName and UnitName("player")
     return type(name) == "string" and name or nil
 end
+local function FullPlayerName()
+    if type(UnitName) ~= 'function' then return nil end
+    local name, surname = UnitName('player')
+    if Secret(name) or type(name) ~= 'string' or name == '' then return nil end
+    if not Secret(surname) and type(surname) == 'string' and surname ~= '' then return name .. ' ' .. surname end
+    return name
+end
 
 local function Print(message)
     print("|cff2ec4b6Old Kraken|r: " .. message)
@@ -223,7 +249,7 @@ function Communication:QueueMessage(message,job,part)
     end
 
     local guild
-    if message:sub(1, 4) == 'GF2^' then
+    if message:sub(1, 4) == 'GF2^' or message:sub(1, 9) == 'OKP^SPEC^' then
         guild = GetGuildInfo and GetGuildInfo('player')
         if type(guild) ~= 'string' or guild == '' then return false end
     end
@@ -248,6 +274,8 @@ local function deferEntry(self,entry,reason)
     self.lastSendError=reason
 end
 function Communication:Pump()
+    EnsurePresenceGuild(self)
+    if self.pendingSpecBroadcast and self.ready and IsInGuild and IsInGuild() then self:SendLocalSpec(self.pendingSpecForce) end
     if #self.queue==0 or GetTime()<self.retryAt then return end
     if not IsInGuild or not IsInGuild() then return end
     local index,priority=1,3
@@ -318,8 +346,6 @@ function Communication:SendTest()
 end
 
 -- Presence is evidence of installation during this session, never evidence of absence.
-Communication.rosterPresence = {}
-Communication.rosterVersions = {}
 function Communication:GetLocalVersion()
     local getter = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
     return (getter and getter('OldKraken', 'Version')) or OldKraken.version or 'unknown'
@@ -348,19 +374,13 @@ function Communication:CompareVersions(left, right)
     return 0
 end
 local function PresenceKey(name)
-    if type(name) ~= 'string' then return '' end
+    if Secret(name) or type(name) ~= 'string' or name == '' then return '' end
     local realm = GetRealmName and GetRealmName() or ''
     if not name:find('-', 1, true) then name = name .. '-' .. realm end
     return (name:gsub('%s+', ''))
 end
 function Communication:HasRosterAddon(name)
-    local guild = GetGuildInfo and GetGuildInfo('player') or ''
-    if self.presenceGuild ~= guild then
-        self.rosterPresence = {}
-        self.rosterVersions = {}
-        self.presenceGuild = guild
-        self.lastPresenceQuery = nil
-    end
+    EnsurePresenceGuild(self)
     return PresenceKey(name) == PresenceKey(PlayerName()) or self.rosterPresence[PresenceKey(name)] == true
 end
 function Communication:GetRosterVersion(name)
@@ -369,19 +389,83 @@ function Communication:GetRosterVersion(name)
     return self.rosterVersions[PresenceKey(name)]
 end
 function Communication:RequestRosterPresence()
+    EnsurePresenceGuild(self)
     if not self.ready or not IsInGuild() then return end
     local now = GetTime()
     if self.lastPresenceQuery and now - self.lastPresenceQuery < 30 then return end
     if self:QueueMessage('OKP^QUERY') then self.lastPresenceQuery = now end
 end
 function Communication:RecordRosterPresence(sender, version)
-    self:HasRosterAddon(sender) -- Reset evidence when the player's guild changes.
+    EnsurePresenceGuild(self)
     local key = PresenceKey(sender)
     if not self.rosterPresence[key] or (version and self.rosterVersions[key] ~= version) then
         self.rosterPresence[key] = true
         if version then self.rosterVersions[key] = version end
         if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
     end
+end
+
+function Communication:GetLocalSpecID()
+    local api = C_SpecializationInfo
+    if not api or type(api.GetSpecialization) ~= 'function' then return nil end
+    local ok, index = pcall(api.GetSpecialization)
+    if type(api.GetSpecializationInfo) ~= 'function' then return nil end
+    if not ok or Secret(index) or type(index) ~= 'number' or index < 1 or math.floor(index) ~= index then return nil end
+    local success, id = pcall(api.GetSpecializationInfo, index)
+    if success and ValidSpecID(id) then return id end
+end
+
+function Communication:RecordRosterSpec(sender, specID)
+    EnsurePresenceGuild(self)
+    if self.presenceGuild == '' or not ValidSpecID(specID) then return false end
+    local key = PresenceKey(sender)
+    if key == '' then return false end
+    local prior = self.rosterSpecs[key]
+    self.rosterSpecs[key] = {id = specID, receivedAt = GetTime()}
+    if (not prior or prior.id ~= specID) and OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+    return true
+end
+
+function Communication:GetRosterSpec(name)
+    EnsurePresenceGuild(self)
+    local key = PresenceKey(name)
+    if key == '' then return nil end
+    local fullKey, shortKey = PresenceKey(FullPlayerName()), PresenceKey(PlayerName())
+    local id, receivedAt
+    if (fullKey ~= '' and key == fullKey) or (shortKey ~= '' and key == shortKey) then
+        id, receivedAt = self:GetLocalSpecID(), GetTime()
+    else
+        local entry = self.rosterSpecs[key]
+        if not entry then return nil end
+        if GetTime() - entry.receivedAt > 3600 then self.rosterSpecs[key] = nil; return nil end
+        id, receivedAt = entry.id, entry.receivedAt
+    end
+    if not ValidSpecID(id) then return nil end
+    local api = GetSpecializationInfoByID or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfoByID)
+    if type(api) ~= 'function' then return nil end
+    local ok, _, specName, _, icon, role = pcall(api, id)
+    if not ok or Secret(specName) or type(specName) ~= 'string' or specName == '' then return nil end
+    if Secret(icon) or not ((type(icon) == 'number' and icon > 0) or (type(icon) == 'string' and icon ~= '')) then icon = nil end
+    if Secret(role) or type(role) ~= 'string' or (role ~= 'TANK' and role ~= 'HEALER' and role ~= 'DAMAGER') then role = nil end
+    return {id = id, name = specName, icon = icon, role = role, receivedAt = receivedAt}
+end
+
+function Communication:SendLocalSpec(forceOnQuery)
+    EnsurePresenceGuild(self)
+    if not self.ready or not IsInGuild or not IsInGuild() then return false end
+    local specID = self:GetLocalSpecID()
+    if not specID then self.pendingSpecBroadcast, self.pendingSpecForce = false, false; return false end
+    if not forceOnQuery and specID == self.lastBroadcastSpecID then self.pendingSpecBroadcast, self.pendingSpecForce = false, false; return false end
+    if (self.lastSpecReply and GetTime() - self.lastSpecReply < 10) or #self.queue > 8 then
+        self.pendingSpecBroadcast = true; if forceOnQuery then self.pendingSpecForce = true end; return false
+    end
+    if self:QueueMessage('OKP^SPEC^' .. tostring(specID)) then
+        self.lastSpecReply, self.lastBroadcastSpecID = GetTime(), specID
+        self.pendingSpecBroadcast, self.pendingSpecForce = false, false
+        return true
+    end
+    self.pendingSpecBroadcast = true; if forceOnQuery then self.pendingSpecForce = true end
+    return false
 end
 
 function Communication:OnAddonMessage(prefix, message, channel, sender)
@@ -400,6 +484,7 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
 
     self:RecordRosterPresence(sender)
     if message == 'OKP^QUERY' then
+        self:SendLocalSpec(true)
         local now = GetTime()
         if not self.lastPresenceReply or now - self.lastPresenceReply >= 10 then
             if self:QueueMessage('OKP^HERE^' .. self:GetLocalVersion()) then self.lastPresenceReply = now end
@@ -411,6 +496,12 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
         if #version <= 48 and version:match('^[%w%.%+%-]+$') then
             self:RecordRosterPresence(sender, version)
         end
+        return
+    elseif message:sub(1, 9) == 'OKP^SPEC^' then
+        local raw = message:sub(10)
+        local idStr = raw:match('^(%d+)$')
+        local specID = idStr and tonumber(idStr)
+        if specID and specID >= 1 and specID <= 9999999 then self:RecordRosterSpec(sender, specID) end
         return
     end
 
@@ -508,6 +599,8 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("CHAT_MSG_ADDON")
+pcall(frame.RegisterEvent, frame, 'ACTIVE_TALENT_GROUP_CHANGED')
+pcall(frame.RegisterEvent, frame, 'PLAYER_SPECIALIZATION_CHANGED')
 
 frame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -522,6 +615,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         if Communication.ready then
             Print(T("Префікс OLDKRKN зареєстровано."))
             Communication:RequestRosterPresence()
+            Communication:SendLocalSpec(true)
         else
             Print(T("Не вдалося зареєструвати префікс OLDKRKN: ") .. tostring(registered))
         end
@@ -532,6 +626,11 @@ frame:SetScript("OnEvent", function(_, event, ...)
                 Communication:Pump()
             end)
         end
+    elseif event == 'ACTIVE_TALENT_GROUP_CHANGED' then
+        Communication:SendLocalSpec(false)
+    elseif event == 'PLAYER_SPECIALIZATION_CHANGED' then
+        local unit = ...
+        if unit == 'player' then Communication:SendLocalSpec(false) end
     elseif event == "CHAT_MSG_ADDON" then
         Communication:OnAddonMessage(...)
     end

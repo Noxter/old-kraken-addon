@@ -1,6 +1,11 @@
 local T = OldKraken.Translate or function(text) return text end
 -- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
+local function memberSpecText(name)
+    local comm = OldKraken.Communication
+    local spec = name and comm and comm.GetRosterSpec and comm:GetRosterSpec(name)
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+end
 local window, selected, requestsWindow
 local refresh
 local groupAlert
@@ -679,6 +684,8 @@ local function ensureGroupCard(f, index)
             GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
             if self.member then
                 GameTooltip:SetText(playerLabel(self.member))
+                local specText = memberSpecText(self.member)
+                if specText then GameTooltip:AddLine(T('Спеціалізація: ') .. specText, 1, 1, 1) end
                 GameTooltip:AddLine(T('Роль: ') .. roleLabel(self.memberRole), 1, 1, 1)
                 local group = self.groupKey and Finder.groups[self.groupKey]
                 if group and self.member ~= group.owner then
@@ -1223,7 +1230,8 @@ refresh=function()
             row.hover:ClearAllPoints()
             row.hover:SetPoint('LEFT', window.detailsContent, 'TOPLEFT', 0, rowY)
             row.hover:SetSize(canInvite and 180 or (canRemove and 240 or 276), 24)
-            row.hover.memberLabel = name .. T('\nРоль: ') .. coloredRole .. T('\nСтатус: ') .. coloredState
+            local specText = memberSpecText(name)
+            row.hover.memberLabel = name .. T('\nРоль: ') .. coloredRole .. T('\nСтатус: ') .. coloredState .. (specText and (T('\nСпеціалізація: ') .. specText) or '')
             row.hover:Show()
         elseif row then
             row.name:Hide(); row.state:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
@@ -2274,6 +2282,8 @@ local function paintAlertRoster(group)
                 control.vacancy:SetShown(not member)
                 control.label:SetTextColor(member and 1 or 0.85,member and 1 or 0.88,member and 1 or 0.93)
                 control.tooltipText=(member or T('Вільне місце'))..'\n'..roleLabel(displayedRole)..' · '..state
+                local specText = member and memberSpecText(member)
+                if specText then control.tooltipText=control.tooltipText..T('\nСпеціалізація: ')..specText end
                 if not member then control.tooltipText=control.tooltipText..(Finder:CanPerformRole(Finder.identity,displayedRole) and T('\nЛівий клік — подати заявку на цю роль.') or T('\nЦя роль недоступна вашому класу.')) end
             end
         end

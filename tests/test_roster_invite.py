@@ -104,6 +104,7 @@ function GetTime() return 100 end
 function UnitName() return 'Me' end
 function GetRealmName() return 'Realm' end
 function IsInGuild() return true end
+function GetGuildInfo() return 'Guild' end
 function CreateFrame() return {RegisterEvent=function() end,SetScript=function() end} end
 ''')
 lua2.execute((p/'Communication.lua').read_text(encoding='utf-8'))

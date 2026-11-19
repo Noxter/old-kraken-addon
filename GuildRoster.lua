@@ -234,6 +234,18 @@ local function SortMembers(a, b)
         left = tonumber(a.rankIndex) or 0
         right = tonumber(b.rankIndex) or 0
     elseif key == "zone" then
+        if not a.isOnline then
+            local aa, bb = a.lastOnline, b.lastOnline
+            if (aa ~= nil) ~= (bb ~= nil) then return aa ~= nil end
+            if aa and bb then
+                for _, unit in ipairs({'years', 'months', 'days', 'hours'}) do
+                    if aa[unit] ~= bb[unit] then
+                        if settings.ascending then return aa[unit] < bb[unit] end
+                        return aa[unit] > bb[unit]
+                    end
+                end
+            end
+        end
         left = string.lower(a.zone or "")
         right = string.lower(b.zone or "")
     else
@@ -580,6 +592,19 @@ local function CreateRosterWindow(parent)
     return frame
 end
 
+local function formatOfflineDuration(duration)
+    if not duration then return nil end
+    local parts = {}
+    for _, unit in ipairs({{'years', 'р'}, {'months', 'міс'}, {'days', 'д'}, {'hours', 'год'}}) do
+        local value = duration[unit[1]]
+        if value > 0 then
+            parts[#parts + 1] = tostring(value) .. ' ' .. T(unit[2])
+            if #parts == 2 then break end
+        end
+    end
+    return #parts > 0 and table.concat(parts, ' ') or T('< 1 год')
+end
+
 local function CreateRow(index, parent)
     local row = CreateFrame("Button", nil, parent)
     row:RegisterForClicks('RightButtonUp')
@@ -620,6 +645,8 @@ local function CreateRow(index, parent)
         row.cells[cellIndex] = cell
     end
     row.onlineDot = row:CreateTexture(nil, 'OVERLAY')
+    row.specIcon = row:CreateTexture(nil, 'OVERLAY')
+    row.specIcon:SetSize(14, 14); row.specIcon:SetPoint('LEFT', row, 'LEFT', 374, 0); row.specIcon:Hide()
     row.onlineDot:SetPoint('LEFT', row, 'LEFT', 14, 0)
     row.onlineDot:SetWidth(8)
     row.onlineDot:SetHeight(8)
@@ -638,7 +665,9 @@ local function CreateRow(index, parent)
         local hover = CreateFrame('Button', nil, row)
         hover:RegisterForClicks('RightButtonUp')
         hover:SetScript('OnClick', function() ShowMemberMenu(row) end)
-        hover:SetAllPoints(row.cells[cellIndex]); hover:EnableMouse(true)
+        if cellIndex == 4 then hover:ClearAllPoints(); hover:SetPoint('LEFT', row, 'LEFT', 374, 0); hover:SetSize(80, ROW_HEIGHT)
+        else hover:SetAllPoints(row.cells[cellIndex]) end
+        hover:EnableMouse(true)
         hover:SetScript('OnEnter', function(self)
             if GameTooltip and self.fullText and self.fullText ~= '' then
                 GameTooltip:SetOwner(self, 'ANCHOR_RIGHT'); GameTooltip:SetText(self.fullText); GameTooltip:Show()
@@ -793,6 +822,15 @@ function Roster:RenderVisible()
         if row.stripe then row.stripe:SetShown(dataIndex % 2 == 0) end
         row.member = member
         local cells = row.cells
+        row.specIcon:SetTexture(nil); row.specIcon:Hide()
+        local spec = comm and comm.GetRosterSpec and comm:GetRosterSpec(member.name)
+        cells[4]:ClearAllPoints()
+        if spec and spec.icon then
+            row.specIcon:SetTexture(spec.icon); row.specIcon:Show()
+            cells[4]:SetPoint('LEFT', row, 'LEFT', 392, 0); cells[4]:SetWidth(62)
+        else
+            cells[4]:SetPoint('LEFT', row, 'LEFT', 374, 0); cells[4]:SetWidth(80)
+        end
 
         cells[7]:Show()
         row.cellHovers[7]:Show()
@@ -848,13 +886,17 @@ function Roster:RenderVisible()
         cells[2]:SetText(SafeText(member.rank))
         cells[3]:SetText(SafeText(member.level))
         cells[4]:SetText(SafeText(member.class))
-        cells[5]:SetText(SafeText(member.zone))
+        local offlineText = not member.isOnline and formatOfflineDuration(member.lastOnline)
+        local zoneText = SafeText(member.zone)
+        local locationText = offlineText and (T('Офлайн') .. ' · ' .. offlineText) or zoneText
+        cells[5]:SetText(locationText)
         cells[6]:Hide()
         row.onlineDot:SetTexture(member.isOnline and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
         row.cellHovers[4].fullText = SafeText(member.class)
-        row.cellHovers[5].fullText = SafeText(member.zone)
+        if spec and spec.name then row.cellHovers[4].fullText = row.cellHovers[4].fullText .. '\n' .. spec.name end
+        row.cellHovers[5].fullText = offlineText and (T('Офлайн') .. ': ' .. offlineText .. (zoneText ~= '' and ('\n' .. zoneText) or '')) or zoneText
 
         local classColor = member.classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.classFile]
         if classColor then
@@ -897,6 +939,8 @@ function Roster:RenderVisible()
     drawing = false
 end
 
+local function Pack(...) return {n = select('#', ...), ...} end
+
 function Roster:Load()
     pendingLoad, pendingRender = false, false
     if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
@@ -910,6 +954,24 @@ function Roster:Load()
             publicNote, officerNote, isOnline, status, classFileName = GetGuildRosterInfo(index)
 
         if name then
+            local lastOnline
+            if not isOnline and type(GetGuildRosterLastOnline) == 'function' then
+                local values = Pack(pcall(GetGuildRosterLastOnline, index))
+                if values[1] then
+                    local n = values.n - 1
+                    local first = values[2]
+                    if n == 1 and not (type(issecretvalue) == 'function' and issecretvalue(first)) and type(first) == 'number' and first == 0 then
+                        values = {n = 5, true, 0, 0, 0, 0}
+                        n = 4
+                    end
+                    local valid = n == 4
+                    for i = 2, 5 do
+                        local value = values[i]
+                        if (type(issecretvalue) == 'function' and issecretvalue(value)) or type(value) ~= 'number' or value < 0 or math.floor(value) ~= value then valid = false; break end
+                    end
+                    if valid then lastOnline = {years = values[2], months = values[3], days = values[4], hours = values[5]} end
+                end
+            end
             rosterData[#rosterData + 1] = {
                 name = name,
                 rank = rankName,
@@ -919,6 +981,7 @@ function Roster:Load()
                 classFile = classFileName,
                 zone = zone,
                 isOnline = isOnline == true,
+                lastOnline = lastOnline,
             }
         end
     end
