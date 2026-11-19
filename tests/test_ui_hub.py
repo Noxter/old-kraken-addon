@@ -229,15 +229,38 @@ ukrainian = load_localized_addon()
 ukrainian.execute('''
     assert(OldKraken.GetLanguage() == 'ukUA')
     local hub = OldKraken.UIHub
+    local sidebarBrand
+    local origBind = OldKraken.BindGuildTitle
+    OldKraken.BindGuildTitle = function(win, suffix, sidebar)
+        if not suffix and sidebar then sidebarBrand = sidebar end
+        return origBind(win, suffix, sidebar)
+    end
     hub:ShowPage('settings')
     assert(hub.contentTitle.text == 'Налаштування')
     assert(hub.frame.TitleText.text == 'Old Kraken')
+    assert(sidebarBrand and sidebarBrand.text == 'Old Kraken', 'sidebar brand FontString must exist')
+    local modWin = CreateFrame('Frame')
+    modWin.TitleText = modWin:CreateFontString()
+    OldKraken.BindGuildTitle(modWin, 'Майстерня')
+    assert(modWin.TitleText.text == 'Old Kraken — Майстерня')
+
     guildName = 'Морські вовки'
     addonEvents.scripts.OnEvent(addonEvents, 'PLAYER_GUILD_UPDATE', 'player')
-    assert(hub.frame.TitleText.text == guildName)
+    assert(hub.frame.TitleText.text == 'Old Kraken')
+    assert(sidebarBrand.text == 'Морські вовки')
+    assert(modWin.TitleText.text == 'Old Kraken — Майстерня')
+
     guildName = nil
     addonEvents.scripts.OnEvent(addonEvents, 'PLAYER_GUILD_UPDATE', 'player')
     assert(hub.frame.TitleText.text == 'Old Kraken')
+    assert(sidebarBrand.text == 'Old Kraken')
+    assert(modWin.TitleText.text == 'Old Kraken — Майстерня')
+
+    guildName = 'Нова гільдія'
+    addonEvents.scripts.OnEvent(addonEvents, 'PLAYER_GUILD_UPDATE', 'player')
+    assert(hub.frame.TitleText.text == 'Old Kraken')
+    assert(sidebarBrand.text == 'Нова гільдія')
+    assert(modWin.TitleText.text == 'Old Kraken — Майстерня')
     local apply = settingsControl('Застосувати й перезавантажити')
     assert(not apply.enabled and not settingsControl('Українська').enabled)
     settingsControl('English').scripts.OnClick()
@@ -250,14 +273,22 @@ english = load_localized_addon(ukrainian.eval('OldKrakenDB.settings.language'))
 english.execute('''
     assert(OldKraken.GetLanguage() == 'enUS')
     local hub = OldKraken.UIHub
+    local enSidebarBrand
+    local origBind = OldKraken.BindGuildTitle
+    OldKraken.BindGuildTitle = function(win, suffix, sidebar)
+        if not suffix and sidebar then enSidebarBrand = sidebar end
+        return origBind(win, suffix, sidebar)
+    end
     guildName = 'Sea Wolves'
     hub:ShowPage('settings')
+    addonEvents.scripts.OnEvent(addonEvents, 'PLAYER_GUILD_UPDATE', 'player')
     assert(hub.contentTitle.text == 'Settings')
     assert(hub.buttons.roster.label.text == 'Roster')
     assert(hub.buttons.groups.label.text == 'Groups')
     assert(hub.buttons.events.label.text == 'Events')
     assert(hub.buttons.workshop.label.text == 'Workshop')
-    assert(hub.frame.TitleText.text == 'Sea Wolves')
+    assert(hub.frame.TitleText.text == 'Old Kraken')
+    assert(enSidebarBrand and enSidebarBrand.text == 'Sea Wolves', 'English hub sidebar must display guild name Sea Wolves')
     assert(OldKraken.ActivityCatalog.dungeon[2].label == 'Ragefire Chasm (RFC)')
     assert(OldKraken.Workshop:ProfessionInfo(171) == 'Alchemy')
     assert(StaticPopupDialogs.OLDKRAKEN_REMOVE_MEMBER.button1 == 'Delete')

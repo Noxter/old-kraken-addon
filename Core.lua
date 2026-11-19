@@ -1246,7 +1246,7 @@ local guildTitles = setmetatable({}, {__mode = 'k'})
 
 local function updateGuildTitle(window, title, name)
     if window.TitleText then
-        window.TitleText:SetText(title.suffix and (name .. ' — ' .. title.suffix) or name)
+        window.TitleText:SetText(title.suffix and ('Old Kraken — ' .. title.suffix) or 'Old Kraken')
     end
     if title.sidebar then title.sidebar:SetText(name) end
 end
