@@ -39,146 +39,244 @@ def runtime(path='Communication.lua'):
     return lua
 
 
-class CommunicationPhaseTwo(unittest.TestCase):
-    def test_local_and_remote_specs(self):
-        lua = runtime()
-        lua.execute(r"""
-local c=OldKraken.Communication
-assert(c:GetLocalSpecID()==1485)
-assert(c:GetRosterSpec('Noxter Moon').id==1485)
-assert(c:GetRosterSpec('Noxter').id==1485)
-assert(c:GetRosterSpec('')==nil and c:GetRosterSpec(secret)==nil)
-assert(c:RecordRosterSpec('Other',1485))
-local e=OldKraken.events
-now=101; assert(c:RecordRosterSpec('Other',1485)); assert(OldKraken.events==e)
-assert(c:RecordRosterSpec('Other',2)); assert(OldKraken.events==e+1)
-assert(not c:RecordRosterSpec('',1))
-for _,v in ipairs({0,-1,1.5,10000000,'1',secret}) do assert(not c:RecordRosterSpec('Other',v)) end
-now=3701; assert(c:GetRosterSpec('Other').id==2)
-now=3702; assert(c:GetRosterSpec('Other')==nil and next(c.rosterSpecs)==nil)
-assert(c:GetRosterSpec('Noxter Moon').id==1485)
-local api=C_SpecializationInfo
-function GetNumTalentTabs() error('legacy fallback used') end
-function GetSpecialization() error('legacy fallback used') end
-for _,v in ipairs({0,-1,1.5,10000000,secret}) do specID=v; assert(c:GetLocalSpecID()==nil) end
-specID=1485
-C_SpecializationInfo=nil; assert(c:GetLocalSpecID()==nil)
-C_SpecializationInfo={}; assert(c:GetLocalSpecID()==nil)
-C_SpecializationInfo={GetSpecialization=function() return 1 end}; assert(c:GetLocalSpecID()==nil)
-for _,v in ipairs({0,-1,1.5,'1',secret}) do
- C_SpecializationInfo={GetSpecialization=function() return v end,GetSpecializationInfo=api.GetSpecializationInfo}
- assert(c:GetLocalSpecID()==nil)
+class SpecTwo(unittest.TestCase):
+    def setUp(self):
+        self.lua = runtime()
+        self.lua.execute(r"""
+OldKraken.DB={roster={}}; clock=1701000000; cfgID=5; treeID=20; spent=20
+points={10,7,3}; ranks={[3]=2,[10]=1}; nodeList={10,3}
+function GetServerTime() return clock end
+C_ClassTalents={GetActiveConfigID=function() return cfgID end}
+C_Traits={
+ GetConfigInfo=function() return {treeIDs={treeID}} end,
+ GetTreeCurrencyInfo=function() return {{spent=spent}} end,
+ GetTreeNodes=function() return nodeList end,
+ GetNodeInfo=function(_,id) return {ranksPurchased=ranks[id] or 0} end}
+function header(name,index,icon)
+ return {Name={GetText=function() return name end},
+         Text={GetText=function() return tostring(points[index]) end},
+         Icon={GetTexture=function() return icon end}}
 end
-C_SpecializationInfo={GetSpecialization=function() return nil end,GetSpecializationInfo=api.GetSpecializationInfo}; assert(c:GetLocalSpecID()==nil)
-C_SpecializationInfo={GetSpecialization=function() error('failure') end,GetSpecializationInfo=api.GetSpecializationInfo}; assert(c:GetLocalSpecID()==nil)
-C_SpecializationInfo={GetSpecialization=function() return secret end,GetSpecializationInfo=api.GetSpecializationInfo}; assert(c:GetLocalSpecID()==nil)
-C_SpecializationInfo={GetSpecialization=function() return 1 end,GetSpecializationInfo=function() error('failure') end}; assert(c:GetLocalSpecID()==nil)
-C_SpecializationInfo=api
-local globalByID=GetSpecializationInfoByID
-GetSpecializationInfoByID=nil
-C_SpecializationInfo.GetSpecializationInfoByID=function(id) return id,'Fallback','',7,'DAMAGER' end
-assert(c:GetRosterSpec('Noxter').name=='Fallback')
-GetSpecializationInfoByID=globalByID
-function GetSpecializationInfoByID() return 1,'Hunter','',-1,'TANK' end
-local s=c:GetRosterSpec('Noxter'); assert(s.name=='Hunter' and s.icon==nil and s.role=='TANK')
-function GetSpecializationInfoByID() return 1,'Hunter','',secret,secret end
-s=c:GetRosterSpec('Noxter'); assert(s and s.icon==nil and s.role==nil)
-function GetSpecializationInfoByID() return 1,secret end
-assert(c:GetRosterSpec('Noxter')==nil)
-function GetSpecializationInfoByID() return 1,'' end
-assert(c:GetRosterSpec('Noxter')==nil)
-function GetSpecializationInfoByID() return 1,nil end
-assert(c:GetRosterSpec('Noxter')==nil)
-function GetSpecializationInfoByID() error('failure') end
-assert(c:GetRosterSpec('Noxter')==nil)
-player=secret; assert(c:GetRosterSpec('Noxter')==nil)
-player=nil; assert(c:GetRosterSpec('Noxter')==nil)
-player=''; assert(c:GetRosterSpec('Noxter')==nil)
+hooks={}; talentFrame={treeHeaders={header(' Marksmanship ',1,123),header('Survival',2,456),header('Beast',3,789)}}
+function talentFrame:RefreshTreeHeaders() end
+function talentFrame:HookScript(name,fn) hooks[name]=fn end
+function hooksecurefunc(_,name,fn) hooks[name]=fn end
+PlayerSpellsFrame={TalentsFrame=talentFrame}
+c=OldKraken.Communication; c.ready=true; c:HasRosterAddon('X')
+function msg(sender,seq,icon,pts,name)
+ c:OnAddonMessage(c.PREFIX,'OKP^SPEC2^'..seq..'^'..icon..'^'..pts..'^'..name,'GUILD',sender or 'Other')
+end
+function queued()
+ local t={}; for _,entry in ipairs(c.queue) do t[#t+1]=entry.message end; return table.concat(t,';')
+end
 """)
 
-    def test_parser_and_guild_lifecycle(self):
-        lua = runtime()
-        lua.execute(r"""
-local c=OldKraken.Communication; c.ready=true
-for _,raw in ipairs({'','abc','-1','1.5','0','10000000','1485^extra','1485 '}) do
- c:OnAddonMessage(c.PREFIX,'OKP^SPEC^'..raw,'GUILD','Other'); assert(next(c.rosterSpecs)==nil)
-end
-for _,id in ipairs({1,1485,9999999}) do
- c:OnAddonMessage(c.PREFIX,'OKP^SPEC^'..id,'GUILD','Other'); assert(c:GetRosterSpec('Other').id==id)
-end
-c.pendingSpecBroadcast=true; c.pendingSpecForce=true; c.lastSpecReply=now; c.lastBroadcastSpecID=1
-c.lastPresenceQuery=now; c.rosterVersions.Other='1'
-guild='B'; c:Pump(); assert(not c.pendingSpecBroadcast and not c.pendingSpecForce and next(c.rosterSpecs)==nil)
-assert(c.lastSpecReply==nil and c.lastBroadcastSpecID==nil and c.lastPresenceQuery==nil)
-assert(next(c.rosterVersions)==nil and next(c.rosterPresence)==nil)
-guild=''; local before=OldKraken.events
-assert(not c:RecordRosterSpec('Other',1485) and next(c.rosterSpecs)==nil and OldKraken.events==before)
+    def test_01_valid_and_legacy_precedence(self):
+        self.lua.execute(r"""
+local invalid=c.stats.invalid
+c:OnAddonMessage(c.PREFIX,'OKP^SPEC^1485','GUILD','Other')
+assert(c.rosterSpecs['Other-Realm'].source=='spec1' and c:GetRosterSpec('Other')==nil and c.stats.invalid==invalid)
+msg('Other',1,123,'10/7/3','Marksman')
+local s=c:GetRosterSpec('Other'); assert(s.name=='Marksman' and s.icon==123 and s.points=='10/7/3')
+c:OnAddonMessage(c.PREFIX,'OKP^SPEC^1485','GUILD','Other')
+assert(c:GetRosterSpec('Other').name=='Marksman')
+msg('Other',2,0,'0/0/0',''); assert(c:GetRosterSpec('Other')==nil and c.rosterSpecs['Other-Realm'].reset)
+c:OnAddonMessage(c.PREFIX,'OKP^SPEC^1485','GUILD','Other')
+assert(c.rosterSpecs['Other-Realm'].reset)
+msg('Other',3,0,'3/5/1','Survival'); s=c:GetRosterSpec('Other')
+assert(s and s.name=='Survival' and s.icon==nil and s.points=='3/5/1')
 """)
 
-    def test_pending_and_event_entry_points(self):
-        lua = runtime()
-        lua.execute(r"""
-local c=OldKraken.Communication; c.ready=true; c:HasRosterAddon('Me')
-assert(c:SendLocalSpec(false) and c.queue[1].message=='OKP^SPEC^1485')
+    def test_02_old_client_and_message_order(self):
+        for source in ('tests/fixtures/communication_0_5_3.lua', 'tests/fixtures/communication_0_5_4_alpha_1.lua'):
+            old = runtime(source)
+            old.execute(r"""
+local c=OldKraken.Communication; local before=c.stats.invalid
+c:OnAddonMessage(c.PREFIX,'OKP^SPEC2^1^123^10/7/3^Marksman','GUILD','Other')
+assert(c.stats.invalid==before and c:HasRosterAddon('Other'))
+""")
+        self.lua.execute(r"""
+msg('Other',11,0,'0/0/0','')
+msg('Other',10,123,'10/7/3','Old'); assert(c.rosterSpecs['Other-Realm'].reset)
+msg('Other',12,123,'10/7/3','New'); assert(c:GetRosterSpec('Other').name=='New')
+""")
+
+    def test_03_local_cache_signature_and_ties(self):
+        self.lua.execute(r"""
+local s=c:GetLocalTraitSignature(); assert(s.distSig=='20|3:2,10:1')
+cfgID=9; assert(c:GetLocalTraitSignature().distSig==s.distSig)
+assert(c:GetRosterSpec('Noxter Moon')==nil)
+c:RefreshLocalTreeSpec(); s=c:GetRosterSpec('Noxter'); assert(s.name=='Marksmanship' and s.points=='10/7/3' and s.icon==123)
+local cache=OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']; assert(cache.distSig=='20|3:2,10:1')
+guild='B'; c:HasRosterAddon('X'); assert(c:GetRosterSpec('Noxter').name=='Marksmanship')
+ranks[10]=2; assert(c:GetRosterSpec('Noxter')==nil and next(OldKraken.DB.roster.localSpecs)==nil)
+points={10,10,0}; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+points={5,5,5}; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+spent=0; points={0,0,0}; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+""")
+
+    def test_04_ui_and_trait_failures_are_not_partial(self):
+        self.lua.execute(r"""
+local old=C_Traits.GetNodeInfo
+C_Traits.GetNodeInfo=function(_,id) if id==3 then error('bad node') end return old(nil,id) end
+assert(c:GetLocalTraitSignature()==nil)
+C_Traits.GetNodeInfo=function(_,id) if id==3 then return nil end return old(nil,id) end
+assert(c:GetLocalTraitSignature()==nil)
+C_Traits.GetNodeInfo=function(_,id) if id==3 then return {ranksPurchased=secret} end return old(nil,id) end
+assert(c:GetLocalTraitSignature()==nil)
+C_Traits.GetNodeInfo=old
+local nodes=C_Traits.GetTreeNodes
+C_Traits.GetTreeNodes=function() error('bad nodes') end; assert(c:GetLocalTraitSignature()==nil)
+C_Traits.GetTreeNodes=function() return nil end; assert(c:GetLocalTraitSignature()==nil)
+C_Traits.GetTreeNodes=nodes
+nodeList={10,secret}; assert(c:GetLocalTraitSignature()==nil); nodeList={10,3}
+talentFrame.treeHeaders=nil; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+talentFrame.treeHeaders={header('A',1,1),header('B',2,2),header('C',3,3)}
+talentFrame.treeHeaders[1].Name.GetText=function() return secret end
+c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+talentFrame.treeHeaders[1].Name.GetText=function() error('bad ui') end
+c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+talentFrame.treeHeaders[1].Name.GetText=function() return 'Valid' end
+talentFrame.treeHeaders[1].Icon.GetTexture=function() return secret end
+c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter').icon==nil)
+""")
+
+    def test_05_local_and_remote_ttl(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec(); local entry=OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']
+clock=clock+604800; assert(c:GetRosterSpec('Noxter'))
+clock=clock+1; assert(c:GetRosterSpec('Noxter')==nil)
+entry.updatedAt=clock+601; assert(c:GetRosterSpec('Noxter')==nil)
+entry.updatedAt=clock+600; assert(c:GetRosterSpec('Noxter'))
+msg('Other',1,0,'10/7/3','Remote'); now=3700; assert(c:GetRosterSpec('Other'))
+now=3701; assert(c:GetRosterSpec('Other')==nil)
+msg('Other',2,0,'0/0/0',''); now=7302; assert(c:GetRosterSpec('Other')==nil and c.rosterSpecs['Other-Realm']==nil)
+""")
+
+    def test_06_bad_wire_messages(self):
+        self.lua.execute(r"""
+local invalid=c.stats.invalid
+local bad={'0^1^10/7/3^Name','1^1^10/10/0^Tie','1^1^5/5/5^Tie',
+ '1^0^00/0/0^','1^00^0/0/0^','1^1^0/0/0^','1^0^0/0/0^Name',
+ '1^1^10/7/3^bad^extra','1^1^10/7/3^bad|escape','1^1^10/7/3^',
+ '1^1^1000/0/0^Name','1^1^10/7/3^'..string.char(192,128),
+ '1^1^10/7/3^'..string.rep('x',231)}
+for _,v in ipairs(bad) do
+ c:OnAddonMessage(c.PREFIX,'OKP^SPEC2^'..v,'GUILD','Other')
+ assert(next(c.rosterSpecs)==nil)
+end
+assert(c.stats.invalid==invalid and (not OldKraken.DB.roster.specSequences or next(OldKraken.DB.roster.specSequences)==nil))
+""")
+
+    def test_07_hwm_duplicates_expiry_and_reload(self):
+        self.lua.execute(r"""
+msg('Other',10,123,'10/7/3','A'); local n=OldKraken.events
+now=101; msg('Other',10,123,'10/7/3','A'); assert(OldKraken.events==n and c.rosterSpecs['Other-Realm'].receivedAt==101)
+msg('Other',10,123,'10/7/3','B'); assert(c:GetRosterSpec('Other').name=='A' and OldKraken.events==n)
+msg('Other',11,0,'0/0/0',''); now=3702; assert(c:GetRosterSpec('Other')==nil)
+msg('Other',10,123,'10/7/3','A'); assert(c.rosterSpecs['Other-Realm']==nil)
+msg('Other',11,0,'0/0/0',''); assert(c.rosterSpecs['Other-Realm']==nil)
+""")
+        self.lua.execute((ROOT / 'Communication.lua').read_text(encoding='utf-8'))
+        self.lua.execute(r"""
+c=OldKraken.Communication; c.ready=true
+msg('Other',10,123,'10/7/3','A'); assert(c:GetRosterSpec('Other')==nil)
+msg('Other',12,123,'10/7/3','C'); assert(c:GetRosterSpec('Other').name=='C')
+""")
+
+    def test_08_guild_isolation_and_hwm_cap(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec(); local localEntry=OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']
+msg('Other',10,123,'10/7/3','A'); guild='B'; c:HasRosterAddon('X')
+assert(next(c.rosterSpecs)==nil and OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']==localEntry)
+msg('Other',1,123,'10/7/3','B'); assert(c:GetRosterSpec('Other').name=='B')
+guild='A'; c:HasRosterAddon('X'); msg('Other',9,123,'10/7/3','Old'); assert(c:GetRosterSpec('Other')==nil)
+local h=OldKraken.DB.roster.specSequences
+for k in pairs(h) do h[k]=nil end
+for i=1,1024 do h['k'..i]={seq=1,payload='x',updatedAt=clock-i} end
+h.k1.updatedAt=clock-2592001
+msg('New',1,1,'2/1/0','New'); assert(h.k1==nil and h.k1024~=nil)
+msg('Newer',1,1,'2/1/0','Newer'); assert(h.k1024==nil)
+""")
+
+    def test_09_hwm_age_and_crash_semantics(self):
+        self.lua.execute(r"""
+msg('Other',10,123,'10/7/3','A')
+local h=OldKraken.DB.roster.specSequences
+clock=clock+2592000; msg('Other',9,123,'10/7/3','Old'); assert(c:GetRosterSpec('Other').name=='A')
+clock=clock+1; msg('Other',9,123,'10/7/3','Old'); assert(c:GetRosterSpec('Other').name=='Old')
+-- A receiver crash restores the last saved HWM.
+h['Realm\001A\001Other-Realm']=nil; c.rosterSpecs={}
+msg('Other',10,123,'10/7/3','After crash'); assert(c:GetRosterSpec('Other').name=='After crash')
+msg('Other',100001,123,'10/7/3','First'); local saved=h['Realm\001A\001Other-Realm'].payload
+msg('Other',100001,123,'10/7/3','Conflict'); assert(h['Realm\001A\001Other-Realm'].payload==saved and c:GetRosterSpec('Other').name=='First')
+msg('Other',100000,123,'10/7/3','Old sender'); assert(c:GetRosterSpec('Other').name=='First')
+msg('Other',100002,123,'10/7/3','Recovered'); assert(c:GetRosterSpec('Other').name=='Recovered')
+""")
+
+    def test_10_retry_and_saved_sequence(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec(); assert(queued():find('OKP^SPEC2^',1,true))
+local key='Realm\001Noxter Moon'; local seq=OldKraken.DB.roster.localSpecSeq[key]
 c.queue={}; assert(not c:SendLocalSpec(false))
 assert(not c:SendLocalSpec(true) and c.pendingSpecForce)
-now=109; c:Pump(); assert(#c.queue==0)
-now=110; c:Pump(); assert(c.lastBroadcastSpecID==1485 and c.lastSpecReply==110 and not c.pendingSpecBroadcast)
-c.queue={}; specID=1486; now=111; assert(not c:SendLocalSpec(false) and c.pendingSpecBroadcast)
-now=120; c:Pump(); assert(c.lastBroadcastSpecID==1486 and not c.pendingSpecBroadcast)
-c.queue={}; now=130; for i=1,8 do c.queue[i]={message='dummy'} end
+now=105; assert(not c:SendLocalSpec(false) and c.pendingSpecForce)
+now=110; c:Pump(); assert(not c.pendingSpecForce and OldKraken.DB.roster.localSpecSeq[key]==seq+1)
+now=120; c.queue={}; for i=1,8 do c.queue[i]={message='test'} end
 assert(c:SendLocalSpec(true) and #c.queue==9)
-c.queue={}; now=140; for i=1,9 do c.queue[i]={message='dummy'} end
+now=130; c.queue={}; for i=1,9 do c.queue[i]={message='test'} end
 assert(not c:SendLocalSpec(true) and c.pendingSpecForce)
-c.queue={}; specID=1487; c:Pump(); assert(c.lastBroadcastSpecID==1487)
-c.queue={}; now=150; local old=c.QueueMessage
-c.QueueMessage=function() return false end
-assert(not c:SendLocalSpec(true) and c.pendingSpecBroadcast and c.lastBroadcastSpecID==1487 and c.lastSpecReply==140)
-c.QueueMessage=old; c:Pump(); assert(c.lastSpecReply==150)
-c.queue={}; now=151; assert(not c:SendLocalSpec(true) and c.pendingSpecForce)
-guild='B'; c:Pump(); assert(not c.pendingSpecForce and #c.queue==0)
-assert(c:SendLocalSpec(false) and c.lastBroadcastSpecID==1487)
-local f=frames[1]; assert(f.events.ACTIVE_TALENT_GROUP_CHANGED and f.events.PLAYER_SPECIALIZATION_CHANGED)
-c.queue={}; now=200; specID=1500; f.scripts.OnEvent(f,'PLAYER_SPECIALIZATION_CHANGED','target'); assert(#c.queue==0)
-f.scripts.OnEvent(f,'PLAYER_SPECIALIZATION_CHANGED','player'); assert(c.lastBroadcastSpecID==1500)
-now=210; specID=1501; f.scripts.OnEvent(f,'ACTIVE_TALENT_GROUP_CHANGED'); assert(c.lastBroadcastSpecID==1501)
-now=220; c:OnAddonMessage(c.PREFIX,'OKP^QUERY','GUILD','Other'); assert(c.lastSpecReply==220)
-local calls={}; local req,send=c.RequestRosterPresence,c.SendLocalSpec
-c.RequestRosterPresence=function() calls[#calls+1]='query' end
-c.SendLocalSpec=function(_,force) assert(force); calls[#calls+1]='spec' end
-f.scripts.OnEvent(f,'PLAYER_LOGIN'); assert(calls[1]=='query' and calls[2]=='spec')
-c.RequestRosterPresence,c.SendLocalSpec=req,send
+c.queue={}; c:Pump(); assert(not c.pendingSpecForce)
+now=131; assert(not c:SendLocalSpec(true)); guild='B'; c:Pump()
+assert(not c.pendingSpecForce and not c.pendingSpecBroadcast)
+""")
+        self.lua.execute((ROOT / 'Communication.lua').read_text(encoding='utf-8'))
+        self.lua.execute(r"""
+c=OldKraken.Communication; c.ready=true; c:HasRosterAddon('X'); c.queue={}
+local key='Realm\001Noxter Moon'; local old=OldKraken.DB.roster.localSpecSeq[key]
+assert(c:SendLocalSpec(true)); assert(OldKraken.DB.roster.localSpecSeq[key]==old+1)
 """)
 
-    def test_pending_force_survives_normal_call(self):
-        lua = runtime()
-        lua.execute(r"""
-local c=OldKraken.Communication; c.ready=true; c:HasRosterAddon('Me')
-local sent={}
-local sendFn=C_ChatInfo.SendAddonMessage
-C_ChatInfo.SendAddonMessage=function(_,msg) sent[#sent+1]=msg; return 0 end
-c.lastBroadcastSpecID=1485; c.lastSpecReply=95; now=100
-assert(not c:SendLocalSpec(true))
-assert(c.pendingSpecBroadcast and c.pendingSpecForce and #c.queue==0 and #sent==0)
-now=102; assert(not c:SendLocalSpec(false))
-assert(c.pendingSpecBroadcast and c.pendingSpecForce and #c.queue==0 and #sent==0)
-now=105; c:Pump()
-assert(#sent==1 and sent[1]=='OKP^SPEC^1485')
-assert(not c.pendingSpecBroadcast and not c.pendingSpecForce and c.lastSpecReply==105)
-C_ChatInfo.SendAddonMessage=sendFn
+    def test_11_hooks_and_reset_broadcast(self):
+        self.lua.execute(r"""
+frames[1].scripts.OnEvent(frames[1],'ADDON_LOADED','Blizzard_PlayerSpells')
+assert(hooks.RefreshTreeHeaders and hooks.OnShow and not OldKraken.DB.roster.localSpecs)
+hooks.OnShow(); local events=OldKraken.events; local count=#c.queue
+hooks.RefreshTreeHeaders(); hooks.OnShow(); assert(OldKraken.events==events and #c.queue==count)
+now=110; spent=0; points={0,0,0}; hooks.RefreshTreeHeaders()
+assert(queued():find('^0^0/0/0^',1,true))
 """)
 
-    def test_login_keeps_presence_throttle(self):
-        lua = runtime()
-        lua.execute(r"""
-local c=OldKraken.Communication; local f=frames[1]
-f.scripts.OnEvent(f,'PLAYER_LOGIN')
-assert(c.lastPresenceQuery==100 and c.lastSpecReply==100 and #c.queue==2)
-c:RequestRosterPresence(); assert(#c.queue==2)
+    def test_12_queue_failure_preserves_sequence_and_force(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec(); local key='Realm\001Noxter Moon'
+local seq=OldKraken.DB.roster.localSpecSeq[key]; local reply=c.lastSpecReply; local payload=c.lastBroadcastSpecPayload
+now=110; local original=c.QueueMessage; c.QueueMessage=function() return false end
+assert(not c:SendLocalSpec(true) and c.pendingSpecForce and c.pendingSpecBroadcast)
+assert(c.lastSpecReply==reply and c.lastBroadcastSpecPayload==payload and OldKraken.DB.roster.localSpecSeq[key]==seq)
+c.QueueMessage=original; c:Pump(); assert(OldKraken.DB.roster.localSpecSeq[key]==seq+1)
 """)
 
-    def test_unsupported_events_are_guarded(self):
-        lua = LuaRuntime(unpack_returned_tuples=True)
+    def test_13_sender_crash_sequence_reuse(self):
+        self.lua.execute(r"""
+clock=1700000001; c:RefreshLocalTreeSpec(); c.queue={}; c.lastSpecReply=nil
+local key='Realm\001Noxter Moon'
+msg('Other',100001,123,'10/7/3','Before crash')
+local h=OldKraken.DB.roster.specSequences['Realm\001A\001Other-Realm']
+local saved=h.payload
+OldKraken.DB.roster.localSpecSeq[key]=100000; c.localSpecSeq=nil
+assert(c:SendLocalSpec(true))
+assert(c.queue[1].message:find('OKP^SPEC2^100001^',1,true)==1)
+c:OnAddonMessage(c.PREFIX,c.queue[1].message,'GUILD','Other')
+assert(h.payload==saved and c:GetRosterSpec('Other').name=='Before crash')
+now=110; c.queue={}; assert(c:SendLocalSpec(true))
+assert(c.queue[1].message:find('OKP^SPEC2^100002^',1,true)==1)
+c:OnAddonMessage(c.PREFIX,c.queue[1].message,'GUILD','Other')
+assert(c:GetRosterSpec('Other').name=='Marksmanship')
+""")
+
+    def test_14_registration_and_login_order(self):
+        lua=LuaRuntime(unpack_returned_tuples=True)
         lua.execute(SETUP)
         lua.execute(r"""
 local original=CreateFrame
@@ -192,14 +290,74 @@ function CreateFrame()
 end
 """)
         lua.execute((ROOT / 'Communication.lua').read_text(encoding='utf-8'))
-        lua.execute("assert(frames[1].events.PLAYER_LOGIN and frames[1].events.CHAT_MSG_ADDON)")
-
-    def test_release_053_accepts_spec_message(self):
-        lua = runtime('tests/fixtures/communication_0_5_3.lua')
         lua.execute(r"""
-local c=OldKraken.Communication; local before=c.stats.invalid
-c:OnAddonMessage(c.PREFIX,'OKP^SPEC^1485','GUILD','Other')
-assert(c.stats.invalid==before and c:HasRosterAddon('Other'))
+local c=OldKraken.Communication; local calls={}
+c.RequestRosterPresence=function() calls[#calls+1]='query' end
+c.SendLocalSpec=function(_,force) assert(force); calls[#calls+1]='spec' end
+frames[1].scripts.OnEvent(frames[1],'PLAYER_LOGIN')
+assert(calls[1]=='query' and calls[2]=='spec')
+assert(frames[1].events.PLAYER_LOGIN and frames[1].events.CHAT_MSG_ADDON)
+""")
+
+    def test_15_legacy_local_id_api_is_unchanged(self):
+        self.lua.execute(r"""
+assert(c:GetLocalSpecID()==1485)
+local api=C_SpecializationInfo
+for _,v in ipairs({0,-1,1.5,10000000,secret}) do specID=v; assert(c:GetLocalSpecID()==nil) end
+specID=1485
+C_SpecializationInfo=nil; assert(c:GetLocalSpecID()==nil)
+C_SpecializationInfo={GetSpecialization=function() error('failure') end,GetSpecializationInfo=api.GetSpecializationInfo}
+assert(c:GetLocalSpecID()==nil)
+C_SpecializationInfo=api
+""")
+
+    def test_16_talent_events_and_forced_reset(self):
+        self.lua.execute(r"""
+local f=frames[1]
+local calls={}; local original=c.SendLocalSpec
+c.SendLocalSpec=function(_,force) calls[#calls+1]=force; return false end
+f.scripts.OnEvent(f,'PLAYER_SPECIALIZATION_CHANGED','target'); assert(#calls==0)
+f.scripts.OnEvent(f,'PLAYER_SPECIALIZATION_CHANGED','player')
+f.scripts.OnEvent(f,'ACTIVE_TALENT_GROUP_CHANGED')
+assert(#calls==2 and calls[1]==false and calls[2]==false)
+c.SendLocalSpec=original
+points={10,10,0}; c:RefreshLocalTreeSpec()
+assert(not queued():find('OKP^SPEC2^',1,true))
+assert(c:SendLocalSpec(true))
+assert(queued():find('^0^0/0/0^',1,true))
+""")
+
+    def test_17_reload_cached_signature_and_changed_config(self):
+        self.lua.execute("c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter'))")
+        self.lua.execute((ROOT / 'Communication.lua').read_text(encoding='utf-8'))
+        self.lua.execute(r"""
+c=OldKraken.Communication; c.ready=true; cfgID=91
+assert(c:GetRosterSpec('Noxter').name=='Marksmanship')
+ranks[10]=3
+assert(c:GetRosterSpec('Noxter')==nil)
+assert(OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']==nil)
+""")
+
+    def test_18_trait_and_header_validation(self):
+        self.lua.execute(r"""
+local active=C_ClassTalents.GetActiveConfigID
+C_ClassTalents.GetActiveConfigID=function() return secret end; assert(c:GetLocalTraitSignature()==nil)
+C_ClassTalents.GetActiveConfigID=function() error('config') end; assert(c:GetLocalTraitSignature()==nil)
+C_ClassTalents.GetActiveConfigID=active
+local info=C_Traits.GetConfigInfo
+C_Traits.GetConfigInfo=function() return {treeIDs={secret}} end; assert(c:GetLocalTraitSignature()==nil)
+C_Traits.GetConfigInfo=info
+local currency=C_Traits.GetTreeCurrencyInfo
+C_Traits.GetTreeCurrencyInfo=function() return {{spent=secret}} end; assert(c:GetLocalTraitSignature()==nil)
+C_Traits.GetTreeCurrencyInfo=currency
+local head=talentFrame.treeHeaders[1]
+head.Text.GetText=function() return secret end; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+head.Text.GetText=function() return '10x' end; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+head.Text.GetText=function() return ' 10 ' end
+head.Name.GetText=function() return 'bad|name' end; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+head.Name.GetText=function() return string.char(192,128) end; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+head.Name.GetText=function() return 'Valid' end
+head.Icon.GetTexture=function() error('icon') end; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
 """)
 
 
