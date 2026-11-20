@@ -7,6 +7,9 @@ OldKraken.Communication = Communication
 Communication.PREFIX = "OLDKRKN"
 Communication.queue = {}
 Communication.ready = false
+Communication.rosterPresence, Communication.rosterVersions, Communication.rosterSpecs = {}, {}, {}
+Communication.lastSpecReply, Communication.lastBroadcastSpecID = nil, nil
+Communication.pendingSpecBroadcast, Communication.pendingSpecForce = false, false
 Communication.lastTestID = nil
 Communication.handlers = {}
 Communication.stats = { sent = 0, retried = 0, dropped = 0, received = 0, invalid = 0 }
@@ -29,6 +32,22 @@ local messageSequence = 0
 local sessionID = tostring(GetServerTime()) .. "-" .. tostring(math.random(100000, 999999))
 local assemblies, completed = {}, {}
 local nextPrune=0
+
+local function EnsurePresenceGuild(self)
+    local guild = GetGuildInfo and GetGuildInfo('player') or ''
+    if self.presenceGuild ~= guild or guild == '' then
+        self.rosterPresence, self.rosterVersions, self.rosterSpecs = {}, {}, {}
+        self.presenceGuild = guild
+        self.lastPresenceQuery, self.lastSpecReply, self.lastBroadcastSpecID, self.lastBroadcastSpecPayload = nil, nil, nil, nil
+        self.pendingSpecBroadcast, self.pendingSpecForce = false, false
+    end
+end
+local function Secret(value)
+    return type(issecretvalue) == 'function' and issecretvalue(value)
+end
+local function ValidSpecID(value)
+    return not Secret(value) and type(value) == 'number' and value >= 1 and value <= 9999999 and math.floor(value) == value
+end
 
 local function Count(t)
     local n = 0
@@ -161,6 +180,13 @@ local function PlayerName()
     local name = UnitName and UnitName("player")
     return type(name) == "string" and name or nil
 end
+local function FullPlayerName()
+    if type(UnitName) ~= 'function' then return nil end
+    local name, surname = UnitName('player')
+    if Secret(name) or type(name) ~= 'string' or name == '' then return nil end
+    if not Secret(surname) and type(surname) == 'string' and surname ~= '' then return name .. ' ' .. surname end
+    return name
+end
 
 local function Print(message)
     print("|cff2ec4b6Old Kraken|r: " .. message)
@@ -223,7 +249,7 @@ function Communication:QueueMessage(message,job,part)
     end
 
     local guild
-    if message:sub(1, 4) == 'GF2^' then
+    if message:sub(1, 4) == 'GF2^' or message:sub(1, 9) == 'OKP^SPEC^' or message:sub(1, 10) == 'OKP^SPEC2^' then
         guild = GetGuildInfo and GetGuildInfo('player')
         if type(guild) ~= 'string' or guild == '' then return false end
     end
@@ -248,6 +274,8 @@ local function deferEntry(self,entry,reason)
     self.lastSendError=reason
 end
 function Communication:Pump()
+    EnsurePresenceGuild(self)
+    if self.pendingSpecBroadcast and self.ready and IsInGuild and IsInGuild() then self:SendLocalSpec(self.pendingSpecForce) end
     if #self.queue==0 or GetTime()<self.retryAt then return end
     if not IsInGuild or not IsInGuild() then return end
     local index,priority=1,3
@@ -318,8 +346,6 @@ function Communication:SendTest()
 end
 
 -- Presence is evidence of installation during this session, never evidence of absence.
-Communication.rosterPresence = {}
-Communication.rosterVersions = {}
 function Communication:GetLocalVersion()
     local getter = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
     return (getter and getter('OldKraken', 'Version')) or OldKraken.version or 'unknown'
@@ -348,19 +374,13 @@ function Communication:CompareVersions(left, right)
     return 0
 end
 local function PresenceKey(name)
-    if type(name) ~= 'string' then return '' end
+    if Secret(name) or type(name) ~= 'string' or name == '' then return '' end
     local realm = GetRealmName and GetRealmName() or ''
     if not name:find('-', 1, true) then name = name .. '-' .. realm end
     return (name:gsub('%s+', ''))
 end
 function Communication:HasRosterAddon(name)
-    local guild = GetGuildInfo and GetGuildInfo('player') or ''
-    if self.presenceGuild ~= guild then
-        self.rosterPresence = {}
-        self.rosterVersions = {}
-        self.presenceGuild = guild
-        self.lastPresenceQuery = nil
-    end
+    EnsurePresenceGuild(self)
     return PresenceKey(name) == PresenceKey(PlayerName()) or self.rosterPresence[PresenceKey(name)] == true
 end
 function Communication:GetRosterVersion(name)
@@ -369,19 +389,304 @@ function Communication:GetRosterVersion(name)
     return self.rosterVersions[PresenceKey(name)]
 end
 function Communication:RequestRosterPresence()
+    EnsurePresenceGuild(self)
     if not self.ready or not IsInGuild() then return end
     local now = GetTime()
     if self.lastPresenceQuery and now - self.lastPresenceQuery < 30 then return end
     if self:QueueMessage('OKP^QUERY') then self.lastPresenceQuery = now end
 end
 function Communication:RecordRosterPresence(sender, version)
-    self:HasRosterAddon(sender) -- Reset evidence when the player's guild changes.
+    EnsurePresenceGuild(self)
     local key = PresenceKey(sender)
     if not self.rosterPresence[key] or (version and self.rosterVersions[key] ~= version) then
         self.rosterPresence[key] = true
         if version then self.rosterVersions[key] = version end
         if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
     end
+end
+
+function Communication:GetLocalSpecID()
+    local api = C_SpecializationInfo
+    if not api or type(api.GetSpecialization) ~= 'function' then return nil end
+    local ok, index = pcall(api.GetSpecialization)
+    if type(api.GetSpecializationInfo) ~= 'function' then return nil end
+    if not ok or Secret(index) or type(index) ~= 'number' or index < 1 or math.floor(index) ~= index then return nil end
+    local success, id = pcall(api.GetSpecializationInfo, index)
+    if success and ValidSpecID(id) then return id end
+end
+
+local function Integer(value, minimum, maximum)
+    return not Secret(value) and type(value) == 'number' and value >= minimum
+        and (not maximum or value <= maximum) and math.floor(value) == value
+end
+
+local function IsValidUTF8(value)
+    local i, length = 1, #value
+    while i <= length do
+        local a = value:byte(i)
+        if a < 128 then
+            i = i + 1
+        else
+            local size = a >= 194 and a <= 223 and 2 or a >= 224 and a <= 239 and 3 or a >= 240 and a <= 244 and 4
+            if not size or i + size - 1 > length then return false end
+            local b = value:byte(i + 1)
+            if b < 128 or b > 191 or (a == 224 and b < 160) or (a == 237 and b > 159)
+                or (a == 240 and b < 144) or (a == 244 and b > 143) then return false end
+            for j = i + 2, i + size - 1 do
+                local c = value:byte(j)
+                if c < 128 or c > 191 then return false end
+            end
+            i = i + size
+        end
+    end
+    return true
+end
+
+local function ValidSpecName(name)
+    return not Secret(name) and type(name) == 'string' and #name >= 1 and #name <= 64
+        and not name:find('[%^|%z\1-\31\127]') and IsValidUTF8(name)
+end
+
+local function ParsePoints(points)
+    if Secret(points) or type(points) ~= 'string' then return nil end
+    local a, b, c = points:match('^(%d+)%/(%d+)%/(%d+)$')
+    if not a then return nil end
+    a, b, c = tonumber(a), tonumber(b), tonumber(c)
+    if not Integer(a, 0, 999) or not Integer(b, 0, 999) or not Integer(c, 0, 999) then return nil end
+    local maximum = math.max(a, b, c)
+    local count = (a == maximum and 1 or 0) + (b == maximum and 1 or 0) + (c == maximum and 1 or 0)
+    return a, b, c, maximum > 0 and count == 1
+end
+
+local function RosterStorage()
+    local db = OldKraken.DB
+    if type(db) ~= 'table' then return nil end
+    if db.roster == nil then db.roster = {} end
+    if type(db.roster) ~= 'table' then return nil end
+    local roster = db.roster
+    if roster.localSpecs == nil then roster.localSpecs = {} end
+    if roster.localSpecSeq == nil then roster.localSpecSeq = {} end
+    if roster.specSequences == nil then roster.specSequences = {} end
+    if type(roster.localSpecs) ~= 'table' or type(roster.localSpecSeq) ~= 'table' or type(roster.specSequences) ~= 'table' then return nil end
+    return roster
+end
+
+local function LocalSpecKey()
+    local name = FullPlayerName()
+    local realm = GetRealmName and GetRealmName()
+    if Secret(realm) or type(realm) ~= 'string' or realm == '' or not name then return nil end
+    return realm .. '\001' .. name
+end
+
+function Communication:GetLocalTraitSignature()
+    local talents, traits = C_ClassTalents, C_Traits
+    if type(talents) ~= 'table' or type(traits) ~= 'table' or type(talents.GetActiveConfigID) ~= 'function'
+        or type(traits.GetConfigInfo) ~= 'function' or type(traits.GetTreeCurrencyInfo) ~= 'function'
+        or type(traits.GetTreeNodes) ~= 'function' or type(traits.GetNodeInfo) ~= 'function' then return nil end
+    local ok, cfgID = pcall(talents.GetActiveConfigID)
+    if not ok or not Integer(cfgID, 1) then return nil end
+    local configOK, cfg = pcall(traits.GetConfigInfo, cfgID)
+    if not configOK or Secret(cfg) or type(cfg) ~= 'table' or Secret(cfg.treeIDs) or type(cfg.treeIDs) ~= 'table' then return nil end
+    local treeID = cfg.treeIDs[1]
+    if not Integer(treeID, 1) then return nil end
+    local currencyOK, currency = pcall(traits.GetTreeCurrencyInfo, cfgID, treeID, true)
+    if not currencyOK or Secret(currency) or type(currency) ~= 'table' or Secret(currency[1]) or type(currency[1]) ~= 'table' then return nil end
+    local spent = currency[1].spent
+    if not Integer(spent, 0) then return nil end
+    local nodesOK, nodes = pcall(traits.GetTreeNodes, treeID)
+    if not nodesOK or Secret(nodes) or type(nodes) ~= 'table' then return nil end
+    local purchased = {}
+    for _, nodeID in pairs(nodes) do
+        if not Integer(nodeID, 1) then return nil end
+        local nodeOK, info = pcall(traits.GetNodeInfo, cfgID, nodeID)
+        if not nodeOK or Secret(info) or type(info) ~= 'table' or not Integer(info.ranksPurchased, 0) then return nil end
+        if info.ranksPurchased > 0 then purchased[#purchased + 1] = {id = nodeID, ranks = info.ranksPurchased} end
+    end
+    table.sort(purchased, function(a, b) return a.id < b.id end)
+    local parts = {}
+    for _, node in ipairs(purchased) do parts[#parts + 1] = tostring(node.id) .. ':' .. tostring(node.ranks) end
+    return {cfgID = cfgID, treeID = treeID, spent = spent, distSig = tostring(treeID) .. '|' .. table.concat(parts, ',')}
+end
+
+local function ReadTreeHeadersSpec()
+    local tf = PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame
+    if Secret(tf) or type(tf) ~= 'table' or Secret(tf.treeHeaders) or type(tf.treeHeaders) ~= 'table' or #tf.treeHeaders ~= 3 then return nil, 'unknown' end
+    local headers, values = tf.treeHeaders, {}
+    for i = 1, 3 do
+        local h = headers[i]
+        if Secret(h) or type(h) ~= 'table' or not h.Name or not h.Text or not h.Icon
+            or type(h.Name.GetText) ~= 'function' or type(h.Text.GetText) ~= 'function' or type(h.Icon.GetTexture) ~= 'function' then return nil, 'unknown' end
+        local okName, name = pcall(h.Name.GetText, h.Name)
+        local okText, text = pcall(h.Text.GetText, h.Text)
+        local okIcon, icon = pcall(h.Icon.GetTexture, h.Icon)
+        if not okName or not okText or not okIcon or Secret(name) or Secret(text) or type(name) ~= 'string' or type(text) ~= 'string' then return nil, 'unknown' end
+        name = (name:gsub('^%s+', '')):gsub('%s+$', '')
+        local digits = text:match('^%s*(%d+)%s*$')
+        local points = digits and tonumber(digits)
+        if not ValidSpecName(name) or not Integer(points, 0, 999) then return nil, 'unknown' end
+        if not Integer(icon, 1, 999999999) then return nil, 'unknown' end
+        values[i] = {name = name, points = points, icon = icon}
+    end
+    local a, b, c = values[1].points, values[2].points, values[3].points
+    local maximum = math.max(a, b, c)
+    local count = (a == maximum and 1 or 0) + (b == maximum and 1 or 0) + (c == maximum and 1 or 0)
+    if maximum == 0 then return nil, 'reset' end
+    if count ~= 1 then return nil, 'unknown' end
+    local best = a == maximum and values[1] or b == maximum and values[2] or values[3]
+    return {name = best.name, icon = best.icon, points = a .. '/' .. b .. '/' .. c, total = a + b + c}, 'active'
+end
+
+function Communication:GetLocalTreeSpec()
+    local sig = self:GetLocalTraitSignature()
+    if not sig then return 'unknown', nil end
+    local roster, key = RosterStorage(), LocalSpecKey()
+    if not roster or not key then return 'unknown', nil end
+    if sig.spent == 0 then roster.localSpecs[key] = nil; return 'reset', nil end
+    local cached = roster.localSpecs[key]
+    if type(cached) ~= 'table' then roster.localSpecs[key] = nil; return 'unknown', nil end
+    local now = GetServerTime()
+    local a, b, c, unique = ParsePoints(cached.points)
+    if cached.distSig ~= sig.distSig or not ValidSpecName(cached.name) or not Integer(cached.icon, 0, 999999999) or not unique
+        or a + b + c ~= sig.spent or not Integer(cached.updatedAt, 0) or cached.updatedAt > now + 600 or now - cached.updatedAt > 604800 then
+        roster.localSpecs[key] = nil
+        return 'unknown', nil
+    end
+    return 'active', {name = cached.name, icon = cached.icon ~= 0 and cached.icon or nil, points = cached.points}
+end
+
+function Communication:RefreshLocalTreeSpec()
+    local sig = self:GetLocalTraitSignature()
+    local roster, key = RosterStorage(), LocalSpecKey()
+    if not sig or not roster or not key then return end
+    local previous = roster.localSpecs[key]
+    if sig.spent == 0 then
+        roster.localSpecs[key] = nil
+        if previous ~= nil or self.lastBroadcastSpecPayload ~= '0^0/0/0^' then
+            if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+            self:SendLocalSpec(false)
+        end
+        return
+    end
+    local spec, headerState = ReadTreeHeadersSpec()
+    if headerState ~= 'active' or not spec or spec.total ~= sig.spent then
+        roster.localSpecs[key] = nil
+        if previous ~= nil and OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+        return
+    end
+    roster.localSpecs[key] = {name = spec.name, icon = spec.icon, points = spec.points, distSig = sig.distSig, updatedAt = GetServerTime()}
+    local changed = type(previous) ~= 'table' or previous.name ~= spec.name or previous.icon ~= spec.icon or previous.points ~= spec.points or previous.distSig ~= sig.distSig
+    if changed then
+        if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+        self:SendLocalSpec(false)
+    end
+end
+
+function Communication:RecordRosterSpec(sender, specID)
+    EnsurePresenceGuild(self)
+    if self.presenceGuild == '' or not ValidSpecID(specID) then return false end
+    local key = PresenceKey(sender)
+    if key == '' then return false end
+    local prior = self.rosterSpecs[key]
+    if prior and prior.source == 'spec2' and GetTime() - prior.receivedAt <= 3600 then return false end
+    self.rosterSpecs[key] = {id = specID, source = 'spec1', receivedAt = GetTime()}
+    if (not prior or prior.id ~= specID) and OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+    return true
+end
+
+function Communication:RecordRosterSpec2(sender, seq, icon, points, name, payload)
+    EnsurePresenceGuild(self)
+    local key, roster = PresenceKey(sender), RosterStorage()
+    local realm = GetRealmName and GetRealmName()
+    if self.presenceGuild == '' or key == '' or not roster or Secret(realm) or type(realm) ~= 'string' or realm == '' then return false end
+    local seqKey = realm .. '\001' .. self.presenceGuild .. '\001' .. key
+    local sequences, now = roster.specSequences, GetServerTime()
+    local hwm = sequences[seqKey]
+    if type(hwm) == 'table' and Integer(hwm.updatedAt, 0) and now - hwm.updatedAt > 2592000 then sequences[seqKey] = nil; hwm = nil end
+    if type(hwm) == 'table' and Integer(hwm.seq, 1, 999999999999) then
+        if seq < hwm.seq then return false end
+        if seq == hwm.seq then
+            if payload ~= hwm.payload then return false end
+            local current = self.rosterSpecs[key]
+            if current and current.source == 'spec2' and current.seq == seq and GetTime() - current.receivedAt <= 3600 then current.receivedAt = GetTime() end
+            return true
+        end
+    end
+    if not sequences[seqKey] and Count(sequences) >= 1024 then
+        local oldestKey, oldestTime
+        for k, entry in pairs(sequences) do
+            local updated = type(entry) == 'table' and entry.updatedAt
+            if not Integer(updated, 0) or now - updated > 2592000 then sequences[k] = nil
+            elseif not oldestTime or updated < oldestTime then oldestKey, oldestTime = k, updated end
+        end
+        if Count(sequences) >= 1024 and oldestKey then sequences[oldestKey] = nil end
+    end
+    sequences[seqKey] = {seq = seq, payload = payload, updatedAt = now}
+    local old = self.rosterSpecs[key]
+    local reset = points == '0/0/0'
+    self.rosterSpecs[key] = {source = 'spec2', reset = reset, seq = seq, receivedAt = GetTime(),
+        name = not reset and name or nil, icon = icon ~= 0 and icon or nil, points = not reset and points or nil}
+    local changed = not old or old.source ~= 'spec2' or old.reset ~= reset or old.name ~= (not reset and name or nil)
+        or old.icon ~= (icon ~= 0 and icon or nil) or old.points ~= (not reset and points or nil)
+    if changed and OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+    return true
+end
+
+function Communication:GetRosterSpec(name)
+    EnsurePresenceGuild(self)
+    local key = PresenceKey(name)
+    if key == '' then return nil end
+    local fullKey, shortKey = PresenceKey(FullPlayerName()), PresenceKey(PlayerName())
+    if (fullKey ~= '' and key == fullKey) or (shortKey ~= '' and key == shortKey) then
+        local state, spec = self:GetLocalTreeSpec()
+        if state ~= 'active' then return nil end
+        spec.receivedAt = GetTime()
+        return spec
+    end
+    local entry = self.rosterSpecs[key]
+    if not entry then return nil end
+    if GetTime() - entry.receivedAt > 3600 then self.rosterSpecs[key] = nil; return nil end
+    if entry.source ~= 'spec2' or entry.reset then return nil end
+    return {name = entry.name, icon = entry.icon, points = entry.points, receivedAt = entry.receivedAt}
+end
+
+function Communication:SendLocalSpec(forceOnQuery)
+    EnsurePresenceGuild(self)
+    if not self.ready or not IsInGuild or not IsInGuild() then return false end
+    local state, spec = self:GetLocalTreeSpec()
+    if state == 'unknown' then self.pendingSpecBroadcast, self.pendingSpecForce = false, false; return false end
+    local force = forceOnQuery or self.pendingSpecForce
+    local payload = state == 'reset' and '0^0/0/0^' or (tostring(spec.icon or 0) .. '^' .. spec.points .. '^' .. spec.name)
+    if not force and (payload == self.lastBroadcastSpecPayload or (state == 'reset' and not self.lastBroadcastSpecPayload)) then
+        self.pendingSpecBroadcast, self.pendingSpecForce = false, false
+        return false
+    end
+    if self.lastSpecReply and GetTime() - self.lastSpecReply < 10 then
+        self.pendingSpecBroadcast = true
+        if force then self.pendingSpecForce = true end
+        return false
+    end
+    if #self.queue > 8 then
+        self.pendingSpecBroadcast = true
+        if force then self.pendingSpecForce = true end
+        return false
+    end
+    local roster, key = RosterStorage(), LocalSpecKey()
+    if not roster or not key then return false end
+    local savedSeq = roster.localSpecSeq[key]
+    if not Integer(savedSeq, 0, 999999999999) then savedSeq = 0 end
+    local currentSeq = Integer(self.localSpecSeq, 0, 999999999999) and self.localSpecSeq or 0
+    local timeSlot = math.max(0, (GetServerTime() or 0) - 1700000000) * 100
+    local seq = math.max(currentSeq + 1, savedSeq + 1, timeSlot)
+    if not Integer(seq, 1, 999999999999) then return false end
+    if self:QueueMessage('OKP^SPEC2^' .. string.format('%.0f', seq) .. '^' .. payload) then
+        self.localSpecSeq, roster.localSpecSeq[key] = seq, seq
+        self.lastSpecReply, self.lastBroadcastSpecPayload = GetTime(), payload
+        self.pendingSpecBroadcast, self.pendingSpecForce = false, false
+        return true
+    end
+    self.pendingSpecBroadcast = true
+    if force then self.pendingSpecForce = true end
+    return false
 end
 
 function Communication:OnAddonMessage(prefix, message, channel, sender)
@@ -394,12 +699,14 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     end
 
     if #message > 240 then
+        if message:sub(1, 10) == 'OKP^SPEC2^' then return end
         self.stats.invalid = self.stats.invalid + 1
         return
     end
 
     self:RecordRosterPresence(sender)
     if message == 'OKP^QUERY' then
+        self:SendLocalSpec(true)
         local now = GetTime()
         if not self.lastPresenceReply or now - self.lastPresenceReply >= 10 then
             if self:QueueMessage('OKP^HERE^' .. self:GetLocalVersion()) then self.lastPresenceReply = now end
@@ -411,6 +718,25 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
         if #version <= 48 and version:match('^[%w%.%+%-]+$') then
             self:RecordRosterPresence(sender, version)
         end
+        return
+    elseif message:sub(1, 9) == 'OKP^SPEC^' then
+        local raw = message:sub(10)
+        local idStr = raw:match('^(%d+)$')
+        local specID = idStr and tonumber(idStr)
+        if specID and specID >= 1 and specID <= 9999999 then self:RecordRosterSpec(sender, specID) end
+        return
+    elseif message:sub(1, 10) == 'OKP^SPEC2^' then
+        local raw = message:sub(11)
+        local seqStr, iconStr, pointsStr, nameStr = raw:match('^([^%^]+)%^([^%^]+)%^([^%^]+)%^(.*)$')
+        if not seqStr or not iconStr or not pointsStr or not nameStr or nameStr:find('^', 1, true)
+            or not seqStr:match('^%d+$') or not iconStr:match('^%d+$') then return end
+        local seq, icon = tonumber(seqStr), tonumber(iconStr)
+        local a, b, c, unique = ParsePoints(pointsStr)
+        if not Integer(seq, 1, 999999999999) or not Integer(icon, 0, 999999999) or not a then return end
+        if a + b + c == 0 then
+            if pointsStr ~= '0/0/0' or iconStr ~= '0' or nameStr ~= '' then return end
+        elseif not unique or not ValidSpecName(nameStr) then return end
+        self:RecordRosterSpec2(sender, seq, icon, pointsStr, nameStr, iconStr .. '^' .. pointsStr .. '^' .. nameStr)
         return
     end
 
@@ -508,9 +834,27 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("CHAT_MSG_ADDON")
+frame:RegisterEvent("ADDON_LOADED")
+pcall(frame.RegisterEvent, frame, 'ACTIVE_TALENT_GROUP_CHANGED')
+pcall(frame.RegisterEvent, frame, 'PLAYER_SPECIALIZATION_CHANGED')
+
+local hookedTalentFrames = {}
+local function InstallTalentHooks()
+    local tf = PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame
+    if Secret(tf) or type(tf) ~= 'table' then return end
+    local state = hookedTalentFrames[tf] or {}
+    hookedTalentFrames[tf] = state
+    if not state.refresh and type(hooksecurefunc) == 'function' and type(tf.RefreshTreeHeaders) == 'function' then
+        state.refresh = pcall(hooksecurefunc, tf, 'RefreshTreeHeaders', function() Communication:RefreshLocalTreeSpec() end)
+    end
+    if not state.show and type(tf.HookScript) == 'function' then
+        state.show = pcall(tf.HookScript, tf, 'OnShow', function() Communication:RefreshLocalTreeSpec() end)
+    end
+end
 
 frame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_LOGIN" then
+        InstallTalentHooks()
         local chatInfo = C_ChatInfo
         if not chatInfo or type(chatInfo.RegisterAddonMessagePrefix) ~= "function" then
             Print(T("RegisterAddonMessagePrefix недоступний у цьому клієнті."))
@@ -522,6 +866,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         if Communication.ready then
             Print(T("Префікс OLDKRKN зареєстровано."))
             Communication:RequestRosterPresence()
+            Communication:SendLocalSpec(true)
         else
             Print(T("Не вдалося зареєструвати префікс OLDKRKN: ") .. tostring(registered))
         end
@@ -532,6 +877,14 @@ frame:SetScript("OnEvent", function(_, event, ...)
                 Communication:Pump()
             end)
         end
+    elseif event == 'ADDON_LOADED' then
+        local addon = ...
+        if addon == 'Blizzard_PlayerSpells' or (PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame) then InstallTalentHooks() end
+    elseif event == 'ACTIVE_TALENT_GROUP_CHANGED' then
+        Communication:SendLocalSpec(false)
+    elseif event == 'PLAYER_SPECIALIZATION_CHANGED' then
+        local unit = ...
+        if unit == 'player' then Communication:SendLocalSpec(false) end
     elseif event == "CHAT_MSG_ADDON" then
         Communication:OnAddonMessage(...)
     end

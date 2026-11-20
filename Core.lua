@@ -2,7 +2,12 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.5.3"
+OldKraken.version = "0.5.4-alpha.1"
+local metadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+if type(metadata)=='function' and type(ADDON_NAME)=='string' then
+    local ok,version=pcall(metadata,ADDON_NAME,'Version')
+    if ok and type(version)=='string' and version~='' then OldKraken.version=version end
+end
 OldKraken._listeners = OldKraken._listeners or {}
 local T = OldKraken.Translate or function(text) return text end
 

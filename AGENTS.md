@@ -3,7 +3,7 @@
 Інструкції для AI-агентів (OpenCode, Codex, Copilot, Antigravity, Gemini CLI, Claude Code) у цьому репозиторії.
 Файл **не дублює** `README.md` і `TESTING.md` — він фіксує те, що агент мусить знати, щоб не ламати аддон і не вигадувати API.
 
-> **Цей файл описує актуальний стан коду (`0.5.3-alpha.1` у `alpha`, `0.5.2` у `main`).** Обидві гілки містять повну 17-файлову структуру аддона, схема БД v3.
+> **Цей файл описує актуальний стан коду (`0.5.4-alpha.1` у `alpha`, `0.5.3` у `main`).** Обидві гілки містять повну 18-файлову структуру аддона, схема БД v3.
 >
 > **Посилання тут — на імена функцій, констант і розділів, а не на номери рядків.** Гілка `alpha` рухається швидко, тож номери рядків застарівають. Шукай за символом: `grep -rn "ReceiveGroup" --include="*.lua" .`
 
@@ -31,8 +31,8 @@
 
 | Шлях | Гілка / стан | Призначення |
 |---|---|---|
-| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка (`0.5.3-alpha.1`)** |
-| `~/Projects/old-kraken-addon/` | `main` | **релізна гілка (`0.5.2`)** |
+| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка (`0.5.4-alpha.1`)** |
+| `~/Projects/old-kraken-addon/` | `main` | **релізна гілка (`0.5.3`)** |
 | `~/Projects/copilot-worktrees/old-kraken-addon/copilot-prewarm-fluffy-winner` | detached worktree | службовий |
 
 **Перед початком роботи завжди:** `git status -sb` + `git log --oneline -1` у `old-kraken-alpha`. Не роби `git reset --hard`, `git checkout .`, `git stash` без підтвердження користувача.
@@ -245,7 +245,7 @@ WorkshopDeliveries.lua  Minimap.lua
   - Релейне скасування **не** породжує сповіщення і збільшує `rejected_relay_cancelled`.
   - Новіша **пряма** копія завжди перемагає релейну, навіть якщо в релейної вищий `rev`.
   - Спроба видати себе за прямого sender'а → `invalid_payload`.
-  - **`tests/test_events_relay_authority.py` — інертний** (див. §13): він містить 5 таких тестів, але жоден не виконується під `python tests/test_events_relay_authority.py`. Тобто ці інваріанти **фактично не захищені CI**. Якщо чіпаєш relay-логіку — перевіряй уручну за розділами `TESTING.md` «Guild Events: перевірка авторитетності relay» та «Ручний тест relay у Guild Events (A — автор, B — прямий отримувач, C — отримувач через B)».
+  - `tests/test_events_relay_authority.py` запускає перевірки relay authority безпосередньо через `__main__`.
 - Зберігання: `DB.events.guildCalendarV1[key]` — `owned`, `observed`, `intents`, `sequence`, `cancelledSeen`, `relays`.
 - Дедуп/anti-replay: монотонний `rev` на власника + виявлення еквівалентності повторним кодуванням і порівнянням payload; `cancelledSeen` — томбстоуни.
 - Ліміти: **≤ 100 живих подій**; prune через **172800 с**; ≤ 100 учасників, ≤ 200 записів версій; title ≤ 100, description ≤ 400; `when` — у майбутньому і ≤ 1 рік; розмір 2–40.
@@ -367,7 +367,7 @@ cd ~/Projects/old-kraken-alpha
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-- **35 файлів** `tests/test_*.py`.
+- **42 файли** `tests/test_*.py`.
 - Рантайм: `lupa==2.8`, `from lupa.lua51 import LuaRuntime` — **Lua 5.1**.
 - **`.venv` не потрібен**: системний Python 3.14.5 має `lupa 2.8`; `lua`/`lua5.1`/`luac` у системі **немає**.
 - **Немає pytest/unittest/conftest/Makefile/requirements** — це прості скрипти з Lua-`assert` усередині `lua.execute('''…''')`, успіх = `print('PASS: …')`.
@@ -377,9 +377,9 @@ for test in tests/test_*.py; do python "$test" || exit 1; done
 
 ### Пастки
 
-- **`tests/test_events_relay_authority.py` — інертний.** 5 функцій `test_*` без top-level викликів і без `__main__` → під `python tests/test_events_relay_authority.py` не перевіряє **нічого** (rc=0, без виводу). При цьому `TESTING.md` у розділі «Guild Events: перевірка авторитетності relay» посилається на нього як на покриття relay authority. **Relay-інваріанти фактично не захищені CI.** Якщо чіпаєш релей — або додай `__main__`-раннер (як у трьох workshop-тестах), або перевіряй уручну.
-- **4 файли мовчать на успіху:** `test_events_relay_authority.py`, `test_events_ui.py`, `test_ui_hub.py`, `test_ui_style.py`. З них інертний лише перший.
-- **`__main__`-раннер мають лише 3 файли:** `test_workshop_orders.py`, `test_workshop_navigation.py`, `test_workshop_sync.py`. Решта покладаються на виконання при імпорті.
+- `tests/test_events_relay_authority.py` виконує усі п’ять перевірок через `__main__`.
+- Деякі тестові скрипти не виводять повідомлення у разі успіху; перевіряй код завершення.
+- Частина тестів використовує `__main__`-раннер, інші виконуються на рівні модуля.
 - Тести **не доводять** реальну сумісність з білдом 70938, реальну доставку GUILD-повідомлень, читання книги професій, захищені дії. Це прямо перелічено в розділі `TESTING.md` «Межі автоматизованих тестів» і в примітках до окремих сценаріїв.
 - Щоб не смітити: запускай з `PYTHONDONTWRITEBYTECODE=1` / `python -B` (є `.gitignore` для `__pycache__`, але краще не створювати).
 
@@ -406,8 +406,6 @@ for test in tests/test_*.py; do python "$test" || exit 1; done
 | `README.md`, розділ про ростер | кнопка «Оновити» в ростері | такої кнопки немає |
 | `README.md`, розділ про ростер | регістрозалежне сортування за локацією | регістронезалежне |
 | `README.md`, розділ про транспорт | «обмеження 50 … не більше п'яти спроб» | `MAX_QUEUE = 4096`, ліміту спроб **немає** |
-| `TESTING.md`, «Автоматизоване покриття» | «19 тестових файлів» | **29** |
-| `TESTING.md`, розділ про relay | посилається на relay-authority тест | тест **інертний** |
 | `Communication.lua`, коментар у `Encode` | «GF1 payloads…» | тег кадру `GF2` |
 | `README.md` / `TESTING.md`, згадка останнього CI | останній CI-ран | `f11f895` — застаріло |
 

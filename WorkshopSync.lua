@@ -60,11 +60,14 @@ comm:RegisterHandler('WRIDX',function(sender,_,payload)
         if rev<directRev or (rev==oldRev and not (type(old)=='table' and old.relayed)) then return end
     elseif rev<=oldRev then return end
     local pending=incoming[owner]
-    if pending and GetTime()<pending.expires then
-        if not direct or pending.provider==owner then return end
+    local now=GetTime()
+    if pending and now<pending.expires and now-pending.lastProgress<180 then
+        if pending.provider==owner then
+            if not direct or rev<=pending.rev then return end
+        elseif not direct and (pending.provider==sender or now-pending.lastProgress<45) then return end
     end
     if not pending and size(incoming)>=8 then return end
-    incoming[owner]={provider=sender,rev=rev,count=count,parts={},received=0,expires=GetTime()+21600,sent=false}
+    incoming[owner]={provider=sender,rev=rev,count=count,parts={},partPayloads={},received=0,recordCount=0,expires=now+21600,lastProgress=now,sent=false}
 end)
 comm:RegisterHandler('WRGET',function(sender,_,payload)
     if not active or not text(sender,128) or sender==identity then return end
@@ -88,7 +91,13 @@ comm:RegisterHandler('WRPAGE',function(sender,_,payload)
     if not f or #f<5 or (#f-5)%7~=0 or f[1]~=identity or not text(f[2],128) then return end
     local owner,rev,part,total=f[2],tonumber(f[3]),tonumber(f[4]),tonumber(f[5]); local pending=incoming[owner]
     if not pending or pending.provider~=sender or pending.rev~=rev or not int(part,1,5000) or not int(total,1,math.max(1,pending.count)) or part>total or (pending.total and pending.total~=total) or (#f==5 and pending.count>0) then return end
-    if pending.parts[part] then return end
+    if GetTime()>=pending.expires then incoming[owner]=nil; return end
+    if pending.parts[part] then
+        -- A replay may need many minutes to reach a missing late page.
+        -- Only an identical page from the selected provider proves activity.
+        if pending.partPayloads[part]==payload then pending.lastProgress=GetTime() end
+        return
+    end
     local records={}
     for i=6,#f,7 do
         if f[i+6]~='D' and f[i+6]~='L' then return end
@@ -96,7 +105,9 @@ comm:RegisterHandler('WRPAGE',function(sender,_,payload)
         if not recipes:ValidateSnapshotRecord(r) then return end
         records[#records+1]=r
     end
-    pending.total=total; pending.parts[part]=records; pending.received=pending.received+1; pending.lastProgress=GetTime()
+    if pending.recordCount+#records>pending.count then incoming[owner]=nil; return end
+    pending.total=total; pending.parts[part]=records; pending.partPayloads[part]=payload
+    pending.recordCount=pending.recordCount+#records; pending.received=pending.received+1; pending.lastProgress=GetTime()
     if pending.received~=total then return end
     local all,seen={},{}
     for i=1,total do for _,r in ipairs(pending.parts[i]) do
@@ -107,7 +118,7 @@ comm:RegisterHandler('WRPAGE',function(sender,_,payload)
     local old=store.recipeSnapshotViews[owner]; local lastDirect=type(old)=='table' and tonumber(old.directRev) or 0
     lastDirect=lastDirect or 0
     if (sender==owner and rev<lastDirect) or (sender~=owner and type(old)=='table' and rev<=(tonumber(old.rev) or 0)) then incoming[owner]=nil; return end
-    local mayOverride=sender==owner and (type(old)~='table' or rev>=(tonumber(old.rev) or 0))
+    local mayOverride=sender==owner
     if recipes:ImportSnapshot(owner,all,sender~=owner,mayOverride) then
         store.recipeSnapshotViews[owner]={rev=rev,directRev=sender==owner and rev or lastDirect,relayed=sender~=owner}
         if sender==owner then store.recipeDirectSnapshots[owner]={rev=rev,records=all}
@@ -125,10 +136,10 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     local now=GetTime()
     if now>=nextQuery and comm:SendProtocol('WRQ','') then nextQuery=now+180 end
     for owner,pending in pairs(incoming) do
-        if now>=pending.expires then incoming[owner]=nil
+        if now>=pending.expires or now-pending.lastProgress>=180 then incoming[owner]=nil
         else
-            if pending.sent and pending.lastProgress and now-pending.lastProgress>=45 then pending.sent=false end
-            if not pending.sent and #comm.queue<=8 and comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)})) then pending.sent=true; pending.lastProgress=now end
+            if pending.sent and pending.lastRequest and now-pending.lastRequest>=45 then pending.sent=false end
+            if not pending.sent and #comm.queue<=8 and comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)})) then pending.sent=true; pending.lastRequest=now end
         end
     end
     local k,index=next(indices)

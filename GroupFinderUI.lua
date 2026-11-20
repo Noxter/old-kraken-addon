@@ -1,6 +1,11 @@
 local T = OldKraken.Translate or function(text) return text end
 -- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
+local function memberSpecText(name)
+    local comm = OldKraken.Communication
+    local spec = name and comm and comm.GetRosterSpec and comm:GetRosterSpec(name)
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+end
 local window, selected, requestsWindow
 local refresh
 local groupAlert
@@ -34,6 +39,14 @@ for _, options in ipairs({catalog.dungeon, catalog.raid}) do
         dungeonLabels[entry.value] = entry.label
         if entry.min and entry.max then dungeonLevels[entry.value] = entry end
     end
+end
+local function displayGroupTitle(group)
+    if type(group) ~= 'table' then return '' end
+    local title = type(group.title) == 'string' and group.title or ''
+    if catalog and type(catalog.IsCanonicalTitle) == 'function' and catalog.IsCanonicalTitle(group.dungeon, title) then
+        return dungeonLabels[group.dungeon] or title
+    end
+    return title
 end
 local activityOptions = {}
 for _, options in ipairs({catalog.dungeon, catalog.raid}) do
@@ -115,23 +128,45 @@ local function isOwnerOffline(owner)
     local rec = ownerRecord(owner)
     return rec ~= nil and rec.online == false
 end
+local function isGroupHiddenByOfflineOwner(key, group)
+    if not guildRosterLoaded or not group or group.closed or group.hidden or group.owner == Finder.identity then return false end
+    if not isOwnerOffline(group.owner) then return false end
+    local since = ownerOfflineSince[key]
+    local now = type(GetTime) == 'function' and GetTime() or 0
+    return type(since) == 'number' and now - since >= OFFLINE_APPLICATION_TTL
+end
 local function pruneOfflineApplications()
-    if not guildRosterLoaded then return end
+    if not guildRosterLoaded then
+        for key in pairs(ownerOfflineSince) do ownerOfflineSince[key] = nil end
+        return
+    end
     local now = type(GetTime) == 'function' and GetTime() or 0
     local changed, nextDelay = false, nil
+    for key, group in pairs(Finder.groups or {}) do
+        if type(group) == 'table' and not group.closed and not group.hidden and group.owner ~= Finder.identity then
+            if isOwnerOffline(group.owner) then
+                ownerOfflineSince[key] = ownerOfflineSince[key] or now
+                local remaining = OFFLINE_APPLICATION_TTL - (now - ownerOfflineSince[key])
+                if remaining > 0 and (not nextDelay or remaining < nextDelay) then nextDelay = remaining end
+            else ownerOfflineSince[key] = nil end
+        end
+    end
     for key in pairs(Finder.pending or {}) do
         local group = Finder.groups and Finder.groups[key]
-        if group and group.owner ~= Finder.identity then
-            if isOwnerOnline(group.owner) then
+        if type(group) ~= 'table' then group = nil end
+        local owner = type(group) == 'table' and group.owner or nil
+        if not owner and type(key) == 'string' then owner = key:match('^([^\001]+)\001.+$') end
+        if owner and owner ~= Finder.identity then
+            if isOwnerOnline(owner) then
                 ownerOfflineSince[key] = nil
-            elseif isOwnerOffline(group.owner) then
+            elseif isOwnerOffline(owner) then
                 ownerOfflineSince[key] = ownerOfflineSince[key] or now
                 local remaining = OFFLINE_APPLICATION_TTL - (now - ownerOfflineSince[key])
                 if remaining <= 0 then
                     Finder.pending[key] = nil
                     if Finder.pendingVersions then Finder.pendingVersions[key] = nil end
                     if Finder.pendingRoles then Finder.pendingRoles[key] = nil end
-                    ownerOfflineSince[key] = nil
+                    if not group or group.closed or group.hidden then ownerOfflineSince[key] = nil end
                     changed = true
                 elseif not nextDelay or remaining < nextDelay then
                     nextDelay = remaining
@@ -146,7 +181,9 @@ local function pruneOfflineApplications()
         end
     end
     for key in pairs(ownerOfflineSince) do
-        if not (Finder.pending and Finder.pending[key]) then ownerOfflineSince[key] = nil end
+        local group = Finder.groups and Finder.groups[key]
+        local openRemote = type(group) == 'table' and not group.closed and not group.hidden and group.owner ~= Finder.identity and isOwnerOffline(group.owner)
+        if not openRemote and not (Finder.pending and Finder.pending[key]) then ownerOfflineSince[key] = nil end
     end
     if nextDelay and not offlinePruneTimerPending and C_Timer and type(C_Timer.After) == 'function' then
         offlinePruneTimerPending = true
@@ -154,12 +191,14 @@ local function pruneOfflineApplications()
             offlinePruneTimerPending = false
             refreshPeople()
             pruneOfflineApplications()
+            if refresh then refresh() end
         end)
     end
     if changed then Finder:Changed() end
 end
 refreshPeople = function()
     local nextPeople, rosterCount = {}, 0
+    local nextPeopleIndex = {}
     if type(GetNumGuildMembers) == 'function' and type(GetGuildRosterInfo) == 'function' then
         local ok, count = pcall(GetNumGuildMembers)
         if ok and type(count) == 'number' then
@@ -168,7 +207,15 @@ refreshPeople = function()
                 pcall(function()
                     local name, _, _, level, _, _, _, _, isOnline, _, class = GetGuildRosterInfo(i)
                     if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(level) or issecretvalue(class)) then return end
-                    if type(name) == 'string' and name ~= '' then nextPeople[name] = {level=tonumber(level), class=class, online=(isOnline == true)} end
+                    if type(name) == 'string' and name ~= '' then
+                        local rec = {level=tonumber(level), class=class}
+                        if not (type(issecretvalue) == 'function' and issecretvalue(isOnline)) and type(isOnline) == 'boolean' then
+                            rec.online = isOnline
+                        end
+                        nextPeople[name] = rec
+                        local key = ownerKey(name)
+                        if key then nextPeopleIndex[key] = rec end
+                    end
                 end)
             end
         end
@@ -190,17 +237,24 @@ refreshPeople = function()
                 if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(surname) or issecretvalue(class) or issecretvalue(level)) then return end
                 if type(name) ~= 'string' or name == '' then return end
                 if type(surname) == 'string' and surname ~= '' then name = name .. ' ' .. surname end
-                local prev = nextPeople[name]
-                local isConnected = true
+                local key = ownerKey(name)
+                local prev = nextPeople[name] or (key and nextPeopleIndex[key])
+                local isConnected
                 if type(UnitIsConnected) == 'function' then
                     local ok, connected = pcall(UnitIsConnected, unit)
-                    if ok and connected ~= nil then isConnected = connected and true or false end
+                    if ok and not (type(issecretvalue) == 'function' and issecretvalue(connected)) and type(connected) == 'boolean' then
+                        isConnected = connected
+                    end
                 end
-                nextPeople[name] = {
-                    class = class or (prev and prev.class),
-                    level = tonumber(level) or (prev and prev.level),
-                    online = (prev and prev.online == true) or isConnected,
-                }
+                local online = prev and prev.online
+                if isConnected == true then online = true
+                elseif isConnected == false and online ~= true then online = false end
+                local rec = prev or {}
+                rec.class = class or rec.class
+                rec.level = tonumber(level) or rec.level
+                rec.online = online
+                nextPeople[name] = rec
+                if key then nextPeopleIndex[key] = rec end
             end)
         end
     end
@@ -406,7 +460,7 @@ local function refreshRequests()
             for name, applicantRole in pairs(requests) do
                 local requestKey = id .. '\001' .. name
                 entries[#entries + 1] = {
-                    id=id, name=name, role=applicantRole, title=group.title,
+                    id=id, name=name, role=applicantRole, title=displayGroupTitle(group),
                     selected=selected == Finder.identity .. '\001' .. id,
                     time=Finder.requestVersions[requestKey] or 0,
                 }
@@ -630,6 +684,8 @@ local function ensureGroupCard(f, index)
             GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
             if self.member then
                 GameTooltip:SetText(playerLabel(self.member))
+                local specText = memberSpecText(self.member)
+                if specText then GameTooltip:AddLine(T('Спеціалізація: ') .. specText, 1, 1, 1) end
                 GameTooltip:AddLine(T('Роль: ') .. roleLabel(self.memberRole), 1, 1, 1)
                 local group = self.groupKey and Finder.groups[self.groupKey]
                 if group and self.member ~= group.owner then
@@ -752,11 +808,16 @@ refresh=function()
     if window.searchHint then window.searchHint:SetShown(searchText == '') end
     refreshPeople()
     pruneOfflineApplications()
+    if tab == 'all' and selected and isGroupHiddenByOfflineOwner(selected, Finder.groups and Finder.groups[selected]) then
+        selected = nil
+        requestOffset = 0
+    end
     local query = string.lower(searchText)
     local lines = {}
     local totalOpenGroups = 0
     for key, group in pairs(Finder.groups or {}) do
-        if not group.closed then totalOpenGroups = totalOpenGroups + 1 end
+        local hiddenOffline = isGroupHiddenByOfflineOwner(key, group)
+        if not group.closed and not hiddenOffline then totalOpenGroups = totalOpenGroups + 1 end
         local levelMatches = true
         if minLevel and maxLevel then
             levelMatches = group.maxLevel >= minLevel and group.minLevel <= maxLevel
@@ -770,13 +831,13 @@ refresh=function()
             and (filterRole == '' or (#group.members < group.maxSize and Finder:RoleAvailable(group, filterRole)))
             and (not filterFree or #group.members < group.maxSize)
             and levelMatches
-            and (query == '' or string.find(string.lower(group.title .. ' ' .. group.owner .. ' ' .. group.description .. ' ' .. (dungeonLabels[group.dungeon] or '')), query, 1, true))
-        if (tab == 'all' and not group.closed and #group.members < group.maxSize and matches) or (tab == 'mine' and group.owner == Finder.identity and not group.hidden)
+            and (query == '' or string.find(string.lower(displayGroupTitle(group) .. ' ' .. group.owner .. ' ' .. group.description .. ' ' .. (dungeonLabels[group.dungeon] or '')), query, 1, true))
+        if (tab == 'all' and not group.closed and not hiddenOffline and #group.members < group.maxSize and matches) or (tab == 'mine' and group.owner == Finder.identity and not group.hidden)
             or (tab == 'applications' and Finder.pending[key]) then
             lines[#lines + 1] = {key=key, group=group}
         end
     end
-    table.sort(lines, function(a,b) return a.group.title < b.group.title end)
+    table.sort(lines, function(a,b) return displayGroupTitle(a.group) < displayGroupTitle(b.group) end)
     window.visible = lines
     local pendingApplications = 0
     for key in pairs(Finder.pending or {}) do
@@ -849,7 +910,8 @@ refresh=function()
             local status = Finder.pending[entry.key]
             local kind = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category] or g.category
             catalog.SetArtwork(b.art, g.dungeon)
-            b.title:SetText(g.title == kind and g.title or (g.title .. '  ·  ' .. kind))
+            local title = displayGroupTitle(g)
+            b.title:SetText(title == kind and title or (title .. '  ·  ' .. kind))
             local present, reserved = {}, 0
             if g.partyObserved then
                 for memberIndex = 2, #g.members do
@@ -870,8 +932,9 @@ refresh=function()
                 b.status:Show(); b.statusBackground:Show()
                 if b.statusPill then b.statusPill:Show() end
             else
-                local openKind = g.closed and 'neutral' or (#g.members >= g.maxSize and 'warning' or 'success')
-                local openLabel = g.closed and T('Закрито') or (#g.members >= g.maxSize and T('Заповнено') or T('Відкрито'))
+                local ownerOffline = not g.closed and g.owner ~= Finder.identity and isOwnerOffline(g.owner)
+                local openKind = g.closed and 'neutral' or ((ownerOffline or #g.members >= g.maxSize) and 'warning' or 'success')
+                local openLabel = g.closed and T('Закрито') or (ownerOffline and T('Офлайн') or (#g.members >= g.maxSize and T('Заповнено') or T('Відкрито')))
                 if b.statusPill and b.statusPill.SetKind then
                     b.statusPill:SetKind(openKind)
                     b.statusPill:SetLabel(openLabel)
@@ -889,7 +952,7 @@ refresh=function()
                 partyLine = g.partyObserved and T('Автор поки без паті') or T('Склад паті не підтверджено')
             end
             b.members:SetText(g.description ~= '' and g.description or partyLine)
-            b.tooltipTitle = g.title
+            b.tooltipTitle = displayGroupTitle(g)
             b.tooltipBody = g.description ~= '' and (g.description .. '\n' .. partyLine) or partyLine
             local fixedSlots = g.category == 'dungeon' and g.maxSize == 5 and Finder:DungeonSlots(g) or nil
             for slotIndex, slot in ipairs(b.slots) do
@@ -958,17 +1021,23 @@ refresh=function()
     if type(detailsScrollBar) == 'table' and detailsScrollBar.SetShown then
         detailsScrollBar:SetShown(g ~= nil and type(g.members) == 'table' and #g.members > 3)
     end
+    local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
+    local canEditDescription = tab ~= 'create' and g and g.owner == Finder.identity and not g.hidden
+    if not canEditDescription or selected ~= editingDescriptionKey then editingDescriptionKey = nil end
+    local editing = canEditDescription and editingDescriptionKey == selected and not showingRequests
+    local hasDescription = g ~= nil and (g.description or '') ~= ''
+    local showDesc = g ~= nil and not editing and (hasDescription or canEditDescription)
     if g then
         local applicationStatus = Finder.pending[selected]
         local activity = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category]
-        local activityLine = activity and activity ~= g.title and ('\n|cff9ba9bc' .. activity .. '|r') or ''
+        local activityLine = activity and activity ~= displayGroupTitle(g) and ('\n|cff9ba9bc' .. activity .. '|r') or ''
         local status = g.closed and T('|cffb5b5b5Закрито|r') or T('|cff59e680Відкрито|r')
         local application = applicationStatus and (T('\n|cff9ba9bcЗаявка:|r |c') .. (pendingColors[applicationStatus] or 'ffb5b5b5') .. (pendingLabels[applicationStatus] or applicationStatus) .. '|r') or ''
         local description = g.description ~= '' and (T('\n\n|cff9ba9bcОпис:|r ') .. g.description) or ''
         window.details:SetText(string.format(T('|cffffd35a%s|r%s\n\n|cff9ba9bcАвтор:|r   |cff9bcaff%s|r\n|cff9ba9bcРівні:|r   |cff9bcaff%d–%d|r\n|cff9ba9bcРоль:|r    %s\n|cff9ba9bcСтатус:|r  %s%s%s\n\n|cffffd35aСклад групи:|r'),
-            g.title, activityLine, playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role), status, application, description))
+            displayGroupTitle(g), activityLine, playerLabel(g.owner), g.minLevel, g.maxLevel, roleLabel(g.role), status, application, description))
         window.details:SetAlpha(0)
-        window.detailsHeading:SetText(g.title)
+        window.detailsHeading:SetText(displayGroupTitle(g))
         window.detailsHeading:Show()
         local appNote = (applicationStatus and not (g.closed and applicationStatus == 'closed'))
             and (' · |c' .. (pendingColors[applicationStatus] or 'ffb5b5b5') .. (pendingLabels[applicationStatus] or applicationStatus) .. '|r') or ''
@@ -977,12 +1046,19 @@ refresh=function()
             string.format('%d–%d', g.minLevel, g.maxLevel),
             roleLabel(g.role),
             status .. appNote,
-            g.description ~= '' and g.description or '—',
+            hasDescription and g.description or '—',
         }
         for idx, kv in ipairs(window.detailsKV or {}) do
-            kv.key:Show()
-            kv.val:SetText(kvValues[idx] or '—')
-            kv.val:Show()
+            if idx == 5 then
+                kv.key:SetShown(showDesc or editing)
+                kv.val:SetWidth(canEditDescription and 122 or 198)
+                kv.val:SetText(kvValues[5])
+                kv.val:SetShown(showDesc)
+            else
+                kv.key:Show()
+                kv.val:SetText(kvValues[idx] or '—')
+                kv.val:Show()
+            end
         end
         if window.detailsDivider then window.detailsDivider:Show() end
         if window.detailsRosterHeader then window.detailsRosterHeader:Show() end
@@ -994,30 +1070,32 @@ refresh=function()
         if window.detailsDivider then window.detailsDivider:Hide() end
         if window.detailsRosterHeader then window.detailsRosterHeader:Hide() end
     end
-    local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
-    if not canManage or selected ~= editingDescriptionKey then editingDescriptionKey = nil end
-    local editing = canManage and editingDescriptionKey == selected and not showingRequests
     if type(window.editDescButton) == 'table' then
-        local descVal = window.detailsKV and window.detailsKV[5] and window.detailsKV[5].val
-        if type(descVal) == 'table' then
-            descVal:SetWidth(canManage and 122 or 198)
-            descVal:SetShown(g ~= nil and not editing)
-        end
-        window.editDescButton:SetShown(canManage and not editing and not showingRequests)
+        window.editDescButton:SetShown(canEditDescription and not editing and not showingRequests)
         window.editDescBox:SetShown(editing)
         window.saveDescButton:SetShown(editing)
         window.cancelDescButton:SetShown(editing)
     end
+    local extraDesc = 0
+    if g and not editing then
+        local descVal = window.detailsKV and window.detailsKV[5] and window.detailsKV[5].val
+        if not showDesc then
+            extraDesc = -26
+        elseif type(descVal) == 'table' and type(descVal.GetStringHeight) == 'function' then
+            local descHeight = tonumber(descVal:GetStringHeight()) or 16
+            if descHeight > 16 then extraDesc = descHeight - 16 end
+        end
+    end
     if window.detailsDivider then
         window.detailsDivider:ClearAllPoints()
-        window.detailsDivider:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -194 or -166)
+        window.detailsDivider:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -194 or (-166 - extraDesc))
     end
     if window.detailsRosterHeader then
         window.detailsRosterHeader:ClearAllPoints()
-        window.detailsRosterHeader:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -208 or -180)
+        window.detailsRosterHeader:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -208 or (-180 - extraDesc))
     end
     local members = g and g.members or {}
-    local top = g and (editing and 240 or 212) or (window.details:GetStringHeight() + 8)
+    local top = g and (editing and 240 or (212 + extraDesc)) or (window.details:GetStringHeight() + 8)
     local viewport=tonumber((window.detailsScroll:GetHeight())) or 210
     if viewport<=0 then viewport=210 end
     local oldScroll=tonumber((window.detailsScroll:GetVerticalScroll())) or 0
@@ -1166,7 +1244,8 @@ refresh=function()
             row.hover:ClearAllPoints()
             row.hover:SetPoint('LEFT', window.detailsContent, 'TOPLEFT', 0, rowY)
             row.hover:SetSize(canInvite and 180 or (canRemove and 240 or 276), 24)
-            row.hover.memberLabel = name .. T('\nРоль: ') .. coloredRole .. T('\nСтатус: ') .. coloredState
+            local specText = memberSpecText(name)
+            row.hover.memberLabel = name .. T('\nРоль: ') .. coloredRole .. T('\nСтатус: ') .. coloredState .. (specText and (T('\nСпеціалізація: ') .. specText) or '')
             row.hover:Show()
         elseif row then
             row.name:Hide(); row.state:Hide(); row.hover:Hide(); row.invite:Hide(); row.remove:Hide()
@@ -1187,7 +1266,7 @@ refresh=function()
         window.applyButton:SetSize(296, 40)
         window.applyButton:SetPoint('TOPLEFT', window, 'TOPLEFT', 587, -550)
     end
-    window.applyButton:SetShown(canApply)
+    window.applyButton:SetShown(canApply and true or false)
     window.applicationActionButton:ClearAllPoints()
     if canApply and showAppAction then
         window.applicationActionButton:SetSize(144, 40)
@@ -1492,14 +1571,14 @@ local function createWindow(parent)
         k:SetText(labelText); k:Hide()
         local v = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
         v:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 78, rowY)
-        v:SetWidth(198); v:SetJustifyH('LEFT'); v:SetWordWrap(false)
+        v:SetWidth(198); v:SetJustifyH('LEFT'); v:SetWordWrap(idx == 5)
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(v, 13) end
         v:Hide()
         f.detailsKV[idx] = {key = k, val = v}
     end
     f.editDescButton = button(f.detailsContent, T('Змінити'), 206, -132, 70, function()
         local g = selected and Finder.groups[selected]
-        if not g or g.owner ~= Finder.identity or g.closed then return end
+        if not g or g.owner ~= Finder.identity or g.hidden then return end
         editingDescriptionKey = selected
         f.editDescBox:SetText(g.description or '')
         refresh()
@@ -1515,12 +1594,15 @@ local function createWindow(parent)
     f.editDescBox:SetAutoFocus(false)
     local function saveEditedDescription()
         local g = selected and Finder.groups[selected]
-        if not g or g.owner ~= Finder.identity or g.closed then editingDescriptionKey = nil; refresh(); return end
+        if not g or g.owner ~= Finder.identity or g.hidden then editingDescriptionKey = nil; refresh(); return end
         local text = (f.editDescBox:GetText() or ''):match('^%s*(.-)%s*$')
-        if Finder:UpdateDescription(g.id, text) then
+        local ok, reason = Finder:UpdateDescription(g.id, text)
+        if ok then
             editingDescriptionKey = nil
             Finder:Changed()
             refresh()
+        elseif reason == 'revision' then
+            print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
         else
             print(T('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.'))
         end
@@ -1681,7 +1763,7 @@ local function createWindow(parent)
     f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText(T('Категорія'))
     f.roleButton = createRoleSelector(f, 587, -502, 296)
     f.roleButton:Update(category)
-    f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.roleLabel = f.roleButton:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.roleLabel, 13, true) end
     local roleLabelMuted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
     if roleLabelMuted then f.roleLabel:SetTextColor(roleLabelMuted[1], roleLabelMuted[2], roleLabelMuted[3]) end
@@ -1979,6 +2061,11 @@ local function createWindow(parent)
     options:Hide(); footer:Hide()
     f.applyButton = button(f, T('Подати заявку'), 587, -550, 296, function()
         local g=selected and Finder.groups[selected]
+        if tab == 'all' and selected and isGroupHiddenByOfflineOwner(selected, g) then
+            selected = nil
+            refresh()
+            return
+        end
         if role == '' or not Finder:CanPerformRole(Finder.identity, role) then
             print(T('Old Kraken: оберіть доступну роль для подачі заявки.'))
             return
@@ -2002,7 +2089,7 @@ local function createWindow(parent)
         if not group or group.owner ~= Finder.identity or group.closed then return end
         local ok, reason, seconds = Finder:Reannounce(group.id)
         if ok then
-            local activityName = (group.title and group.title ~= '' and group.title) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or T('Група')
+            local activityName = (group.title and group.title ~= '' and displayGroupTitle(group)) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or T('Група')
             announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description)
             print(T('Old Kraken: повторне оголошення додано до черги гільдії.'))
         elseif reason == 'cooldown' then print(T('Old Kraken: повторити оголошення можна через ') .. seconds .. T(' с.'))
@@ -2012,7 +2099,10 @@ local function createWindow(parent)
     f.reopenButton = button(f, T('Відкрити набір знову'), 587, -550, 296, function()
         local group = selected and Finder.groups[selected]
         if not group or group.owner ~= Finder.identity or not group.closed or group.hidden then return end
-        if Finder:Reopen(group.id) then Finder:Changed(); refresh()
+        local ok, reason = Finder:Reopen(group.id)
+        if ok then Finder:Changed(); refresh()
+        elseif reason == 'payload' then print(T('Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір.'))
+        elseif reason == 'revision' then print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
         else print(T('Old Kraken: не вдалося відкрити набір знову. Перевірте зв’язок.')) end
     end, 40, 'primary', {rounded = true})
     f.bumpButton:SetScript('OnUpdate', function(self, elapsed)
@@ -2059,6 +2149,7 @@ if OldKraken.UIHub then
 end
 local peopleDirty=false
 local scheduleRefreshPending=false
+local offlineTrackingRefreshPending=false
 local function scheduleRefresh()
     if scheduleRefreshPending then return end
     if not ((window and window:IsShown()) or (requestsWindow and requestsWindow:IsShown())) then return end
@@ -2068,16 +2159,36 @@ local function scheduleRefresh()
     end
     if C_Timer and C_Timer.After then scheduleRefreshPending=true; C_Timer.After(0.15,flush) else flush() end
 end
-OldKraken:On('GROUP_FINDER_CHANGED', function()
+OldKraken:On('GROUP_FINDER_CHANGED', function(group)
     if refreshAlertRoster then refreshAlertRoster() end
+    -- Start tracking newly received listings even when the window is closed.
+    if group and group.owner ~= Finder.identity and not (window and window:IsShown()) and not offlineTrackingRefreshPending then
+        local function updateOfflineTracking()
+            offlineTrackingRefreshPending = false
+            refreshPeople()
+            pruneOfflineApplications()
+        end
+        if C_Timer and type(C_Timer.After) == 'function' then
+            offlineTrackingRefreshPending = true
+            C_Timer.After(0, updateOfflineTracking)
+        else updateOfflineTracking() end
+    end
     scheduleRefresh()
 end)
 local peopleEvents = CreateFrame('Frame')
 peopleEvents:RegisterEvent('GUILD_ROSTER_UPDATE')
 peopleEvents:RegisterEvent('GROUP_ROSTER_UPDATE')
-peopleEvents:SetScript('OnEvent', function() peopleDirty=true; scheduleRefresh() end)
+peopleEvents:SetScript('OnEvent', function()
+    peopleDirty = true
+    -- Keep the offline window continuous even while the group page is hidden.
+    if next(Finder.groups or {}) or next(Finder.pending or {}) then
+        refreshPeople()
+        pruneOfflineApplications()
+    end
+    scheduleRefresh()
+end)
 OldKraken:On('GROUP_FINDER_ALERT_SETTING', function()
-    if groupAlert and groupAlert.kind == 'group' and not Finder:GroupAlertsEnabled() then groupAlert:Hide() end
+    if Finder.SyncAlertVisibility then Finder:SyncAlertVisibility('group') end
     refresh()
 end)
 
@@ -2185,6 +2296,8 @@ local function paintAlertRoster(group)
                 control.vacancy:SetShown(not member)
                 control.label:SetTextColor(member and 1 or 0.85,member and 1 or 0.88,member and 1 or 0.93)
                 control.tooltipText=(member or T('Вільне місце'))..'\n'..roleLabel(displayedRole)..' · '..state
+                local specText = member and memberSpecText(member)
+                if specText then control.tooltipText=control.tooltipText..T('\nСпеціалізація: ')..specText end
                 if not member then control.tooltipText=control.tooltipText..(Finder:CanPerformRole(Finder.identity,displayedRole) and T('\nЛівий клік — подати заявку на цю роль.') or T('\nЦя роль недоступна вашому класу.')) end
             end
         end
@@ -2207,6 +2320,41 @@ end
 
 local deferredRequests = {}
 local deferredRequestSequence = 0
+
+local function groupAlertsEnabled()
+    if type(Finder.GroupAlertsEnabled) == 'function' then return Finder:GroupAlertsEnabled() end
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    return type(settings) ~= 'table' or settings.groupFinderNotifications ~= false
+end
+local function eventAlertsEnabled()
+    if OldKraken.GuildEvents and type(OldKraken.GuildEvents.AlertsEnabled) == 'function' then
+        return OldKraken.GuildEvents:AlertsEnabled()
+    end
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    return type(settings) ~= 'table' or settings.guildEventNotifications ~= false
+end
+local function workshopAlertsEnabled()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    return type(settings) ~= 'table' or settings.workshopOrderAlerts ~= false
+end
+function Finder:SyncAlertVisibility(category)
+    local groupEnabled, eventEnabled, workshopEnabled = groupAlertsEnabled(), eventAlertsEnabled(), workshopAlertsEnabled()
+    if (not category or category == 'group') and not groupEnabled then deferredRequests = {} end
+    if not groupAlert then return end
+    local kind = groupAlert.kind
+    if ((not category or category == 'group') and (kind == 'group' or kind == 'request' or kind == 'decision') and not groupEnabled)
+        or ((not category or category == 'event') and (kind == 'event' or kind == 'event_signup') and not eventEnabled)
+        or ((not category or category == 'workshop') and kind == 'workshop' and not workshopEnabled) then groupAlert:Hide() end
+end
+function Finder:ResetAlertPositions()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    if type(settings) == 'table' then settings.alertPositions = {} end
+    if groupAlert then
+        groupAlert:ClearAllPoints()
+        groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
+    end
+    return true
+end
 
 local function smartNotificationsEnabled()
     local settings = OldKraken.DB and OldKraken.DB.settings
@@ -2465,28 +2613,32 @@ function Finder:PreviewAlert(kind)
 end
 
 OldKraken:On('WORKSHOP_ORDER_NOTICE', function(title,subtitle,k)
+    if not workshopAlertsEnabled() then return end
     showAlert(title,subtitle,'workshop',k)
 end)
 
 OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
-    if not OldKraken.GuildEvents or not OldKraken.GuildEvents:AlertsEnabled() then return end
+    if not eventAlertsEnabled() then return end
     local subtitle = event.owner .. ' · ' .. date('%d.%m.%Y %H:%M', event.when)
     showAlert(T('Нова подія: ') .. event.title, subtitle, 'event', key)
 end)
 OldKraken:On('GUILD_EVENTS_NEW_SIGNUP', function(key, event, name, role)
+    if not eventAlertsEnabled() then return end
     refreshPeople()
     local signupRole=role=='flex' and T('Учасник') or roleLabel(role)
     showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. event.title, 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_CANCELLED', function(key, event)
+    if not eventAlertsEnabled() then return end
     showAlert(T('Подію скасовано'), event.title .. T(' · Автор: ') .. event.owner, 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
-    if groupAlert and groupAlert.kind=='event' and not OldKraken.GuildEvents:AlertsEnabled() then groupAlert:Hide() end
+    Finder:SyncAlertVisibility('event')
 end)
+OldKraken:On('WORKSHOP_ALERT_SETTING', function() Finder:SyncAlertVisibility('workshop') end)
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
-    if not Finder:GroupAlertsEnabled() then return end
+    if not groupAlertsEnabled() then return end
     if group.category == 'dungeon' then
         local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
         if not level or level < group.minLevel or level > group.maxLevel then return end
@@ -2506,12 +2658,13 @@ OldKraken:On('GROUP_FINDER_NEW', function(group)
         needed = T('Вільні ролі: ') .. roleLabel('tank') .. ' ' .. missing.tank .. ', ' .. roleLabel('healer') .. ' ' .. missing.healer .. ', ' .. roleLabel('dps') .. ' ' .. missing.dps
     end
     local groupKey = group.owner .. '\001' .. group.id
-    showAlert(playerLabel(group.owner) .. T(' збирає: ') .. group.title, summary .. ' · ' .. needed, 'group', groupKey, group.dungeon, group)
+    showAlert(playerLabel(group.owner) .. T(' збирає: ') .. displayGroupTitle(group), summary .. ' · ' .. needed, 'group', groupKey, group.dungeon, group)
 end)
 
 local function flushDeferredRequests()
     local pending = deferredRequests
     deferredRequests = {}
+    if not groupAlertsEnabled() then return end
     if not smartNotificationsEnabled() or isPlayerInCombat() then return end
     local uniqueApplicants = {}
     local count = 0
@@ -2553,20 +2706,23 @@ end)
 OldKraken:On('GROUP_FINDER_NEW_REQUEST', function(group, name, role)
     refreshPeople()
     local groupKey = group.owner .. '\001' .. group.id
-    if smartNotificationsEnabled() and isPlayerInCombat() and group.owner == Finder.identity and type(name) == 'string' and name ~= '' then
+    if groupAlertsEnabled() and smartNotificationsEnabled() and isPlayerInCombat() and group.owner == Finder.identity and type(name) == 'string' and name ~= '' then
         deferredRequests[groupKey] = deferredRequests[groupKey] or {}
         deferredRequestSequence = deferredRequestSequence + 1
         deferredRequests[groupKey][name] = deferredRequestSequence
     end
-    showAlert(T('Нова заявка від ') .. playerLabel(name), roleLabel(role) .. '  |cff9ba9bc·|r  |cffffd36b' .. group.title .. '|r',
-        'request', groupKey)
+    if groupAlertsEnabled() then
+        showAlert(T('Нова заявка від ') .. playerLabel(name), roleLabel(role) .. '  |cff9ba9bc·|r  |cffffd36b' .. displayGroupTitle(group) .. '|r',
+            'request', groupKey)
+    end
     refreshRequests()
 end)
 
 OldKraken:On('GROUP_FINDER_APPLICATION_STATUS', function(group, status)
     if not group or status ~= 'reject' then return end
+    if not groupAlertsEnabled() then return end
     refreshPeople()
-    showAlert(T('Заявку відхилив ') .. playerLabel(group.owner), group.title, 'decision', group.owner .. '\001' .. group.id)
+    showAlert(T('Заявку відхилив ') .. playerLabel(group.owner), displayGroupTitle(group), 'decision', group.owner .. '\001' .. group.id)
 end)
 
 if OldKraken.LocalizeTable then

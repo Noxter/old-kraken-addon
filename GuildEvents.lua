@@ -3,6 +3,11 @@ local T = OldKraken.Translate or function(text) return text end
 local Events = {}
 OldKraken.GuildEvents = Events
 local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
+local function memberSpecText(name)
+    local transport = OldKraken.Communication
+    local spec = name and transport and transport.GetRosterSpec and transport:GetRosterSpec(name)
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+end
 local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
 local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}
 local statuses = {pending='Очікує', accepted='Прийнято', reserve='Резерв', rejected='Відхилено'}
@@ -200,7 +205,9 @@ local function receiveEvent(sender, _, payload, isAnnouncement, isRelay, cancell
         or (intent.role ~= 'leave' and e.people[identity] == intent.role and e.statuses[identity] ~= 'rejected')
         or e.cancelled) then intents[key] = nil end
 
-    if e.cancelled and e.owner~=identity and e.people[identity] and e.statuses[identity]~='rejected' and not storage.cancelledSeen[key] then
+    local participant=e.people[identity] and e.statuses[identity]~='rejected'
+    if not e.people[identity] and old and old.people[identity] and old.statuses[identity]~='rejected' then participant=true end
+    if e.cancelled and e.owner~=identity and participant and not storage.cancelledSeen[key] then
         storage.cancelledSeen[key]=e.when+172800
         OldKraken:Fire('GUILD_EVENTS_CANCELLED',key,e)
     end
@@ -219,6 +226,12 @@ comm:RegisterHandler('CVSTATE', function(sender,id,payload) receiveEvent(sender,
 
 local function canPerformRole(name,role)
     return role=='flex' or codec:CanPerformRole(name,role)
+end
+local function canDecideRole(name,role)
+    -- Existing signups were checked when received; the shared role cache may
+    -- have been cleared since then or lost when the organizer reloaded.
+    local available=codec:GetGameRoles(name) or (codec.roleCapabilities and codec.roleCapabilities[name])
+    return not available or role=='flex' or available[role]==true
 end
 local function updateSignup(sender, owner, id, role, version)
     local key = eventKey(owner,id)
@@ -244,6 +257,7 @@ local function updateSignup(sender, owner, id, role, version)
     if sender ~= identity and role ~= 'leave' and (not previous or previousStatus=='rejected') then
         OldKraken:Fire('GUILD_EVENTS_NEW_SIGNUP',key,e,sender,role)
     end
+    return true
 end
 comm:RegisterHandler('CEVRSVP', function(sender, _, payload)
     if not active then return end
@@ -353,9 +367,37 @@ raidInviteFrame:SetScript('OnUpdate',function(_,elapsed)
     if inviteElapsed>=0.8 then inviteElapsed=0; Events:PumpRaidInvites() end
 end)
 
+local function fitCancellation(e)
+    -- Older saved events can fill the entire wire limit. Preserve the full
+    -- participant list whenever possible, reducing optional details first.
+    local originalDescription,originalActivity,originalTitle=e.description,e.activity,e.title
+    local removed={}
+    local function shorten(s)
+        local last=#s; while last>0 and s:byte(last)>=128 and s:byte(last)<=191 do last=last-1 end
+        return s:sub(1,last-1)
+    end
+    while #encode(e)>2560 and #e.description>0 do e.description=shorten(e.description) end
+    if #encode(e)>2560 then e.activity='' end
+    while #encode(e)>2560 and #shorten(e.title)>0 do e.title=shorten(e.title) end
+    if #encode(e)>2560 then
+        local names={}; for name in pairs(e.people) do names[#names+1]=name end; table.sort(names)
+        for _,name in ipairs(names) do
+            removed[name]={role=e.people[name],status=e.statuses[name]}; e.people[name],e.statuses[name]=nil,nil
+            if #encode(e)<=2560 then break end
+        end
+    end
+    if #encode(e)>2560 then
+        e.description,e.activity,e.title=originalDescription,originalActivity,originalTitle
+        for name,entry in pairs(removed) do e.people[name],e.statuses[name]=entry.role,entry.status end
+        return false
+    end
+    return true
+end
 function Events:Cancel(key)
-    local e=events[key]; if not active or not e or e.owner~=identity or e.cancelled then return false end
-    e.cancelled=true; e.rev=e.rev+1; dirty[key]=true; save(); fire(); return true
+    local e=events[key]; if not active or not e or e.owner~=identity or e.cancelled or e.rev>=2147483647 then return false end
+    e.cancelled=true; e.rev=e.rev+1
+    if not fitCancellation(e) then e.cancelled=false; e.rev=e.rev-1; return false end
+    dirty[key]=true; save(); fire(); return true
 end
 function Events:Signup(key, role)
     local e=events[key]
@@ -363,14 +405,16 @@ function Events:Signup(key, role)
     if role~='leave' and not canPerformRole(identity,role) then return false end
     if role~='leave' and e.owner==identity and e.statuses[identity]~='accepted' and acceptedCount(e)>=e.size then return false end
     sequence=math.max(sequence+1,GetServerTime()*1000)
-    local intent={role=role,version=sequence}; intents[key]=intent
-    if e.owner==identity then updateSignup(identity,e.owner,e.id,role,intent.version) end
+    local intent={role=role,version=sequence}
+    if e.owner==identity then
+        if not updateSignup(identity,e.owner,e.id,role,intent.version) then return false end
+    else intents[key]=intent end
     save(); nextRetry=0; fire(); return true
 end
 function Events:Decide(key, name, status)
     local e=events[key]
     if not active or not e or e.owner~=identity or e.cancelled or not e.people[name] or name==identity or not statuses[status] or status=='pending' then return false end
-    if (status=='accepted' or status=='reserve') and not canPerformRole(name,e.people[name]) then return false end
+    if (status=='accepted' or status=='reserve') and not canDecideRole(name,e.people[name]) then return false end
     if status=='accepted' and e.statuses[name]~='accepted' and acceptedCount(e)>=e.size then return false end
     if e.statuses[name]==status then return true end
     local previous=e.statuses[name]
@@ -403,9 +447,20 @@ local function connect()
     if type(storage.owned)=='table' then
         for k,e in pairs(storage.owned) do
             if type(e)=='table' and e.owner==identity and type(e.people)=='table' then
-                local ok,payload=pcall(encode,e)
+                local ok,payload=pcall(encode,e); local recovered=false
+                -- Recover cancellations saved by older builds just over the wire limit.
+                if ok and e.cancelled and #payload>2560 and #payload<=2660 then
+                    local copy={}; for field,value in pairs(e) do copy[field]=value end
+                    copy.people={}; for person,role in pairs(e.people) do copy.people[person]=role end
+                    copy.statuses={}; for person,status in pairs(type(e.statuses)=='table' and e.statuses or {}) do copy.statuses[person]=status end
+                    local fitted,result=pcall(fitCancellation,copy)
+                    if fitted and result then ok,payload=pcall(encode,copy); recovered=ok end
+                end
                 local valid=ok and decode(identity,payload)
-                if valid and k==eventKey(identity,valid.id) then valid.versions=type(e.versions)=='table' and e.versions or {}; events[k]=valid; directEvents[k]=valid; dirty[k]=true end
+                if valid and k==eventKey(identity,valid.id) then
+                    valid.versions=type(e.versions)=='table' and e.versions or {}; events[k]=valid; directEvents[k]=valid; dirty[k]=true
+                    if recovered then storage.owned[k]=valid end
+                end
             end
         end
     end
@@ -801,9 +856,10 @@ refresh=function()
                 row.label:SetText(participantName(name,classes)); row.roleStatus:SetText(largeRoleIcon(role,26))
                 local tint=statusColors[st] or statusColors.pending
                 row.stateText:SetText('|c'..tint..(statuses[st] or st)..'|r')
-                row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])
+                local specText=memberSpecText(name)
+                row.hover.tooltipName=participantName(name,classes); row.hover.tooltipStatus=participantRoleStatus(role,e.statuses[name])..(specText and (T('\nСпеціалізація: ')..specText) or '')
                 row.invite:SetShown(own and e.kind=='raid' and name~=identity and e.statuses[name]=='accepted')
-                row.accept:SetEnabled(canPerformRole(name,role)); row.reserve:SetEnabled(canPerformRole(name,role))
+                row.accept:SetEnabled(canDecideRole(name,role)); row.reserve:SetEnabled(canDecideRole(name,role))
                 row.accept:SetShown(own and name~=identity); row.reserve:SetShown(own and name~=identity); row.reject:SetShown(own and name~=identity); row:Show()
             end
             height=height+#names*32

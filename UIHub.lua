@@ -302,7 +302,7 @@ local function createSettings(parent)
     local colors = OldKraken.UIStyle and OldKraken.UIStyle.Colors
     if OldKraken.UIStyle and OldKraken.UIStyle.Panel then
         OldKraken.UIStyle.Panel(page, 0, -48, 560, 166)
-        OldKraken.UIStyle.Panel(page, 0, -230, 560, 128)
+        OldKraken.UIStyle.Panel(page, 0, -230, 560, 276)
     end
 
     local label = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
@@ -333,9 +333,9 @@ local function createSettings(parent)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(alertsLabel, 15, true) end
     alertsLabel:SetText(T('Сповіщення'))
 
-    local smartButton = button('', 18, -274, 282)
+    local smartButton = button('', 18, -272, 282)
     local smartHint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    smartHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -316)
+    smartHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -312)
     smartHint:SetWidth(524)
     smartHint:SetJustifyH('LEFT')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(smartHint, 13) end
@@ -353,6 +353,86 @@ local function createSettings(parent)
         settings.smartNotifications = settings.smartNotifications == false
         refreshSmartButton()
     end)
+
+    local groupFinderButton = button('', 18, -354, 256)
+    local guildEventsButton = button('', 286, -354, 256)
+    local workshopButton = button('', 18, -396, 256)
+    local previewButton = button('', 18, -450, 256)
+    local resetPositionsButton = button(T('Скинути позиції банерів'), 286, -450, 256)
+    local previewKinds = {'group', 'request', 'event', 'workshop'}
+    local previewLabels = {'група', 'заявка', 'подія', 'майстерня'}
+    local previewIndex = 1
+    local function isGroupAlertsOn()
+        local finder = OldKraken.GroupFinder
+        if finder and type(finder.GroupAlertsEnabled) == 'function' then return finder:GroupAlertsEnabled() end
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        return type(settings) ~= 'table' or settings.groupFinderNotifications ~= false
+    end
+    local function isEventAlertsOn()
+        local events = OldKraken.GuildEvents
+        if events and type(events.AlertsEnabled) == 'function' then return events:AlertsEnabled() end
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        return type(settings) ~= 'table' or settings.guildEventNotifications ~= false
+    end
+    local function refreshAlertButtons()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        local function state(enabled)
+            return enabled and ('|cff69dc8c' .. T('увімк.') .. '|r') or ('|cff9aa5b1' .. T('вимк.') .. '|r')
+        end
+        refreshSmartButton()
+        groupFinderButton:SetText(T('Пошук груп') .. ': ' .. state(isGroupAlertsOn()))
+        guildEventsButton:SetText(T('Події гільдії') .. ': ' .. state(isEventAlertsOn()))
+        workshopButton:SetText(T('Замовлення Майстерні') .. ': ' .. state(type(settings) ~= 'table' or settings.workshopOrderAlerts ~= false))
+        previewButton:SetText(T('Тест банера: ') .. T(previewLabels[previewIndex]))
+    end
+    groupFinderButton:SetScript('OnClick', function()
+        local finder = OldKraken.GroupFinder
+        if finder and type(finder.SetGroupAlertsEnabled) == 'function' then
+            finder:SetGroupAlertsEnabled(not isGroupAlertsOn())
+        else
+            local settings = OldKraken.DB and OldKraken.DB.settings
+            if type(settings) ~= 'table' then return end
+            settings.groupFinderNotifications = not isGroupAlertsOn()
+            if type(OldKraken.Fire) == 'function' then OldKraken:Fire('GROUP_FINDER_ALERT_SETTING') end
+        end
+        refreshAlertButtons()
+    end)
+    guildEventsButton:SetScript('OnClick', function()
+        local events = OldKraken.GuildEvents
+        if events and type(events.SetAlertsEnabled) == 'function' then
+            events:SetAlertsEnabled(not isEventAlertsOn())
+        else
+            local settings = OldKraken.DB and OldKraken.DB.settings
+            if type(settings) ~= 'table' then return end
+            settings.guildEventNotifications = not isEventAlertsOn()
+            if type(OldKraken.Fire) == 'function' then OldKraken:Fire('GUILD_EVENTS_ALERT_SETTING') end
+        end
+        refreshAlertButtons()
+    end)
+    workshopButton:SetScript('OnClick', function()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        if type(settings) ~= 'table' then return end
+        settings.workshopOrderAlerts = settings.workshopOrderAlerts == false
+        if type(OldKraken.Fire) == 'function' then OldKraken:Fire('WORKSHOP_ALERT_SETTING') end
+        refreshAlertButtons()
+    end)
+    previewButton:SetScript('OnClick', function()
+        local kind = previewKinds[previewIndex]
+        previewIndex = previewIndex % #previewKinds + 1
+        refreshAlertButtons()
+        local finder = OldKraken.GroupFinder
+        if finder and type(finder.PreviewAlert) == 'function' then finder:PreviewAlert(kind) end
+    end)
+    resetPositionsButton:SetScript('OnClick', function()
+        local finder = OldKraken.GroupFinder
+        if finder and type(finder.ResetAlertPositions) == 'function' then finder:ResetAlertPositions()
+        elseif OldKraken.DB and type(OldKraken.DB.settings) == 'table' then OldKraken.DB.settings.alertPositions = {} end
+    end)
+    if type(OldKraken.On) == 'function' then
+        OldKraken:On('GROUP_FINDER_ALERT_SETTING', refreshAlertButtons)
+        OldKraken:On('GUILD_EVENTS_ALERT_SETTING', refreshAlertButtons)
+        OldKraken:On('WORKSHOP_ALERT_SETTING', refreshAlertButtons)
+    end
 
     local active = OldKraken.GetLanguage()
     local selected = active
@@ -377,9 +457,10 @@ local function createSettings(parent)
         settings.language = selected
         ReloadUI()
     end)
-    page:SetScript('OnShow', function() selectLanguage(active); refreshSmartButton() end)
+    page:SetScript('OnShow', function() selectLanguage(active); refreshSmartButton(); refreshAlertButtons() end)
     selectLanguage(active)
     refreshSmartButton()
+    refreshAlertButtons()
     return page
 end
 

@@ -43,6 +43,12 @@ local roleCode = { ['']='U', tank='T', healer='H', dps='D', flex='F' }
 local codeRole = { U='', T='tank', H='healer', D='dps', F='flex' }
 local MAX_GROUPS = 100
 local GROUP_TTL = 3600
+local IDLE_GROUP_TTL = 3600
+local MAX_GROUP_REVISION = 2147483647
+Finder.IDLE_GROUP_TTL = IDLE_GROUP_TTL
+local function persist(self)
+    if type(self.onPersist) == 'function' then self.onPersist() end
+end
 local MAX_DELETED_FENCE = 500
 local function roleResult(ok,tank,healer,dps)
     for _,value in pairs({tank=tank,healer=healer,dps=dps}) do
@@ -155,6 +161,7 @@ end
 
 function Finder:Initialize(identity, send)
     self.roleCapabilities={}
+    self.lastActivity = {}
     assert(validText(identity, 1, 128) and type(send) == 'function')
     self.identity, self.send = identity, send
     self.groups, self.requests, self.pending, self.syncPending, self.requestVersions = {}, {}, {}, {}, {}
@@ -187,6 +194,8 @@ function Finder:Create(title, category, description, maxSize, minLevel, maxLevel
     local payload = self:EncodeGroup(group)
     if not self.send('ANNOUNCE', payload) then return false, 'queue' end
     self.groups[self.identity .. '\001' .. id] = group
+    self.lastActivity[id] = GetServerTime()
+    persist(self)
     return true, id
 end
 
@@ -211,7 +220,54 @@ function Finder:EncodeGroup(group)
         memberRoles[i] = roleCode[memberRole] or 'U'
     end
     fields[#fields + 1] = table.concat(memberRoles)
-    return pack(fields)
+    local payload = pack(fields)
+    if not group.closed and #payload > 2560 then
+        local knownOtherRole = false
+        for i = 2, #group.members do
+            local role = group.memberRoles and group.memberRoles[group.members[i]]
+            if role and role ~= '' then knownOtherRole = true; break end
+        end
+        if not knownOtherRole then
+            fields[#fields] = nil
+            payload = pack(fields)
+            if #payload > 2560 and fields[#fields] == '' then
+                fields[#fields] = nil
+                payload = pack(fields)
+                if #payload > 2560 and not group.partyObserved then
+                    fields[#fields] = nil
+                    payload = pack(fields)
+                end
+            end
+        end
+    end
+    -- Closed records can omit optional details to fit the existing protocol.
+    -- Open records must retain the exact party state and roles on the wire.
+    if group.closed and #payload > 2560 and group.partyObserved then
+        fields[13 + #group.members] = '?'
+        payload = pack(fields)
+    end
+    if group.closed and #payload > 2560 then
+        fields[#fields] = nil
+        payload = pack(fields)
+    end
+    if group.closed and #payload > 2560 then
+        local description = fields[7]
+        while #payload > 2560 and #description > 0 do
+            local last = #description
+            while last > 0 and description:byte(last) >= 128 and description:byte(last) <= 191 do last = last - 1 end
+            description = description:sub(1, math.max(0, last - 1))
+            fields[7] = description
+            payload = pack(fields)
+        end
+        local count = #group.members
+        while #payload > 2560 and count > 1 do
+            table.remove(fields, 12 + count)
+            count = count - 1
+            fields[9] = count
+            payload = pack(fields)
+        end
+    end
+    return payload
 end
 
 -- Combine actual party or raid members with accepted reservations that have
@@ -266,6 +322,7 @@ function Finder:SyncPartyMembers(party, partyRoles)
                 end
             end
             if differs or observedChanged or rolesChanged then
+                if group.revision >= MAX_GROUP_REVISION - 1 then return false, changed, 'revision' end
                 local oldMembers, oldMax, oldRevision, oldObserved = group.members, group.maxSize, group.revision, group.partyObserved
                 local oldRole = group.role
                 local oldMemberRoles = {}
@@ -353,7 +410,7 @@ function Finder:ReceiveGroup(sender, payload, hiddenOwn)
     end
     local existing = self.groups[key]
     if existing and existing.revision >= rev then
-        if existing.revision == rev and self:EncodeGroup(existing) == payload then existing.seenAt = GetTime() end
+        if existing.revision == rev and (existing._receivedPayload == payload or self:EncodeGroup(existing) == payload) then existing.seenAt = GetTime() end
         return false
     end
     local isHiddenTombstone = hiddenOwn == true and owner == self.identity and closed == '1'
@@ -365,7 +422,7 @@ function Finder:ReceiveGroup(sender, payload, hiddenOwn)
         end
     end
     self.groups[key] = { id=id, owner=owner, revision=rev, closed=closed=='1', hidden=isHiddenTombstone or nil, title=title,
-        category=category, description=description, maxSize=maxSize, minLevel=minLevel,
+        category=category, description=description, maxSize=maxSize, minLevel=minLevel, _receivedPayload=payload,
         maxLevel=maxLevel, role=role, members=members, partyObserved=observed, memberRoles=memberRoles, dungeon=dungeon, seenAt=GetTime() }
     if self.pending[key] == 'pending' then
         if seen[self.identity] then
@@ -381,6 +438,10 @@ end
 
 function Finder:Prune()
     local now, changed = GetTime(), false
+    for id in pairs(self.lastActivity or {}) do
+        local group = self.groups[self.identity .. '\001' .. id]
+        if not group or group.closed or group.hidden then self.lastActivity[id] = nil; changed = true end
+    end
     local tombstones = {}
     for key, group in pairs(self.groups) do
         if group.owner ~= self.identity and now - group.seenAt > GROUP_TTL then
@@ -546,8 +607,9 @@ end
 function Finder:Decide(id, applicant, accept)
     local group = self.groups[self.identity .. '\001' .. id]
     local requests = self.requests[id]
-    if not group or not requests or requests[applicant] == nil then return false end
+    if not group or group.closed or group.hidden or not requests or requests[applicant] == nil then return false end
     if accept then
+        if group.revision >= MAX_GROUP_REVISION - 1 then return false, 'revision' end
         if not self:CanPerformRole(applicant,requests[applicant]) then return false end
         if #group.members >= group.maxSize then return false end
         if not self:RoleAvailable(group, requests[applicant]) then return false end
@@ -573,6 +635,8 @@ function Finder:Decide(id, applicant, accept)
         self.decisionSync[id .. '\001' .. applicant] = true
     end
     requests[applicant] = nil
+    self.lastActivity[id] = GetServerTime()
+    persist(self)
     return true
 end
 
@@ -591,20 +655,28 @@ end
 
 function Finder:Cancel(id)
     local group = self.groups[self.identity .. '\001' .. id]
-    if not group or group.closed then return false end
+    if not group or group.closed or group.revision >= MAX_GROUP_REVISION then return false end
     group.closed, group.revision = true, group.revision + 1
     if not self.send('CANCEL', self:EncodeGroup(group)) then
         group.closed, group.revision = false, group.revision - 1
         return false
     end
+    self.lastActivity[id] = nil
+    persist(self)
     return true
 end
 
 function Finder:Reopen(id)
     local group = self.groups[self.identity .. '\001' .. id]
     if not group or not group.closed or group.hidden then return false end
+    if group.revision >= MAX_GROUP_REVISION - 1 then return false, 'revision' end
     group.closed, group.revision = false, group.revision + 1
-    if not self.send('UPDATE', self:EncodeGroup(group)) then
+    local payload = self:EncodeGroup(group)
+    if #payload > 2560 then
+        group.closed, group.revision = true, group.revision - 1
+        return false, 'payload'
+    end
+    if not self.send('UPDATE', payload) then
         group.closed, group.revision = true, group.revision - 1
         return false
     end
@@ -618,15 +690,18 @@ function Finder:Reopen(id)
         end
         self.reopenFloors[id] = nil
     end
+    self.lastActivity[id] = GetServerTime()
+    persist(self)
     return true
 end
 
 function Finder:UpdateDescription(id, description)
     local group = self.groups[self.identity .. '\001' .. id]
-    if not group or group.closed or group.hidden then return false end
+    if not group or group.hidden then return false end
     description = type(description) == 'string' and description or ''
     if not validText(description, 0, 500) then return false end
     if group.description == description then return true end
+    if group.revision >= MAX_GROUP_REVISION - (group.closed and 2 or 1) then return false, 'revision' end
     local oldDescription, oldRevision = group.description, group.revision
     group.description, group.revision = description, group.revision + 1
     local payload = self:EncodeGroup(group)
@@ -634,6 +709,8 @@ function Finder:UpdateDescription(id, description)
         group.description, group.revision = oldDescription, oldRevision
         return false
     end
+    if not group.closed then self.lastActivity[id] = GetServerTime() end
+    persist(self)
     return true
 end
 
@@ -647,6 +724,8 @@ function Finder:Delete(id)
     self.deletedGroups = self.deletedGroups or {}
     self.deletedGroups[id] = { rev = group.revision, at = GetServerTime() }
     if self.reopenFloors then self.reopenFloors[id] = nil end
+    self.lastActivity[id] = nil
+    persist(self)
     return true
 end
 
@@ -665,7 +744,7 @@ end
 
 function Finder:RemoveMember(id, member)
     local group = self.groups[self.identity .. '\001' .. id]
-    if not group or group.closed then return false end
+    if not group or group.closed or group.revision >= MAX_GROUP_REVISION - 1 then return false end
     for i=2,#group.members do
         if group.members[i] == member then
             table.remove(group.members, i)
@@ -676,6 +755,8 @@ function Finder:RemoveMember(id, member)
                 return false
             end
             if group.memberRoles then group.memberRoles[member] = nil end
+            self.lastActivity[id] = GetServerTime()
+            persist(self)
             return true
         end
     end

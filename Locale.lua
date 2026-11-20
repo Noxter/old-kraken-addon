@@ -1,5 +1,12 @@
 -- English translations keyed by the original Ukrainian UI text.
 local english = {
+    ["р"] = "y",
+    ["міс"] = "mo",
+    ["д"] = "d",
+    ["год"] = "h",
+    ["< 1 год"] = "< 1 h",
+    ["\nСпеціалізація: "] = "\nSpecialization: ",
+    ["Спеціалізація: "] = "Specialization: ",
     ["|cff9aa5b1Немає доступної ролі|r"] = "|cff9aa5b1No available role|r",
     ["Old Kraken: оберіть доступну роль для подачі заявки."] = "Old Kraken: Choose an available role to apply.",
     ["Усі типи"] = "All types",
@@ -498,6 +505,8 @@ local english = {
     ["Застаріла: версія старіша за вашу."] = "Older than your version.",
     ["Новіша за вашу версію."] = "Newer than your version.",
     ["Така сама версія, як у вас."] = "Same version as yours.",
+    ["Однакова версія, але різні Git-збірки."] = "Same version, but different Git builds.",
+    ["Неможливо порівняти Git-збірки: в однієї немає ідентифікатора."] = "Cannot compare Git builds: one has no build identifier.",
     ["Не вдалося порівняти номер версії."] = "Could not compare versions.",
     ["|cff2ec4b6Old Kraken|r: персонаж не перебуває в гільдії."] = "|cff2ec4b6Old Kraken|r: This character is not in a guild.",
     ["|cff2ec4b6Old Kraken|r: API оновлення ростера недоступний."] = "|cff2ec4b6Old Kraken|r: The roster refresh API is unavailable.",
@@ -698,6 +707,12 @@ local english = {
     ["Old Kraken: показано збережені результати; запит гільдії надіслати не вдалося."] = "Old Kraken: Showing saved results. Could not send the guild search request.",
     ["Не вдалося зчитати власну професію. Відкрийте її та перевірте доступність API."] = "Could not scan your profession. Open it and check API availability.",
     ["Old Kraken: новий рецепт очікує даних гри. Відкрийте відповідну професію, щоб завершити оновлення."] = "Old Kraken: Waiting for game data on a new recipe. Open its profession to finish updating.",
+    ["Old Kraken: ваш новий рецепт%s очікує даних гри. Відкрийте свою професію (%s), щоб завершити оновлення."] = "Old Kraken: Your new recipe%s is waiting for game data. Open your profession (%s) to finish updating.",
+    ["Old Kraken: ваш новий рецепт%s очікує даних гри. Відкрийте вікно своєї професії, щоб завершити оновлення."] = "Old Kraken: Your new recipe%s is waiting for game data. Open your profession window to finish updating.",
+    [" (та ще %d)"] = " (and %d more)",
+    [" (та ще %d без назви)"] = " (and %d more unnamed)",
+    [" (та ще %d, з них %d без назви)"] = " (and %d more, %d unnamed)",
+    [" (%d без назви)"] = " (%d unnamed)",
     ["|cff4cde80онлайн|r"] = "|cff4cde80online|r",
     ["|cff999999офлайн|r"] = "|cff999999offline|r",
     ["Матеріали: дані гри недоступні."] = "Materials: Game data unavailable.",
@@ -761,10 +776,25 @@ local english = {
     ["Автоматично приглушувати фонові банери в данжах і рейдах та відкладати заявки під час бою."] = "Automatically mute background banners in dungeons and raids, and defer requests during combat.",
     ["Нові заявки: "] = "New requests: ",
     ["Очікують підтвердження"] = "Pending review",
+    ["Офлайн"] = "Offline",
+    ["|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності."] = "|cff2ec4b6Old Kraken|r: Listing \"%s\" was automatically closed after 60 min of inactivity.",
+    ["Old Kraken: досягнуто межі ревізії групи; створіть новий набір."] = "Old Kraken: The listing revision limit was reached; create a new listing.",
+    ["Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір."] = "Old Kraken: The listing is too large to reopen. Shorten its description or create a new listing.",
+    ["Замовлення Майстерні"] = "Workshop Orders",
+    ["Тест банера: "] = "Test banner: ",
+    ["група"] = "group",
+    ["заявка"] = "request",
+    ["подія"] = "event",
+    ["майстерня"] = "workshop",
+    ["Скинути позиції банерів"] = "Reset banner positions",
 }
 
 local language = 'ukUA'
 local labelTables = {}
+
+function OldKraken.TranslateEn(text)
+    return english[text] or text
+end
 
 function OldKraken.Translate(text)
     if language == 'enUS' then return english[text] or text end

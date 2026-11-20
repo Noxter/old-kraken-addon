@@ -1,0 +1,330 @@
+"""Regression tests for event packet boundaries and Workshop sync recovery."""
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+from test_events_relay_authority import make_runtime, storage_for
+from test_workshop_orders import client as real_workshop_client
+from test_workshop_sync import client as sync_client, pack
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def crowded_event():
+    lua = make_runtime()
+    lua.execute(r'''
+        local events=OldKraken.GuildEvents
+        assert(events:Create('Event', '', 2000003600, 'raid', 40, ''))
+        local store=OldKraken.DB.events.guildCalendarV1['Test Realm\001Guild\001Tester Realm']
+        for key,event in pairs(store.owned) do eventKey=key; crowded=event end
+        crowded.rev=99
+        for i=1,98 do
+            local name=string.format('Attendee%03d',i)..string.rep('x',5)
+            crowded.people[name]='dps'; crowded.statuses[name]='pending'
+        end
+        function encodeEvent(e)
+            local names={}; for name in pairs(e.people) do names[#names+1]=name end; table.sort(names)
+            local f={e.id,e.owner,e.rev,e.when,e.kind,e.size,e.cancelled and '1' or '0',e.title,e.description,#names}
+            for _,name in ipairs(names) do f[#f+1]=name; f[#f+1]=e.people[name] end
+            f[#f+1]=e.activity or ''; local codes={}
+            for _,name in ipairs(names) do codes[#codes+1]=e.statuses[name]=='pending' and 'P' or 'A' end
+            f[#f+1]=table.concat(codes); return OldKraken.GroupFinder._pack(f)
+        end
+        local base=#encodeEvent(crowded); assert(base<=2560 and base>=2158,base)
+        crowded.description=string.rep('x',2560-base)
+        -- Account for the length prefix growing when the description grows.
+        while #encodeEvent(crowded)>2560 do crowded.description=crowded.description:sub(1,-2) end
+        assert(#encodeEvent(crowded)==2560,#encodeEvent(crowded))
+        function OldKraken.GroupFinder:CanPerformRole() return true end
+    ''')
+    return lua
+
+
+def test_event_cancellation_fits_and_survives_reconnect():
+    lua = crowded_event()
+    lua.execute(r'''
+        assert(OldKraken.GuildEvents:Cancel(eventKey))
+        assert(crowded.cancelled and crowded.rev==100 and #encodeEvent(crowded)<=2560)
+        assert(crowded.people['Attendee001xxxxx']=='dps')
+        local guild=GetGuildInfo; GetGuildInfo=function() return nil end
+        createdFrames[#createdFrames].scripts.OnEvent(nil,'PLAYER_GUILD_UPDATE')
+        GetGuildInfo=guild; createdFrames[#createdFrames].scripts.OnEvent(nil,'PLAYER_LOGIN')
+    ''')
+    entry = storage_for(lua)["owned"][lua.globals().eventKey]
+    assert entry is not None and entry["cancelled"] and entry["rev"] == 100
+
+
+def test_owner_signup_fails_without_dangling_intent_when_packet_is_full():
+    lua = crowded_event()
+    lua.execute("assert(not OldKraken.GuildEvents:Signup(eventKey,'dps'))")
+    store = storage_for(lua)
+    assert store["owned"][lua.globals().eventKey]["people"]["Tester Realm"] is None
+    assert store["intents"][lua.globals().eventKey] is None
+
+
+def test_recovers_oversized_cancellation_saved_by_old_build():
+    lua = crowded_event()
+    lua.execute(r'''
+        crowded.cancelled=true; crowded.rev=100; assert(#encodeEvent(crowded)==2561)
+        local guild=GetGuildInfo; GetGuildInfo=function() return nil end
+        createdFrames[#createdFrames].scripts.OnEvent(nil,'PLAYER_GUILD_UPDATE')
+        GetGuildInfo=guild; createdFrames[#createdFrames].scripts.OnEvent(nil,'PLAYER_LOGIN')
+        local store=OldKraken.DB.events.guildCalendarV1['Test Realm\001Guild\001Tester Realm']
+        assert(store.owned[eventKey] and #encodeEvent(store.owned[eventKey])<=2560)
+    ''')
+
+
+def test_cancellation_uses_prior_membership_only_when_omitted():
+    lua = make_runtime()
+    lua.execute(r'''
+        alerts=0; OldKraken:On('GUILD_EVENTS_CANCELLED',function() alerts=alerts+1 end)
+        local h=OldKraken.Communication.handlers
+        h.CEVENT('Owner Realm','1',makePayload(1,false,'dps','A'))
+        local p=OldKraken.GroupFinder._pack({'1999999900-123456-1','Owner Realm',2,2000003600,'raid',10,'1','Test event','',0,'',''})
+        h.CEVENT('Owner Realm','2',p)
+        assert(alerts==1)
+    ''')
+    lua = make_runtime()
+    lua.execute(r'''
+        alerts=0; OldKraken:On('GUILD_EVENTS_CANCELLED',function() alerts=alerts+1 end)
+        local h=OldKraken.Communication.handlers
+        h.CEVENT('Owner Realm','1',makePayload(1,false,'dps','A'))
+        h.CEVENT('Owner Realm','2',makePayload(2,true,'dps','D'))
+        assert(alerts==0)
+    ''')
+
+
+def test_direct_owner_replaces_newer_relay_in_real_recipe_store():
+    lua = real_workshop_client('Carol')
+    lua.execute((ROOT / 'WorkshopSync.lua').read_text(encoding='utf-8'))
+    lua.execute(r'''
+        for _,f in ipairs(frames) do if f.events.PLAYER_LOGIN then f.scripts.OnEvent(f,'PLAYER_LOGIN') end end
+        local c=OldKraken.GroupFinder
+        local function snapshot(sender,rev,seen,name,flag,id)
+            handlers.WRIDX(sender,'GUILD',c._pack({'Carol Mon','Alice Mon',rev,1}))
+            handlers.WRPAGE(sender,'GUILD',c._pack({'Carol Mon','Alice Mon',rev,1,1,id or 123,456,171,seen,name,'Potion',flag}))
+        end
+        snapshot('Relay Mon',200,now,'Relay record','L')
+        snapshot('Alice Mon',100,now-1,'Owner record','L')
+        local s=OldKraken.DB.workshop.guilds['Realm\001Guild']
+        assert(s.recipes['Alice Mon'][123].name=='Owner record')
+        assert(s.recipeSnapshotViews['Alice Mon'].relayed==false)
+        assert(s.recipeSources['Alice Mon'][123]==false)
+        -- Relay tombstones cannot overwrite an already direct recipe.
+        snapshot('Relay Mon',400,now,'Relay tombstone','D')
+        assert(s.recipes['Alice Mon'][123].name=='Owner record')
+        -- A direct record also replaces a newer relayed tombstone.
+        snapshot('Relay Mon',500,now,'Relay tombstone','D',124)
+        snapshot('Alice Mon',300,now-2,'Still known','L',124)
+        assert(s.recipes['Alice Mon'][124].name=='Still known')
+    ''')
+
+
+def test_direct_recipe_updates_override_relay_but_not_newer_direct_state():
+    lua = real_workshop_client('Carol')
+    lua.execute(r'''
+        local recipes=OldKraken.WorkshopRecipes
+        local scope=OldKraken.DB.workshop.guilds['Realm\001Guild']
+        local c=OldKraken.GroupFinder
+        local function record(id,deleted)
+            return {recipe=id,item=456,profession=171,seen=now,name='Relay',product='Potion',deleted=deleted}
+        end
+        assert(recipes:ImportSnapshot('Alice Mon',{record(101),record(102,true),record(103),record(104,true)},true,false))
+        local function direct(kind,id,seen,name)
+            handlers[kind]('Alice Mon','GUILD',c._pack({id,456,171,seen,name,'Potion'}))
+        end
+        direct('WRLEARN',101,now-1,'Learned')
+        direct('WRLEARN',102,now-1,'Restored')
+        direct('WRFORGET',103,now-1,'Forgotten')
+        direct('WRFORGET',104,now-1,'Forgotten')
+        assert(scope.recipes['Alice Mon'][101].name=='Learned')
+        assert(scope.recipes['Alice Mon'][102].name=='Restored')
+        assert(not scope.recipes['Alice Mon'][103] and not scope.recipes['Alice Mon'][104])
+        assert(scope.recipeSources['Alice Mon'][101]==false and scope.recipeSources['Alice Mon'][103]==false)
+        direct('WRLEARN',101,now-2,'Stale')
+        direct('WRFORGET',102,now-2,'Stale')
+        direct('WRLEARN',103,now-2,'Stale')
+        assert(scope.recipes['Alice Mon'][101].name=='Learned')
+        assert(scope.recipes['Alice Mon'][102].name=='Restored')
+        assert(not scope.recipes['Alice Mon'][103])
+        -- Direct search replies have the same authority as live updates.
+        assert(recipes:ImportSnapshot('Alice Mon',{record(105),record(106,true)},true,false))
+        recipes:ShowProfession(171)
+        local token=assert(recipes:CaptureView().activeQuery).token
+        handlers.WRBATCH('Alice Mon','GUILD',c._pack({'Carol Mon',token,105,456,171,now-1,'Batch direct','Potion'}))
+        assert(scope.recipes['Alice Mon'][105].name=='Batch direct')
+        clock=clock+11; recipes:ShowMasters(456,0)
+        token=assert(recipes:CaptureView().activeQuery).token
+        handlers.WRRESULT('Alice Mon','GUILD',c._pack({'Carol Mon',token,106,456,171,now-1,'Result direct','Potion'}))
+        assert(scope.recipes['Alice Mon'][106].name=='Result direct')
+    ''')
+
+
+def test_stalled_relay_fails_over_and_owner_preempts():
+    lua = sync_client('Bob', [])
+    g = lua.globals()
+    index = pack(lua, ['Bob Realm', 'Alice Realm', 7, 1])
+    g.handlers['WRIDX']('Relay1 Realm', 'GUILD', index)
+    lua.execute('now=104; ticker(); drain()')
+    # Healthy transfers retain their provider.
+    g.handlers['WRIDX']('Relay2 Realm', 'GUILD', index)
+    lua.execute('now=149; ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Relay1 Realm'
+    lua.execute('now=150')
+    g.handlers['WRIDX']('Relay2 Realm', 'GUILD', index)
+    lua.execute('ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Relay2 Realm'
+    g.handlers['WRIDX']('Alice Realm', 'GUILD', index)
+    lua.execute('now=151; ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Alice Realm'
+    # A newer direct revision replaces an unfinished older direct transfer.
+    g.handlers['WRIDX']('Alice Realm', 'GUILD', pack(lua, ['Bob Realm','Alice Realm',8,1]))
+    lua.execute('now=152; ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Alice Realm' and fields[3] == '8'
+    # No-progress timeout releases even a direct transfer for a later relay.
+    lua.execute('now=333; ticker(); drain()')
+    g.handlers['WRIDX']('Relay2 Realm', 'GUILD', index)
+    lua.execute('now=334; ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Relay2 Realm'
+
+
+def test_large_snapshot_recovers_a_lost_late_page_during_replay():
+    lua = sync_client('Bob', [])
+    g = lua.globals()
+    g.handlers['WRIDX']('Alice Realm', 'GUILD', pack(lua, ['Bob Realm','Alice Realm',7,65]))
+    pages = [pack(lua, ['Bob Realm','Alice Realm',7,n,65,n,456,171,1700000000,'Recipe','Potion','L'])
+             for n in range(1, 66)]
+    for payload in pages[:-1]:
+        g.handlers['WRPAGE']('Alice Realm', 'GUILD', payload)
+    for payload in pages[:-1]:
+        lua.execute('now=now+3; ticker(); drain()')
+        g.handlers['WRPAGE']('Alice Realm', 'GUILD', payload)
+    assert g.now > 280 and g.imported['Alice Realm'] is None
+    g.handlers['WRPAGE']('Alice Realm', 'GUILD', pages[-1])
+    assert len(g.imported['Alice Realm']) == 65
+
+    # A conflicting duplicate cannot prevent failover by pretending to be progress.
+    lua = sync_client('Bob', [])
+    g = lua.globals()
+    index = pack(lua, ['Bob Realm','Alice Realm',7,2])
+    g.handlers['WRIDX']('Relay1 Realm', 'GUILD', index)
+    first = pack(lua, ['Bob Realm','Alice Realm',7,1,2,1,456,171,1700000000,'Recipe','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', first)
+    lua.execute('now=150')
+    conflict = pack(lua, ['Bob Realm','Alice Realm',7,1,2,1,456,171,1700000000,'Altered','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', conflict)
+    g.handlers['WRIDX']('Relay2 Realm', 'GUILD', index)
+    lua.execute('ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Relay2 Realm'
+
+    # Identical replay traffic keeps a live relay from being replaced too early.
+    lua = sync_client('Bob', [])
+    g = lua.globals()
+    index = pack(lua, ['Bob Realm','Alice Realm',7,2])
+    g.handlers['WRIDX']('Relay1 Realm', 'GUILD', index)
+    first = pack(lua, ['Bob Realm','Alice Realm',7,1,2,1,456,171,1700000000,'Recipe','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', first)
+    lua.execute('now=149')
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', first)
+    lua.execute('now=150')
+    g.handlers['WRIDX']('Relay2 Realm', 'GUILD', index)
+    lua.execute('ticker()')
+    fields = g.OldKraken.GroupFinder._unpackFields(g.drain('WRGET')[1]['payload'], 3)
+    assert fields[1] == 'Relay1 Realm'
+    # The absolute six-hour deadline remains effective despite replay traffic.
+    lua.execute('now=21700')
+    last = pack(lua, ['Bob Realm','Alice Realm',7,2,2,2,456,171,1700000000,'Recipe','Potion','L'])
+    g.handlers['WRPAGE']('Relay1 Realm', 'GUILD', last)
+    assert g.imported['Alice Realm'] is None
+
+
+def test_packaged_version_identifies_actual_commit():
+    with tempfile.TemporaryDirectory() as folder:
+        toc = Path(folder) / 'OldKraken.toc'
+        toc.write_bytes(b'## Interface: 16001\r\n## Version: 0.5.4-alpha.1\r\nCore.lua\r\n')
+        script = ROOT / 'scripts/stamp-version.py'
+        commit = '0123456789abcdef0123456789abcdef01234567'
+        subprocess.run([sys.executable, str(script), str(toc), commit], check=True)
+        assert toc.read_bytes() == b'## Interface: 16001\r\n## Version: 0.5.4-alpha.1+g0123456789ab\r\nCore.lua\r\n'
+        subprocess.run([sys.executable, str(script), str(toc), 'f' * 40], check=True)
+        assert b'0.5.4-alpha.1+gffffffffffff' in toc.read_bytes()
+        before = toc.read_bytes()
+        result = subprocess.run([sys.executable, str(script), str(toc), 'bad'], capture_output=True)
+        assert result.returncode != 0 and toc.read_bytes() == before
+
+
+def test_group_details_description_wrap_and_role_label_layer():
+    import runpy
+    source = (ROOT / 'GroupFinderUI.lua').read_text(encoding='utf-8')
+    assert 'f.roleLabel = f.roleButton:CreateFontString(' in source
+    assert 'v:SetWordWrap(idx == 5)' in source
+    lua = runpy.run_path(str(ROOT / 'tests/test_ui_smoke.py'))['lua']
+    lua.execute(r"""
+local finder=OldKraken.GroupFinder
+local ui=OldKrakenGroupFinderFrame
+local divY,hdrY
+local oldDivSet,oldHdrSet=ui.detailsDivider.SetPoint,ui.detailsRosterHeader.SetPoint
+ui.detailsDivider.SetPoint=function(self,_,_,_,x,y) divY=y end
+ui.detailsRosterHeader.SetPoint=function(self,_,_,_,x,y) hdrY=y end
+
+for k in pairs(finder.groups) do finder.groups[k]=nil end
+ui:Show()
+if ui.tabs and ui.tabs[1] and ui.tabs[1].button and ui.tabs[1].button.scripts.OnClick then ui.tabs[1].button.scripts.OnClick() end
+if ui.searchFilter and ui.searchFilter.SetText then ui.searchFilter:SetText('') end
+local other={id='wrap_test',owner='Other Owner',title='Wrap Test',category='dungeon',dungeon='rfc',role='tank',maxSize=5,minLevel=1,maxLevel=60,description='',members={'Other Owner'}}
+finder.groups[other.owner..'\001'..other.id]=other
+OldKraken.listeners.GROUP_FINDER_CHANGED()
+ui.rows[1].scripts.OnClick()
+assert(ui.detailsHeading.text=='Wrap Test')
+assert(not ui.detailsKV[5].key.shown and not ui.detailsKV[5].val.shown)
+assert(divY==-140 and hdrY==-154)
+
+other.description='Довгий опис у кілька рядків'
+local meta=getmetatable(ui.detailsKV[5].val); local oldIndex=meta.__index
+meta.__index=function(self,k) if k=='GetStringHeight' then return function() return 48 end end; return oldIndex(self,k) end
+OldKraken.listeners.GROUP_FINDER_CHANGED()
+assert(ui.detailsKV[5].key.shown and ui.detailsKV[5].val.shown)
+assert(divY==-198 and hdrY==-212)
+meta.__index=oldIndex
+ui.detailsDivider.SetPoint,ui.detailsRosterHeader.SetPoint=oldDivSet,oldHdrSet
+""")
+
+
+def test_workshop_masters_count_matches_details_by_profession():
+    from test_workshop_orders import client
+    lua = client('Tester')
+    lua.execute(r"""
+local recipes=OldKraken.WorkshopRecipes
+local store=OldKraken.DB.workshop.guilds['Realm\001Guild'].recipes
+store['Tester']={[101]={recipe=101,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Miriel']={[101]={recipe=101,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Tofur']={[202]={recipe=202,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Veira']={[202]={recipe=202,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Miner']={[303]={recipe=303,item=5555,profession=186,seen=100,name='Bar',product='',reagents={}}}
+assert(#recipes:FindMasters(5555,101,333)==4)
+assert(#recipes:FindMasters(5555,303,186)==1)
+assert(#recipes:FindMasters(5555,101)==5)
+""")
+
+
+if __name__ == '__main__':
+    test_event_cancellation_fits_and_survives_reconnect()
+    test_owner_signup_fails_without_dangling_intent_when_packet_is_full()
+    test_recovers_oversized_cancellation_saved_by_old_build()
+    test_cancellation_uses_prior_membership_only_when_omitted()
+    test_direct_owner_replaces_newer_relay_in_real_recipe_store()
+    test_direct_recipe_updates_override_relay_but_not_newer_direct_state()
+    test_stalled_relay_fails_over_and_owner_preempts()
+    test_large_snapshot_recovers_a_lost_late_page_during_replay()
+    test_packaged_version_identifies_actual_commit()
+    test_group_details_description_wrap_and_role_label_layer()
+    test_workshop_masters_count_matches_details_by_profession()
+    print('Alpha regression checks passed')

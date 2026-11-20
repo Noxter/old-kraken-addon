@@ -5,7 +5,7 @@ OldKraken.WorkshopRecipes=Recipes
 local comm,codec=OldKraken.Communication,OldKraken.GroupFinder
 local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування',[185]='Кулінарія',[129]='Перша допомога',[186]='Гірництво',[182]='Травництво',[393]='Свіжування',[356]='Риболовля'}
 local active,identity,profile,scope,people=false,nil,nil,nil,{}
-local pendingLearned,learnAttempts={},{}
+local pendingLearned,learnAttempts,learnWarned={},{},{}
 local recipeCatalog,catalogCursor,catalogPending,catalogSize=nil,nil,false,0
 local scanPending,tradeOpen,sendQueue=false,false,{}
 local activeQuery,sequence,lastQuery,lastIncoming=nil,0,-60,{}
@@ -68,7 +68,7 @@ local function connect()
     local realm=type(GetRealmName)=='function' and GetRealmName()
     if not name or not safeText(guild,1,128) or not usable(realm,'string') or not OldKraken.DB then
         if Recipes.CancelPicker then Recipes:CancelPicker() end
-        active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts={},{}
+        active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts,learnWarned={},{},{}
         tabStates={}
         indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
         if frame then frame:Hide() end; return
@@ -95,7 +95,7 @@ local function connect()
     if not integer(scope.recipeVersions[name],1,9000000000000000) then scope.recipeVersions[name]=GetServerTime()*1000 end
     if type(scope.pendingRecipes)~='table' then scope.pendingRecipes={} end
     if type(scope.pendingRecipes[name])~='table' then scope.pendingRecipes[name]={} end
-    pendingLearned,learnAttempts=scope.pendingRecipes[name],{}
+    pendingLearned,learnAttempts,learnWarned=scope.pendingRecipes[name],{},{}
     activeQuery,sendQueue,lastIncoming,resultSet,forgetChecks,lastScanProfession=nil,{}, {}, {}, {},nil
     local removals=type(scope.pendingProfessionRemovals)=='table' and scope.pendingProfessionRemovals[name]
     if type(removals)=='table' and type(Recipes.ForgetProfession)=='function' then
@@ -109,6 +109,7 @@ local function storeRecipe(owner,r,relayed,authoritative)
     if type(scope.recipeTombstones[owner])~='table' then scope.recipeTombstones[owner]={} end
     local records,sources=people[owner],scope.recipeSources[owner]
     local tomb=scope.recipeTombstones[owner][r.recipe]
+    if relayed and sources[r.recipe]~=true and (validRecord(records[r.recipe]) or validRecord(tomb)) then return records[r.recipe] end
     if validRecord(tomb) then
         if tomb.seen>=r.seen and not (authoritative and not relayed and sources[r.recipe]==true) then return nil end
         scope.recipeTombstones[owner][r.recipe]=nil
@@ -125,6 +126,7 @@ local function storeTombstone(owner,r,relayed,authoritative)
     if type(scope.recipeTombstones[owner])~='table' then scope.recipeTombstones[owner]={} end
     local records,tombs,sources=people[owner],scope.recipeTombstones[owner],scope.recipeSources[owner]
     local old,tomb=records[r.recipe],tombs[r.recipe]
+    if relayed and sources[r.recipe]~=true and (validRecord(old) or validRecord(tomb)) then return false end
     local directOverride=authoritative and not relayed and sources[r.recipe]==true
     if validRecord(old) and old.seen>r.seen and not directOverride then return false end
     if validRecord(tomb) and tomb.seen>=r.seen and not directOverride then return false end
@@ -209,7 +211,7 @@ local function recordLearned(r,deferRefresh)
     indexRevision=indexRevision+1; recipeChanged=true
     if pendingLearned[r.recipe] then
         if #sendQueue<100 then
-            pendingLearned[r.recipe]=nil; learnAttempts[r.recipe]=nil
+            pendingLearned[r.recipe]=nil; learnAttempts[r.recipe]=nil; learnWarned[r.recipe]=nil
             local payload=codec._pack({r.recipe,r.item,r.profession,r.seen,r.name,r.product})
             sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
         end
@@ -228,7 +230,7 @@ local function forgetRecipe(id,deferRefresh)
     if not storeTombstone(identity,removed,false) then return false end
     scope.recipeVersions[identity]=math.max((scope.recipeVersions[identity] or 0)+1,GetServerTime()*1000)
     scope.recipeVersionSeen[identity]=GetServerTime()
-    pendingLearned[id],learnAttempts[id],forgetChecks[id]=nil,nil,nil
+    pendingLearned[id],learnAttempts[id],learnWarned[id],forgetChecks[id]=nil,nil,nil,nil
     if #sendQueue<100 then
         sendQueue[#sendQueue+1]={kind='WRFORGET',payload=codec._pack({removed.recipe,removed.item,removed.profession,removed.seen,removed.name,removed.product}),expires=GetTime()+600}
     end
@@ -259,6 +261,9 @@ local function scanLearned(id)
     if not profession and type(api.GetTradeSkillLineForRecipe)=='function' then
         local success,line=pcall(api.GetTradeSkillLineForRecipe,id)
         if success and integer(line,1,1000000) and professionNames[line] then profession=line end
+    end
+    if not profession and recipeCatalog and validRecord(recipeCatalog[id]) and professionNames[recipeCatalog[id].profession] then
+        profession=recipeCatalog[id].profession
     end
     if not profession or not playerHasProfession(profession) then return false end
     local item,product=outputInfo(api,id)
@@ -515,7 +520,7 @@ comm:RegisterHandler('WRBATCH',function(sender,_,payload)
         if matches(r,activeQuery.query) and (people[sender][r.recipe] or cachedCount<5000) then
             local old=people[sender][r.recipe]
             if not old then cachedCount=cachedCount+1 end
-            local stored=storeRecipe(sender,r,false)
+            local stored=storeRecipe(sender,r,false,true)
             if stored then
                 local k=sender..'\001'..r.recipe
                 if resultSet[k] or resultCount<5000 then if not resultSet[k] then resultCount=resultCount+1 end; resultSet[k]={owner=sender,record=stored} end
@@ -533,7 +538,7 @@ comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if not matches(r,activeQuery.query) then return end
     if type(people[sender])~='table' then if count(people)>=1000 then return end; people[sender]={} end
     if not people[sender][r.recipe] and count(people[sender])>=5000 then return end
-    local stored=storeRecipe(sender,r,false); if not stored then return end
+    local stored=storeRecipe(sender,r,false,true); if not stored then return end
     local k=sender..'\001'..r.recipe
     if resultSet[k] or count(resultSet)<500 then resultSet[k]={owner=sender,record=stored} end
     changed(); indexRevision=indexRevision+1; recipeChanged=true
@@ -548,7 +553,7 @@ comm:RegisterHandler('WRLEARN',function(sender,_,payload)
     local old=people[sender][r.recipe]
     local sources=scope.recipeSources[sender]
     if validRecord(old) and old.seen>=r.seen and not (type(sources)=='table' and sources[r.recipe]) then return end
-    local stored=storeRecipe(sender,r,false); if not stored then return end
+    local stored=storeRecipe(sender,r,false,true); if not stored then return end
     if activeQuery and GetTime()<=activeQuery.untilTime then
         local k=sender..'\001'..r.recipe
         if matches(stored,activeQuery.query) and (resultSet[k] or count(resultSet)<500) then resultSet[k]={owner=sender,record=stored}
@@ -560,7 +565,7 @@ comm:RegisterHandler('WRFORGET',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
     local f=codec._unpackFields(payload,6); if not f or #f~=6 then return end
     local r={recipe=tonumber(f[1]),item=tonumber(f[2]),profession=tonumber(f[3]),seen=tonumber(f[4]),name=f[5],product=f[6],deleted=true}
-    if validRecord(r) and storeTombstone(sender,r,false) then changed(); indexRevision=indexRevision+1; recipeChanged=true end
+    if validRecord(r) and storeTombstone(sender,r,false,true) then changed(); indexRevision=indexRevision+1; recipeChanged=true end
 end)
 
 local events=CreateFrame('Frame')
@@ -570,7 +575,7 @@ events:SetScript('OnEvent',function(_,event,recipeID)
     elseif event=='NEW_RECIPE_LEARNED' then
         connect()
         if active and integer(recipeID,1,100000000) and (pendingLearned[recipeID] or count(pendingLearned)<1000) then
-            pendingLearned[recipeID]=true; learnAttempts[recipeID]=0
+            pendingLearned[recipeID]=true; learnAttempts[recipeID]=0; learnWarned[recipeID]=nil
             if tradeOpen then scanPending=true end
         end
     elseif event=='SPELLS_CHANGED' or event=='LEARNED_SPELL_IN_SKILL_LINE' then catalogCursor=nil; catalogPending=true; if tradeOpen then scanPending=true end
@@ -578,6 +583,96 @@ events:SetScript('OnEvent',function(_,event,recipeID)
     elseif event=='TRADE_SKILL_SHOW' then tradeOpen=true; scanPending=true; learnAttempts={}
     elseif tradeOpen then scanPending=true end
 end)
+local function pendingRecipeName(id)
+    if type(C_TradeSkillUI)=='table' and type(C_TradeSkillUI.GetRecipeInfo)=='function' then
+        local ok,info=pcall(C_TradeSkillUI.GetRecipeInfo,id)
+        if ok and usable(info,'table') and safeText(info.name,1,120) then return info.name end
+    end
+    if recipeCatalog and type(recipeCatalog[id])=='table' and safeText(recipeCatalog[id].name,1,120) then
+        return recipeCatalog[id].name
+    end
+    if type(C_Spell)=='table' and type(C_Spell.GetSpellName)=='function' then
+        local ok,name=pcall(C_Spell.GetSpellName,id)
+        if ok and safeText(name,1,120) then return name end
+    end
+    if type(GetSpellInfo)=='function' then
+        local ok,name=pcall(GetSpellInfo,id)
+        if ok and safeText(name,1,120) then return name end
+    end
+    return nil
+end
+local function pendingRecipeProfession(id)
+    local prof
+    if type(C_TradeSkillUI)=='table' then
+        if type(C_TradeSkillUI.GetProfessionInfoByRecipeID)=='function' then
+            local ok,data=pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID,id)
+            if ok and usable(data,'table') then
+                if integer(data.parentProfessionID,1,1000000) and professionNames[data.parentProfessionID] then prof=data.parentProfessionID
+                elseif integer(data.professionID,1,1000000) and professionNames[data.professionID] then prof=data.professionID end
+            end
+        end
+        if not prof and type(C_TradeSkillUI.GetTradeSkillLineForRecipe)=='function' then
+            local ok,line=pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe,id)
+            if ok and integer(line,1,1000000) and professionNames[line] then prof=line end
+        end
+    end
+    if not prof and recipeCatalog and type(recipeCatalog[id])=='table' and professionNames[recipeCatalog[id].profession] then
+        prof=recipeCatalog[id].profession
+    end
+    if prof and professionNames[prof] and playerHasProfession(prof) then return T(professionNames[prof]) end
+    return nil
+end
+local function playerCraftingProfessionsText()
+    if type(GetProfessions)~='function' or type(GetProfessionInfo)~='function' then return nil end
+    local ok,a,b,c,d,e,f=pcall(GetProfessions); if not ok then return nil end
+    local gathering={[182]=true,[393]=true,[356]=true}
+    local indexes={a,b,c,d,e,f}
+    local list,seen={},{}
+    for i=1,6 do
+        if integer(indexes[i],1,100000) then
+            local success,_,_,_,_,_,_,skillLine=pcall(GetProfessionInfo,indexes[i])
+            if success and integer(skillLine,1,1000000) and professionNames[skillLine] and not gathering[skillLine] and not seen[skillLine] then
+                seen[skillLine]=true; list[#list+1]=T(professionNames[skillLine])
+            end
+        end
+    end
+    return #list>0 and table.concat(list,' / ') or nil
+end
+local function formatPendingNotice(ids)
+    local names,profs,seenNames,seenProfs={},{},{},{}
+    local namedCount=0
+    for _,id in ipairs(ids) do
+        local rname=pendingRecipeName(id)
+        if rname then
+            namedCount=namedCount+1
+            if not seenNames[rname] and #names<3 then seenNames[rname]=true; names[#names+1]=rname end
+        end
+        local pname=pendingRecipeProfession(id)
+        if pname and not seenProfs[pname] then seenProfs[pname]=true; profs[#profs+1]=pname end
+    end
+    local extra=#ids-#names
+    local recipePart=''
+    if #names>0 then
+        recipePart=' «'..table.concat(names,'», «')..'»'
+        if extra>0 then
+            local unnamed=#ids-namedCount
+            if unnamed>0 and namedCount>#names then
+                recipePart=recipePart..string.format(T(' (та ще %d, з них %d без назви)'),extra,unnamed)
+            elseif unnamed>0 then
+                recipePart=recipePart..string.format(T(' (та ще %d без назви)'),unnamed)
+            else
+                recipePart=recipePart..string.format(T(' (та ще %d)'),extra)
+            end
+        end
+    elseif #ids>1 then
+        recipePart=string.format(T(' (%d без назви)'),#ids)
+    end
+    local profPart=#profs>0 and table.concat(profs,' / ') or playerCraftingProfessionsText()
+    if profPart then
+        return string.format(T('Old Kraken: ваш новий рецепт%s очікує даних гри. Відкрийте свою професію (%s), щоб завершити оновлення.'),recipePart,profPart)
+    end
+    return string.format(T('Old Kraken: ваш новий рецепт%s очікує даних гри. Відкрийте вікно своєї професії, щоб завершити оновлення.'),recipePart)
+end
 if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
     connect(); if not active then return end
     if scanPending then
@@ -610,17 +705,37 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
             end
         else catalogPending=false end
     end
+    local newlyTimedOut,checked={},0
+    local pendingIds={}
     for id in pairs(pendingLearned) do
-        if not integer(id,1,100000000) then pendingLearned[id]=nil
+        if integer(id,1,100000000) then pendingIds[#pendingIds+1]=id
+        else pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil end
+    end
+    table.sort(pendingIds)
+    for _,id in ipairs(pendingIds) do
+        local stored=people[identity] and people[identity][id]
+        if validRecord(stored) then
+            learnAttempts[id]=0; learnWarned[id]=nil
+            if #sendQueue<100 then
+                pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
+                local payload=codec._pack({stored.recipe,stored.item,stored.profession,stored.seen,stored.name,stored.product})
+                sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
+            end
         elseif (learnAttempts[id] or 0)<10 then
             local ok,done=pcall(scanLearned,id)
-            if not ok or not done or pendingLearned[id] then
+            if ok and done then
+                learnAttempts[id]=0; learnWarned[id]=nil
+            else
                 learnAttempts[id]=(learnAttempts[id] or 0)+1
-                if learnAttempts[id]==10 then print(T('Old Kraken: новий рецепт очікує даних гри. Відкрийте відповідну професію, щоб завершити оновлення.')) end
+                if learnAttempts[id]==10 and not learnWarned[id] then
+                    learnWarned[id]=true
+                    newlyTimedOut[#newlyTimedOut+1]=id
+                end
             end
-            break
+            checked=checked+1; if checked>=50 then break end
         end
     end
+    if #newlyTimedOut>0 then print(formatPendingNotice(newlyTimedOut)) end
     while #sendQueue>0 and sendQueue[1].expires<GetTime() do table.remove(sendQueue,1) end
     if #sendQueue>0 and #comm.queue<=8 and comm:SendProtocol(sendQueue[1].kind or 'WRRESULT',sendQueue[1].payload) then table.remove(sendQueue,1) end
     if recipeChanged then recipeChanged=false; OldKraken:Fire('WORKSHOP_RECIPES_CHANGED') end
@@ -1031,7 +1146,7 @@ render=function()
         end
         resizeInfo(); return
     end
-    local list,grouped,groupCounts,groupOnline={},{},{},{}
+    local list,grouped,groupCounts={},{},{}
     local byRecipe=not selectRecipe and not viewOwner and not (filter and (filter:find('^item:') or filter:find('^recipe:')))
     local workshop=OldKraken.Workshop
     for _,entry in pairs(resultSet) do
@@ -1045,7 +1160,6 @@ render=function()
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
                 groupCounts[id]=(groupCounts[id] or 0)+1
-                if online[entry.owner] then groupOnline[id]=(groupOnline[id] or 0)+1 end
                 local other=entry.owner~=identity
                 local oldOther=old and old.owner~=identity
                 if not old or (other and not oldOther) or (other==oldOther and ((online[entry.owner] and not online[old.owner]) or ((online[entry.owner] and true or false)==(online[old.owner] and true or false) and entry.record.seen>old.record.seen))) then grouped[id]=entry end
@@ -1063,9 +1177,11 @@ render=function()
             local r=entry.record; row.entry=entry
             row.icon:SetTexture(recipeIcon(r))
             row.name:SetText(displayRecipeName(r))
-            local totalMasters=byRecipe and (groupCounts[r.recipe] or 1) or 1
+            local rowMasters=byRecipe and Recipes:FindMasters(r.item,r.recipe,r.profession) or nil
+            local totalMasters=byRecipe and math.max(groupCounts[r.recipe] or 1, rowMasters and #rowMasters or 0) or 1
             if byRecipe and totalMasters>1 then
-                local onCount=groupOnline[r.recipe] or 0
+                local onCount=0
+                for _,m in ipairs(rowMasters or {}) do if online[m.name] then onCount=onCount+1 end end
                 local onText=onCount>0 and ('|cff68d98c'..onCount..T(' онлайн|r')) or T('|cff9ba9bcофлайн|r')
                 local mWord=OldKraken.Workshop and OldKraken.Workshop.PluralUk and OldKraken.Workshop:PluralUk(totalMasters,T('майстер'),T('майстри'),T('майстрів')) or T('майстрів')
                 row.meta:SetText(professionNames[r.profession]..' · '..totalMasters..' '..mWord..' · '..onText)
@@ -1084,7 +1200,7 @@ render=function()
     if r then
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(displayRecipeName(r))
-        local masters=Recipes:FindMasters(r.item,r.recipe)
+        local masters=Recipes:FindMasters(r.item,r.recipe,r.profession)
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
         if viewOwner~=nil then
             selectedRecipeMaster=viewOwner~=identity and viewOwner or nil
@@ -1704,18 +1820,31 @@ function Recipes:Choose(callback,profession)
     frame.status:SetText(T('Оберіть рецепт іншого майстра. Власні рецепти позначено у списку.'))
     frame:Raise(); render()
 end
-function Recipes:FindMasters(itemID,recipeID)
+function Recipes:FindMasters(itemID,recipeID,profession)
     local found={}
     if not integer(itemID,0,100000000) or not integer(recipeID,0,100000000) or (itemID==0 and recipeID==0) then return {} end
     if recipeID>0 then
         for name,records in pairs(people) do
             local r=type(records)=='table' and records[recipeID]
-            if safeText(name,1,128) and validRecord(r) then found[name]=r.seen end
+            if safeText(name,1,128) and validRecord(r) and (not profession or r.profession==profession) then found[name]=r.seen end
         end
     end
     if itemID>0 then
         ensureRecipeIndex()
-        for name,seen in pairs(itemIndex[itemID] or {}) do found[name]=math.max(found[name] or 0,seen) end
+        for name,seen in pairs(itemIndex[itemID] or {}) do
+            if not profession then
+                found[name]=math.max(found[name] or 0,seen)
+            else
+                local records=people[name]
+                if type(records)=='table' then
+                    for _,r in pairs(records) do
+                        if validRecord(r) and r.item==itemID and r.profession==profession then
+                            found[name]=math.max(found[name] or 0,r.seen)
+                        end
+                    end
+                end
+            end
+        end
     end
     local out={}; for name,seen in pairs(found) do out[#out+1]={name=name,seen=seen} end
     table.sort(out,function(a,b) return a.name<b.name end); return out

@@ -33,6 +33,7 @@ end
 
 local function deactivate()
     if active then comm:ClearProtocolState() end
+    finder.onPersist = nil
     active, finder.active, storage, currentKey = false, false, nil, nil
     partyDirty = true
     nextPartyCheck = 0
@@ -41,11 +42,35 @@ end
 
 local function saveOwned()
     if not storage then return end
+    storage.lastActivity = {}
+    for id, ts in pairs(finder.lastActivity or {}) do
+        local group = finder.groups[finder.identity .. '\001' .. id]
+        if group and not group.closed and not group.hidden and type(ts) == 'number'
+            and ts == ts and ts % 1 == 0 and ts > 0 then
+            storage.lastActivity[id] = ts
+        end
+    end
     local records = {}
+    local compactGroupData = {}
     for _, group in pairs(finder.groups) do
-        if group.owner == finder.identity then records[#records + 1] = finder:EncodeGroup(group) end
+        if group.owner == finder.identity then
+            local payload = finder:EncodeGroup(group)
+            records[#records + 1] = payload
+            local fields = finder._unpackFields(payload, 215)
+            local count = fields and tonumber(fields[9])
+            if group.closed and count and (count ~= #group.members or fields[7] ~= group.description or #fields < 15 + count) then
+                local members, roles = {}, {}
+                for _, member in ipairs(group.members) do
+                    members[#members + 1] = member
+                    local role = group.memberRoles and group.memberRoles[member]
+                    if role == 'tank' or role == 'healer' or role == 'dps' or role == 'flex' then roles[member] = role end
+                end
+                compactGroupData[group.id] = {description=group.description, members=members, memberRoles=roles}
+            end
+        end
     end
     storage.records = records
+    storage.compactGroupData = compactGroupData
     storage.observedParty = {}
     for _, group in pairs(finder.groups) do
         if group.owner == finder.identity and group.partyObserved then
@@ -128,13 +153,13 @@ local function receiveGroup(kind, sender, _, payload)
     diagnostics.lastSender = sender
     local name = normalizeSender(sender)
     diagnostics.lastNormalized = name
-    local fields = kind == 'ANNOUNCE' and finder._unpackFields(payload, 215) or nil
+    local fields = finder._unpackFields(payload, 215)
     local key = fields and fields[1] and fields[2] and (fields[2] .. '\001' .. fields[1]) or nil
     local isNew = key and not finder.groups[key]
     if name and finder:ReceiveGroup(name, payload) then
         diagnostics.accepted = diagnostics.accepted + 1
         saveOwned()
-        OldKraken:Fire('GROUP_FINDER_CHANGED')
+        OldKraken:Fire('GROUP_FINDER_CHANGED', key and finder.groups[key])
         if kind == 'ANNOUNCE' and isNew and name ~= finder.identity and finder:GroupAlertsEnabled() then
             local group = finder.groups[key]
             local created = group and tonumber(group.id:match('^(%d+)%-'))
@@ -159,11 +184,12 @@ comm:RegisterHandler('BUMP', function(sender, _, payload)
     if not name or not fields or not fields[1] or fields[2] ~= name or name == finder.identity then return end
     local key = name .. '\001' .. fields[1]
     local existing = finder.groups[key]
-    local current = existing and finder:EncodeGroup(existing) == payload
+    local current = existing and (existing._receivedPayload == payload or finder:EncodeGroup(existing) == payload)
+    if current then existing.seenAt = GetTime() end
     if not current then
         if not finder:ReceiveGroup(name, payload) then return end
         saveOwned()
-        OldKraken:Fire('GROUP_FINDER_CHANGED')
+        OldKraken:Fire('GROUP_FINDER_CHANGED', finder.groups[key])
     end
     local group = finder.groups[key]
     if group and not group.closed and finder:GroupAlertsEnabled() then OldKraken:Fire('GROUP_FINDER_NEW', group) end
@@ -173,9 +199,17 @@ function finder:GetReannounceRemaining(id)
     local group = active and self.groups[self.identity .. '\001' .. id]
     if not group or group.closed or group.hidden then return nil end
     local now = GetServerTime()
-    storage.lastBump = storage.lastBump or {}
-    local created = tonumber(id:match('^(%d+)%-')) or now
-    local previous = tonumber(storage.lastBump[id]) or created
+    if type(storage.lastBump) ~= 'table' then storage.lastBump = {} end
+    local function validTimestamp(value)
+        return type(value) == 'number' and value == value and value % 1 == 0 and value > 0 and value <= now + 600
+    end
+    local created = tonumber(id:match('^(%d+)%-'))
+    if not validTimestamp(created) then created = now - REANNOUNCE_DELAY end
+    local previous = tonumber(storage.lastBump[id])
+    if not validTimestamp(previous) then
+        storage.lastBump[id] = nil
+        previous = created
+    end
     return math.max(0, math.ceil(previous + REANNOUNCE_DELAY - now))
 end
 
@@ -186,6 +220,8 @@ function finder:Reannounce(id)
     local group = self.groups[self.identity .. '\001' .. id]
     if not comm:SendProtocol('BUMP', self:EncodeGroup(group)) then return false, 'queue' end
     storage.lastBump[id] = GetServerTime()
+    finder.lastActivity[id] = storage.lastBump[id]
+    saveOwned()
     return true
 end
 comm:RegisterHandler('JOIN', function(sender, _, payload)
@@ -421,6 +457,38 @@ frame:SetScript('OnEvent', function(_, event)
             if group and group.closed and hidden == true then group.hidden = true end
         end
     end
+    if type(storage.compactGroupData) == 'table' then
+        local function validText(value, min, max)
+            return type(value) == 'string' and #value >= min and #value <= max and not value:find('[%z\1-\31\127]')
+        end
+        for _, group in pairs(finder.groups) do
+            local backup = storage.compactGroupData[group.id]
+            if group.owner == identity and group.closed and type(backup) == 'table'
+                and validText(backup.description, 0, 500) and type(backup.members) == 'table'
+                and backup.description:sub(1, #group.description) == group.description
+                and #backup.members >= #group.members and #backup.members <= group.maxSize and backup.members[1] == identity then
+                local members, seen, valid = {}, {}, true
+                for _, member in ipairs(backup.members) do
+                    if not validText(member, 1, 128) or seen[member] then valid = false; break end
+                    members[#members + 1] = member
+                    seen[member] = true
+                end
+                for i, member in ipairs(group.members) do
+                    if members[i] ~= member then valid = false; break end
+                end
+                if valid and #members == #backup.members then
+                    local roles = {}
+                    local savedRoles = type(backup.memberRoles) == 'table' and backup.memberRoles or {}
+                    for _, member in ipairs(members) do
+                        local role = savedRoles[member]
+                        if role == 'tank' or role == 'healer' or role == 'dps' or role == 'flex' then roles[member] = role end
+                    end
+                    roles[identity] = group.role
+                    group.description, group.members, group.memberRoles = backup.description, members, roles
+                end
+            end
+        end
+    end
     if type(storage.deletedGroups) == 'table' then
         local count = 0
         for id, entry in pairs(storage.deletedGroups) do
@@ -525,6 +593,36 @@ frame:SetScript('OnEvent', function(_, event)
             end
         end
     end
+    -- Restore activity only after every profile table has been loaded.
+    local serverNow = GetServerTime()
+    local function validActivity(ts)
+        return type(ts) == 'number' and ts == ts and ts % 1 == 0 and ts > 0 and ts <= serverNow + 600
+    end
+    local savedActivity = type(storage.lastActivity) == 'table' and storage.lastActivity or {}
+    local savedBumps = type(storage.lastBump) == 'table' and storage.lastBump or {}
+    for _, group in pairs(finder.groups) do
+        if group.owner == identity and not group.closed and not group.hidden then
+            local ts = tonumber(savedActivity[group.id])
+            if not validActivity(ts) then
+                local bump = tonumber(savedBumps[group.id])
+                local created = tonumber(group.id:match('^(%d+)%-'))
+                if validActivity(bump) and validActivity(created) then ts = math.max(bump, created)
+                elseif validActivity(bump) then ts = bump
+                elseif validActivity(created) then ts = created
+                else ts = serverNow end
+            end
+            if serverNow - ts >= finder.IDLE_GROUP_TTL then
+                group.closed = true
+                -- At the protocol limit the local closure is retained, but peers
+                -- holding the same revision cannot accept a newer snapshot.
+                if group.revision < 2147483647 then group.revision = group.revision + 1
+                else print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.')) end
+                comm:SendProtocol('CANCEL', finder:EncodeGroup(group))
+            else finder.lastActivity[group.id] = ts end
+        end
+    end
+    finder.onPersist = saveOwned
+    saveOwned()
     active = true
     partyDirty = true
     finder.active = true
@@ -542,6 +640,38 @@ frame:SetScript('OnEvent', function(_, event)
                 return
             end
             local now = GetTime()
+            local serverNow = GetServerTime()
+            local activityChanged = false
+            for _, group in pairs(finder.groups) do
+                if group.owner == finder.identity and not group.closed and not group.hidden then
+                    local ts = finder.lastActivity[group.id]
+                    if type(ts) ~= 'number' or ts ~= ts or ts % 1 ~= 0 or ts <= 0 or ts > serverNow + 600 then
+                        finder.lastActivity[group.id] = serverNow
+                        activityChanged = true
+                    elseif serverNow - ts >= finder.IDLE_GROUP_TTL then
+                        if group.revision >= 2147483647 then
+                            group.closed = true
+                            finder.lastActivity[group.id] = nil
+                            activityChanged = true
+                            OldKraken:Fire('GROUP_FINDER_CHANGED')
+                            print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+                        elseif finder:Cancel(group.id) then
+                            OldKraken:Fire('GROUP_FINDER_CHANGED')
+                            local title = group.title or group.id
+                            local catalog = OldKraken.ActivityCatalog
+                            if catalog and catalog.IsCanonicalTitle and catalog.IsCanonicalTitle(group.dungeon, title) then
+                                for _, list in ipairs({catalog.dungeon or {}, catalog.raid or {}}) do
+                                    for _, entry in ipairs(list) do
+                                        if entry.value == group.dungeon then title = entry.label; break end
+                                    end
+                                end
+                            end
+                            print(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності.'), title))
+                        end
+                    end
+                end
+            end
+            if activityChanged then saveOwned() end
             -- Some clients can miss a roster event or deliver it before the
             -- roster is complete. Reconcile periodically even after success.
             if partyDirty or now >= nextPartyCheck then
@@ -551,6 +681,7 @@ frame:SetScript('OnEvent', function(_, event)
             if now >= nextQuery and comm:RequestSync() then nextQuery = now + 180 end
             if now >= nextBroadcast then finder:OnQuery(); nextBroadcast = now + 300 end
             if now >= nextRetry and finder:RetryPending() then nextRetry = now + 180 end
+
             finder:SyncStep()
             if finder:Prune() then saveOwned() end
         end)
