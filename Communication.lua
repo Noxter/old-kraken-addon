@@ -510,65 +510,71 @@ end
 
 local function ReadTreeHeadersSpec()
     local tf = PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame
-    if Secret(tf) or type(tf) ~= 'table' or Secret(tf.treeHeaders) or type(tf.treeHeaders) ~= 'table' or #tf.treeHeaders ~= 3 then return nil, false end
+    if Secret(tf) or type(tf) ~= 'table' or Secret(tf.treeHeaders) or type(tf.treeHeaders) ~= 'table' or #tf.treeHeaders ~= 3 then return nil, 'unknown' end
     local headers, values = tf.treeHeaders, {}
     for i = 1, 3 do
         local h = headers[i]
         if Secret(h) or type(h) ~= 'table' or not h.Name or not h.Text or not h.Icon
-            or type(h.Name.GetText) ~= 'function' or type(h.Text.GetText) ~= 'function' or type(h.Icon.GetTexture) ~= 'function' then return nil, false end
+            or type(h.Name.GetText) ~= 'function' or type(h.Text.GetText) ~= 'function' or type(h.Icon.GetTexture) ~= 'function' then return nil, 'unknown' end
         local okName, name = pcall(h.Name.GetText, h.Name)
         local okText, text = pcall(h.Text.GetText, h.Text)
         local okIcon, icon = pcall(h.Icon.GetTexture, h.Icon)
-        if not okName or not okText or not okIcon or Secret(name) or Secret(text) or type(name) ~= 'string' or type(text) ~= 'string' then return nil, false end
+        if not okName or not okText or not okIcon or Secret(name) or Secret(text) or type(name) ~= 'string' or type(text) ~= 'string' then return nil, 'unknown' end
         name = (name:gsub('^%s+', '')):gsub('%s+$', '')
         local digits = text:match('^%s*(%d+)%s*$')
         local points = digits and tonumber(digits)
-        if not ValidSpecName(name) or not Integer(points, 0, 999) then return nil, false end
-        if not Integer(icon, 1, 999999999) then icon = 0 end
+        if not ValidSpecName(name) or not Integer(points, 0, 999) then return nil, 'unknown' end
+        if not Integer(icon, 1, 999999999) then return nil, 'unknown' end
         values[i] = {name = name, points = points, icon = icon}
     end
     local a, b, c = values[1].points, values[2].points, values[3].points
     local maximum = math.max(a, b, c)
     local count = (a == maximum and 1 or 0) + (b == maximum and 1 or 0) + (c == maximum and 1 or 0)
-    if maximum == 0 or count ~= 1 then return nil, true end
+    if maximum == 0 then return nil, 'reset' end
+    if count ~= 1 then return nil, 'unknown' end
     local best = a == maximum and values[1] or b == maximum and values[2] or values[3]
-    return {name = best.name, icon = best.icon, points = a .. '/' .. b .. '/' .. c}, true
+    return {name = best.name, icon = best.icon, points = a .. '/' .. b .. '/' .. c, total = a + b + c}, 'active'
 end
 
 function Communication:GetLocalTreeSpec()
     local sig = self:GetLocalTraitSignature()
-    if not sig then return nil, false end
+    if not sig then return 'unknown', nil end
     local roster, key = RosterStorage(), LocalSpecKey()
-    if not roster or not key then return nil, false end
-    if sig.spent == 0 then roster.localSpecs[key] = nil; return nil, true end
-    if self.localSpecResetSig == sig.distSig then return nil, true end
+    if not roster or not key then return 'unknown', nil end
+    if sig.spent == 0 then roster.localSpecs[key] = nil; return 'reset', nil end
     local cached = roster.localSpecs[key]
-    if type(cached) ~= 'table' then return nil, false end
-    if cached.distSig ~= sig.distSig then roster.localSpecs[key] = nil; return nil, false end
+    if type(cached) ~= 'table' then roster.localSpecs[key] = nil; return 'unknown', nil end
     local now = GetServerTime()
     local a, b, c, unique = ParsePoints(cached.points)
-    if not ValidSpecName(cached.name) or not Integer(cached.icon, 0, 999999999) or not unique
-        or not Integer(cached.updatedAt, 0) or cached.updatedAt > now + 600 or now - cached.updatedAt > 604800 then return nil, false end
-    return {name = cached.name, icon = cached.icon ~= 0 and cached.icon or nil, points = cached.points}, false
+    if cached.distSig ~= sig.distSig or not ValidSpecName(cached.name) or not Integer(cached.icon, 0, 999999999) or not unique
+        or a + b + c ~= sig.spent or not Integer(cached.updatedAt, 0) or cached.updatedAt > now + 600 or now - cached.updatedAt > 604800 then
+        roster.localSpecs[key] = nil
+        return 'unknown', nil
+    end
+    return 'active', {name = cached.name, icon = cached.icon ~= 0 and cached.icon or nil, points = cached.points}
 end
 
 function Communication:RefreshLocalTreeSpec()
     local sig = self:GetLocalTraitSignature()
     local roster, key = RosterStorage(), LocalSpecKey()
     if not sig or not roster or not key then return end
-    local spec, valid = ReadTreeHeadersSpec()
-    if not valid then return end
     local previous = roster.localSpecs[key]
-    local oldReset = self.localSpecResetSig == sig.distSig
-    if sig.spent == 0 or not spec then
+    if sig.spent == 0 then
         roster.localSpecs[key] = nil
-        self.localSpecResetSig = sig.distSig
-    else
-        self.localSpecResetSig = nil
-        roster.localSpecs[key] = {name = spec.name, icon = spec.icon, points = spec.points, distSig = sig.distSig, updatedAt = GetServerTime()}
+        if previous ~= nil or self.lastBroadcastSpecPayload ~= '0^0/0/0^' then
+            if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+            self:SendLocalSpec(false)
+        end
+        return
     end
-    local changed = (not spec or sig.spent == 0) and (previous ~= nil or not oldReset)
-        or (spec and sig.spent > 0 and (not previous or previous.name ~= spec.name or previous.icon ~= spec.icon or previous.points ~= spec.points or previous.distSig ~= sig.distSig))
+    local spec, headerState = ReadTreeHeadersSpec()
+    if headerState ~= 'active' or not spec or spec.total ~= sig.spent then
+        roster.localSpecs[key] = nil
+        if previous ~= nil and OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+        return
+    end
+    roster.localSpecs[key] = {name = spec.name, icon = spec.icon, points = spec.points, distSig = sig.distSig, updatedAt = GetServerTime()}
+    local changed = type(previous) ~= 'table' or previous.name ~= spec.name or previous.icon ~= spec.icon or previous.points ~= spec.points or previous.distSig ~= sig.distSig
     if changed then
         if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
         self:SendLocalSpec(false)
@@ -631,8 +637,9 @@ function Communication:GetRosterSpec(name)
     if key == '' then return nil end
     local fullKey, shortKey = PresenceKey(FullPlayerName()), PresenceKey(PlayerName())
     if (fullKey ~= '' and key == fullKey) or (shortKey ~= '' and key == shortKey) then
-        local spec = self:GetLocalTreeSpec()
-        if spec then spec.receivedAt = GetTime() end
+        local state, spec = self:GetLocalTreeSpec()
+        if state ~= 'active' then return nil end
+        spec.receivedAt = GetTime()
         return spec
     end
     local entry = self.rosterSpecs[key]
@@ -645,11 +652,11 @@ end
 function Communication:SendLocalSpec(forceOnQuery)
     EnsurePresenceGuild(self)
     if not self.ready or not IsInGuild or not IsInGuild() then return false end
-    local spec, reset = self:GetLocalTreeSpec()
-    if not spec and not reset then self.pendingSpecBroadcast, self.pendingSpecForce = false, false; return false end
+    local state, spec = self:GetLocalTreeSpec()
+    if state == 'unknown' then self.pendingSpecBroadcast, self.pendingSpecForce = false, false; return false end
     local force = forceOnQuery or self.pendingSpecForce
-    local payload = spec and (tostring(spec.icon or 0) .. '^' .. spec.points .. '^' .. spec.name) or '0^0/0/0^'
-    if not force and (payload == self.lastBroadcastSpecPayload or (reset and not self.lastBroadcastSpecPayload)) then
+    local payload = state == 'reset' and '0^0/0/0^' or (tostring(spec.icon or 0) .. '^' .. spec.points .. '^' .. spec.name)
+    if not force and (payload == self.lastBroadcastSpecPayload or (state == 'reset' and not self.lastBroadcastSpecPayload)) then
         self.pendingSpecBroadcast, self.pendingSpecForce = false, false
         return false
     end

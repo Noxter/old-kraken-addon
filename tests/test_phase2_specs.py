@@ -138,7 +138,9 @@ talentFrame.treeHeaders[1].Name.GetText=function() error('bad ui') end
 c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
 talentFrame.treeHeaders[1].Name.GetText=function() return 'Valid' end
 talentFrame.treeHeaders[1].Icon.GetTexture=function() return secret end
-c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter').icon==nil)
+c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+talentFrame.treeHeaders[1].Icon.GetTexture=function() return 123 end
+c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter').icon==123)
 """)
 
     def test_05_local_and_remote_ttl(self):
@@ -146,7 +148,9 @@ c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter').icon==nil)
 c:RefreshLocalTreeSpec(); local entry=OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']
 clock=clock+604800; assert(c:GetRosterSpec('Noxter'))
 clock=clock+1; assert(c:GetRosterSpec('Noxter')==nil)
+OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']=entry
 entry.updatedAt=clock+601; assert(c:GetRosterSpec('Noxter')==nil)
+OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']=entry
 entry.updatedAt=clock+600; assert(c:GetRosterSpec('Noxter'))
 msg('Other',1,0,'10/7/3','Remote'); now=3700; assert(c:GetRosterSpec('Other'))
 now=3701; assert(c:GetRosterSpec('Other')==nil)
@@ -323,6 +327,8 @@ assert(#calls==2 and calls[1]==false and calls[2]==false)
 c.SendLocalSpec=original
 points={10,10,0}; c:RefreshLocalTreeSpec()
 assert(not queued():find('OKP^SPEC2^',1,true))
+assert(not c:SendLocalSpec(true) and #c.queue==0)
+spent=0; points={0,0,0}
 assert(c:SendLocalSpec(true))
 assert(queued():find('^0^0/0/0^',1,true))
 """)
@@ -358,6 +364,109 @@ head.Name.GetText=function() return 'bad|name' end; c:RefreshLocalTreeSpec(); as
 head.Name.GetText=function() return string.char(192,128) end; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
 head.Name.GetText=function() return 'Valid' end
 head.Icon.GetTexture=function() error('icon') end; c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter')==nil)
+""")
+
+    def test_state_01_zero_spent_is_reset(self):
+        self.lua.execute(r"""
+spent=0; points={0,0,0}
+local state,spec=c:GetLocalTreeSpec(); assert(state=='reset' and spec==nil)
+assert(c:SendLocalSpec(true) and queued():find('^0^0/0/0^',1,true))
+""")
+
+    def test_state_02_tied_10_10_is_unknown(self):
+        self.lua.execute(r"""
+points={10,10,0}; c:RefreshLocalTreeSpec()
+local state,spec=c:GetLocalTreeSpec()
+assert(state=='unknown' and spec==nil and not c:SendLocalSpec(true) and #c.queue==0)
+""")
+
+    def test_state_03_tied_5_5_5_is_unknown(self):
+        self.lua.execute(r"""
+spent=15; points={5,5,5}; c:RefreshLocalTreeSpec()
+assert(c:GetLocalTreeSpec()=='unknown' and not c:SendLocalSpec(true) and #c.queue==0)
+""")
+
+    def test_state_04_invalid_and_secret_headers_are_unknown(self):
+        self.lua.execute(r"""
+local h=talentFrame.treeHeaders[3]
+points={0,0,0}
+for _,value in ipairs({secret,'bad','-1','1.5'}) do
+ h.Text.GetText=function() return value end
+ c:RefreshLocalTreeSpec()
+ assert(c:GetLocalTreeSpec()=='unknown' and not c:SendLocalSpec(true) and #c.queue==0)
+end
+talentFrame.treeHeaders=nil; c:RefreshLocalTreeSpec()
+assert(c:GetLocalTreeSpec()=='unknown' and #c.queue==0)
+""")
+
+    def test_state_05_header_total_must_match_spent(self):
+        self.lua.execute(r"""
+local key='Realm\001Noxter Moon'
+for _,p in ipairs({{0,0,0},{10,7,2},{30,0,0}}) do
+ points=p; c:RefreshLocalTreeSpec()
+ assert(c:GetLocalTreeSpec()=='unknown' and OldKraken.DB.roster.localSpecs[key]==nil)
+ assert(not c:SendLocalSpec(true) and #c.queue==0)
+end
+""")
+
+    def test_state_06_active_to_unknown_keeps_broadcast(self):
+        self.lua.execute(r"""
+spent=26; points={26,0,0}; c:RefreshLocalTreeSpec()
+assert(c:GetRosterSpec('Noxter') and #c.queue==1)
+local payload=c.lastBroadcastSpecPayload; local events=OldKraken.events
+c.queue={}; spent=20; points={10,10,0}; now=110; c:RefreshLocalTreeSpec()
+assert(c:GetRosterSpec('Noxter')==nil and c.lastBroadcastSpecPayload==payload and #c.queue==0)
+assert(OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']==nil and OldKraken.events==events+1)
+c:RefreshLocalTreeSpec(); assert(OldKraken.events==events+1 and #c.queue==0)
+""")
+
+    def test_state_07_active_to_reset(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec(); assert(#c.queue==1)
+c.queue={}; now=110; spent=0; points={0,0,0}
+c:RefreshLocalTreeSpec()
+assert(c:GetLocalTreeSpec()=='reset' and not c:GetRosterSpec('Noxter'))
+assert(OldKraken.DB.roster.localSpecs['Realm\001Noxter Moon']==nil)
+assert(c.lastBroadcastSpecPayload=='0^0/0/0^' and queued():find('^0^0/0/0^',1,true))
+""")
+
+    def test_state_08_reset_to_active(self):
+        self.lua.execute(r"""
+spent=0; points={0,0,0}; assert(c:SendLocalSpec(true))
+c.queue={}; now=110; spent=20; points={10,7,3}; c:RefreshLocalTreeSpec()
+local state,spec=c:GetLocalTreeSpec()
+assert(state=='active' and spec.name=='Marksmanship' and spec.points=='10/7/3')
+assert(queued():find('^123^10/7/3^Marksmanship',1,true))
+""")
+
+    def test_state_09_unknown_to_active(self):
+        self.lua.execute(r"""
+points={10,10,0}; c:RefreshLocalTreeSpec()
+assert(c:GetLocalTreeSpec()=='unknown' and not c:SendLocalSpec(true))
+points={3,14,3}; now=110; c:RefreshLocalTreeSpec()
+local state,spec=c:GetLocalTreeSpec()
+assert(state=='active' and spec.name=='Survival' and queued():find('^456^3/14/3^Survival',1,true))
+""")
+
+    def test_state_10_pending_force_does_not_create_reset(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec(); local payload=c.lastBroadcastSpecPayload
+c.queue={}; points={10,10,0}; c:RefreshLocalTreeSpec()
+c.pendingSpecBroadcast=true; c.pendingSpecForce=true
+assert(not c:SendLocalSpec(true) and not c.pendingSpecBroadcast and not c.pendingSpecForce)
+assert(c.lastBroadcastSpecPayload==payload and #c.queue==0)
+c:Pump(); assert(#c.queue==0)
+""")
+
+    def test_state_11_mismatched_cached_total_is_cleared(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec(); local key='Realm\001Noxter Moon'
+local cache=OldKraken.DB.roster.localSpecs[key]
+cache.points='11/7/3'
+local state,spec=c:GetLocalTreeSpec()
+assert(state=='unknown' and spec==nil and OldKraken.DB.roster.localSpecs[key]==nil)
+OldKraken.DB.roster.localSpecs[key]=123
+c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter').points=='10/7/3')
 """)
 
 
