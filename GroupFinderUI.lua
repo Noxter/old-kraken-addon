@@ -2414,8 +2414,12 @@ end
 local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isPreview)
     local isEvent = kind == 'event' or kind == 'event_signup'
     local isWorkshop = kind == 'workshop'
-    logAlert(title, subtitle, kind)
-    if not shouldShowAlertBanner(kind, isPreview) then return end
+    if not shouldShowAlertBanner(kind, isPreview) then
+        if kind ~= 'group' and kind ~= 'request' then
+            logAlert(title, subtitle, kind)
+        end
+        return
+    end
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         groupAlert.roleSlots = {}
@@ -2647,7 +2651,7 @@ OldKraken:On('GROUP_FINDER_NEW', function(group)
     end
     refreshPeople()
     local free = math.max(0, group.maxSize - #group.members)
-    local actual = group.partyObserved and 1 or nil
+    local actual = group.partyObserved and 1 or (#group.members <= 1 and #group.members or nil)
     for i, name in ipairs(group.members) do
         if actual and i > 1 and group.partyObserved[name] then actual = actual + 1 end
     end
