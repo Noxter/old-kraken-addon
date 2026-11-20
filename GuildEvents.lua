@@ -6,7 +6,9 @@ local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
 local function memberSpecText(name)
     local transport = OldKraken.Communication
     local spec = name and transport and transport.GetRosterSpec and transport:GetRosterSpec(name)
-    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then
+        return OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name
+    end
 end
 local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
 local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}

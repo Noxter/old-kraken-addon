@@ -4,7 +4,9 @@ local Finder = OldKraken.GroupFinder
 local function memberSpecText(name)
     local comm = OldKraken.Communication
     local spec = name and comm and comm.GetRosterSpec and comm:GetRosterSpec(name)
-    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then
+        return OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name
+    end
 end
 local window, selected, requestsWindow
 local refresh

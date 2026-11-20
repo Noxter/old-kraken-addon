@@ -895,7 +895,7 @@ function Roster:RenderVisible()
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
         row.cellHovers[4].fullText = SafeText(member.class)
-        if spec and spec.name then row.cellHovers[4].fullText = row.cellHovers[4].fullText .. '\n' .. spec.name end
+        if spec and spec.name then row.cellHovers[4].fullText = row.cellHovers[4].fullText .. '\n' .. (OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name) end
         row.cellHovers[5].fullText = offlineText and (T('Офлайн') .. ': ' .. offlineText .. (zoneText ~= '' and ('\n' .. zoneText) or '')) or zoneText
 
         local classColor = member.classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.classFile]
