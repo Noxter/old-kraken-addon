@@ -1021,6 +1021,12 @@ refresh=function()
     if type(detailsScrollBar) == 'table' and detailsScrollBar.SetShown then
         detailsScrollBar:SetShown(g ~= nil and type(g.members) == 'table' and #g.members > 3)
     end
+    local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
+    local canEditDescription = tab ~= 'create' and g and g.owner == Finder.identity and not g.hidden
+    if not canEditDescription or selected ~= editingDescriptionKey then editingDescriptionKey = nil end
+    local editing = canEditDescription and editingDescriptionKey == selected and not showingRequests
+    local hasDescription = g ~= nil and (g.description or '') ~= ''
+    local showDesc = g ~= nil and not editing and (hasDescription or canEditDescription)
     if g then
         local applicationStatus = Finder.pending[selected]
         local activity = (g.dungeon and g.dungeon ~= '' and dungeonLabels[g.dungeon]) or categoryLabels[g.category]
@@ -1040,12 +1046,19 @@ refresh=function()
             string.format('%d–%d', g.minLevel, g.maxLevel),
             roleLabel(g.role),
             status .. appNote,
-            g.description ~= '' and g.description or '—',
+            hasDescription and g.description or '—',
         }
         for idx, kv in ipairs(window.detailsKV or {}) do
-            kv.key:Show()
-            kv.val:SetText(kvValues[idx] or '—')
-            kv.val:Show()
+            if idx == 5 then
+                kv.key:SetShown(showDesc or editing)
+                kv.val:SetWidth(canEditDescription and 122 or 198)
+                kv.val:SetText(kvValues[5])
+                kv.val:SetShown(showDesc)
+            else
+                kv.key:Show()
+                kv.val:SetText(kvValues[idx] or '—')
+                kv.val:Show()
+            end
         end
         if window.detailsDivider then window.detailsDivider:Show() end
         if window.detailsRosterHeader then window.detailsRosterHeader:Show() end
@@ -1057,31 +1070,32 @@ refresh=function()
         if window.detailsDivider then window.detailsDivider:Hide() end
         if window.detailsRosterHeader then window.detailsRosterHeader:Hide() end
     end
-    local canManage = tab ~= 'create' and g and g.owner == Finder.identity and not g.closed
-    local canEditDescription = tab ~= 'create' and g and g.owner == Finder.identity and not g.hidden
-    if not canEditDescription or selected ~= editingDescriptionKey then editingDescriptionKey = nil end
-    local editing = canEditDescription and editingDescriptionKey == selected and not showingRequests
     if type(window.editDescButton) == 'table' then
-        local descVal = window.detailsKV and window.detailsKV[5] and window.detailsKV[5].val
-        if type(descVal) == 'table' then
-            descVal:SetWidth(canEditDescription and 122 or 198)
-            descVal:SetShown(g ~= nil and not editing)
-        end
         window.editDescButton:SetShown(canEditDescription and not editing and not showingRequests)
         window.editDescBox:SetShown(editing)
         window.saveDescButton:SetShown(editing)
         window.cancelDescButton:SetShown(editing)
     end
+    local extraDesc = 0
+    if g and not editing then
+        local descVal = window.detailsKV and window.detailsKV[5] and window.detailsKV[5].val
+        if not showDesc then
+            extraDesc = -26
+        elseif type(descVal) == 'table' and type(descVal.GetStringHeight) == 'function' then
+            local descHeight = tonumber(descVal:GetStringHeight()) or 16
+            if descHeight > 16 then extraDesc = descHeight - 16 end
+        end
+    end
     if window.detailsDivider then
         window.detailsDivider:ClearAllPoints()
-        window.detailsDivider:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -194 or -166)
+        window.detailsDivider:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -194 or (-166 - extraDesc))
     end
     if window.detailsRosterHeader then
         window.detailsRosterHeader:ClearAllPoints()
-        window.detailsRosterHeader:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -208 or -180)
+        window.detailsRosterHeader:SetPoint('TOPLEFT', window.detailsContent, 'TOPLEFT', 0, editing and -208 or (-180 - extraDesc))
     end
     local members = g and g.members or {}
-    local top = g and (editing and 240 or 212) or (window.details:GetStringHeight() + 8)
+    local top = g and (editing and 240 or (212 + extraDesc)) or (window.details:GetStringHeight() + 8)
     local viewport=tonumber((window.detailsScroll:GetHeight())) or 210
     if viewport<=0 then viewport=210 end
     local oldScroll=tonumber((window.detailsScroll:GetVerticalScroll())) or 0
@@ -1557,7 +1571,7 @@ local function createWindow(parent)
         k:SetText(labelText); k:Hide()
         local v = f.detailsContent:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
         v:SetPoint('TOPLEFT', f.detailsContent, 'TOPLEFT', 78, rowY)
-        v:SetWidth(198); v:SetJustifyH('LEFT'); v:SetWordWrap(false)
+        v:SetWidth(198); v:SetJustifyH('LEFT'); v:SetWordWrap(idx == 5)
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(v, 13) end
         v:Hide()
         f.detailsKV[idx] = {key = k, val = v}
@@ -1749,7 +1763,7 @@ local function createWindow(parent)
     f.categoryLabel:SetPoint('TOPLEFT', f, 'TOPLEFT', 305, -389); f.categoryLabel:SetText(T('Категорія'))
     f.roleButton = createRoleSelector(f, 587, -502, 296)
     f.roleButton:Update(category)
-    f.roleLabel = f:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    f.roleLabel = f.roleButton:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.roleLabel, 13, true) end
     local roleLabelMuted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
     if roleLabelMuted then f.roleLabel:SetTextColor(roleLabelMuted[1], roleLabelMuted[2], roleLabelMuted[3]) end

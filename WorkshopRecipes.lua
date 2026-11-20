@@ -1146,7 +1146,7 @@ render=function()
         end
         resizeInfo(); return
     end
-    local list,grouped,groupCounts,groupOnline={},{},{},{}
+    local list,grouped,groupCounts={},{},{}
     local byRecipe=not selectRecipe and not viewOwner and not (filter and (filter:find('^item:') or filter:find('^recipe:')))
     local workshop=OldKraken.Workshop
     for _,entry in pairs(resultSet) do
@@ -1160,7 +1160,6 @@ render=function()
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
                 groupCounts[id]=(groupCounts[id] or 0)+1
-                if online[entry.owner] then groupOnline[id]=(groupOnline[id] or 0)+1 end
                 local other=entry.owner~=identity
                 local oldOther=old and old.owner~=identity
                 if not old or (other and not oldOther) or (other==oldOther and ((online[entry.owner] and not online[old.owner]) or ((online[entry.owner] and true or false)==(online[old.owner] and true or false) and entry.record.seen>old.record.seen))) then grouped[id]=entry end
@@ -1178,9 +1177,11 @@ render=function()
             local r=entry.record; row.entry=entry
             row.icon:SetTexture(recipeIcon(r))
             row.name:SetText(displayRecipeName(r))
-            local totalMasters=byRecipe and (groupCounts[r.recipe] or 1) or 1
+            local rowMasters=byRecipe and Recipes:FindMasters(r.item,r.recipe,r.profession) or nil
+            local totalMasters=byRecipe and math.max(groupCounts[r.recipe] or 1, rowMasters and #rowMasters or 0) or 1
             if byRecipe and totalMasters>1 then
-                local onCount=groupOnline[r.recipe] or 0
+                local onCount=0
+                for _,m in ipairs(rowMasters or {}) do if online[m.name] then onCount=onCount+1 end end
                 local onText=onCount>0 and ('|cff68d98c'..onCount..T(' онлайн|r')) or T('|cff9ba9bcофлайн|r')
                 local mWord=OldKraken.Workshop and OldKraken.Workshop.PluralUk and OldKraken.Workshop:PluralUk(totalMasters,T('майстер'),T('майстри'),T('майстрів')) or T('майстрів')
                 row.meta:SetText(professionNames[r.profession]..' · '..totalMasters..' '..mWord..' · '..onText)
@@ -1199,7 +1200,7 @@ render=function()
     if r then
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(displayRecipeName(r))
-        local masters=Recipes:FindMasters(r.item,r.recipe)
+        local masters=Recipes:FindMasters(r.item,r.recipe,r.profession)
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
         if viewOwner~=nil then
             selectedRecipeMaster=viewOwner~=identity and viewOwner or nil
@@ -1819,18 +1820,31 @@ function Recipes:Choose(callback,profession)
     frame.status:SetText(T('Оберіть рецепт іншого майстра. Власні рецепти позначено у списку.'))
     frame:Raise(); render()
 end
-function Recipes:FindMasters(itemID,recipeID)
+function Recipes:FindMasters(itemID,recipeID,profession)
     local found={}
     if not integer(itemID,0,100000000) or not integer(recipeID,0,100000000) or (itemID==0 and recipeID==0) then return {} end
     if recipeID>0 then
         for name,records in pairs(people) do
             local r=type(records)=='table' and records[recipeID]
-            if safeText(name,1,128) and validRecord(r) then found[name]=r.seen end
+            if safeText(name,1,128) and validRecord(r) and (not profession or r.profession==profession) then found[name]=r.seen end
         end
     end
     if itemID>0 then
         ensureRecipeIndex()
-        for name,seen in pairs(itemIndex[itemID] or {}) do found[name]=math.max(found[name] or 0,seen) end
+        for name,seen in pairs(itemIndex[itemID] or {}) do
+            if not profession then
+                found[name]=math.max(found[name] or 0,seen)
+            else
+                local records=people[name]
+                if type(records)=='table' then
+                    for _,r in pairs(records) do
+                        if validRecord(r) and r.item==itemID and r.profession==profession then
+                            found[name]=math.max(found[name] or 0,r.seen)
+                        end
+                    end
+                end
+            end
+        end
     end
     local out={}; for name,seen in pairs(found) do out[#out+1]={name=name,seen=seen} end
     table.sort(out,function(a,b) return a.name<b.name end); return out

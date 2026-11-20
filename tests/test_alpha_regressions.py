@@ -261,6 +261,60 @@ def test_packaged_version_identifies_actual_commit():
         assert result.returncode != 0 and toc.read_bytes() == before
 
 
+def test_group_details_description_wrap_and_role_label_layer():
+    import runpy
+    source = (ROOT / 'GroupFinderUI.lua').read_text(encoding='utf-8')
+    assert 'f.roleLabel = f.roleButton:CreateFontString(' in source
+    assert 'v:SetWordWrap(idx == 5)' in source
+    lua = runpy.run_path(str(ROOT / 'tests/test_ui_smoke.py'))['lua']
+    lua.execute(r"""
+local finder=OldKraken.GroupFinder
+local ui=OldKrakenGroupFinderFrame
+local divY,hdrY
+local oldDivSet,oldHdrSet=ui.detailsDivider.SetPoint,ui.detailsRosterHeader.SetPoint
+ui.detailsDivider.SetPoint=function(self,_,_,_,x,y) divY=y end
+ui.detailsRosterHeader.SetPoint=function(self,_,_,_,x,y) hdrY=y end
+
+for k in pairs(finder.groups) do finder.groups[k]=nil end
+ui:Show()
+if ui.tabs and ui.tabs[1] and ui.tabs[1].button and ui.tabs[1].button.scripts.OnClick then ui.tabs[1].button.scripts.OnClick() end
+if ui.searchFilter and ui.searchFilter.SetText then ui.searchFilter:SetText('') end
+local other={id='wrap_test',owner='Other Owner',title='Wrap Test',category='dungeon',dungeon='rfc',role='tank',maxSize=5,minLevel=1,maxLevel=60,description='',members={'Other Owner'}}
+finder.groups[other.owner..'\001'..other.id]=other
+OldKraken.listeners.GROUP_FINDER_CHANGED()
+ui.rows[1].scripts.OnClick()
+assert(ui.detailsHeading.text=='Wrap Test')
+assert(not ui.detailsKV[5].key.shown and not ui.detailsKV[5].val.shown)
+assert(divY==-140 and hdrY==-154)
+
+other.description='Довгий опис у кілька рядків'
+local meta=getmetatable(ui.detailsKV[5].val); local oldIndex=meta.__index
+meta.__index=function(self,k) if k=='GetStringHeight' then return function() return 48 end end; return oldIndex(self,k) end
+OldKraken.listeners.GROUP_FINDER_CHANGED()
+assert(ui.detailsKV[5].key.shown and ui.detailsKV[5].val.shown)
+assert(divY==-198 and hdrY==-212)
+meta.__index=oldIndex
+ui.detailsDivider.SetPoint,ui.detailsRosterHeader.SetPoint=oldDivSet,oldHdrSet
+""")
+
+
+def test_workshop_masters_count_matches_details_by_profession():
+    from test_workshop_orders import client
+    lua = client('Tester')
+    lua.execute(r"""
+local recipes=OldKraken.WorkshopRecipes
+local store=OldKraken.DB.workshop.guilds['Realm\001Guild'].recipes
+store['Tester']={[101]={recipe=101,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Miriel']={[101]={recipe=101,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Tofur']={[202]={recipe=202,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Veira']={[202]={recipe=202,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
+store['Miner']={[303]={recipe=303,item=5555,profession=186,seen=100,name='Bar',product='',reagents={}}}
+assert(#recipes:FindMasters(5555,101,333)==4)
+assert(#recipes:FindMasters(5555,303,186)==1)
+assert(#recipes:FindMasters(5555,101)==5)
+""")
+
+
 if __name__ == '__main__':
     test_event_cancellation_fits_and_survives_reconnect()
     test_owner_signup_fails_without_dangling_intent_when_packet_is_full()
@@ -271,4 +325,6 @@ if __name__ == '__main__':
     test_stalled_relay_fails_over_and_owner_preempts()
     test_large_snapshot_recovers_a_lost_late_page_during_replay()
     test_packaged_version_identifies_actual_commit()
+    test_group_details_description_wrap_and_role_label_layer()
+    test_workshop_masters_count_matches_details_by_profession()
     print('Alpha regression checks passed')
