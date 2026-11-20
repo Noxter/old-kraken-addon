@@ -14,6 +14,13 @@ for _,level in ipairs({12,13,18,19,0}) do
     assert(alert:IsShown()==(level>=13 and level<=18),'level boundary '..level)
 end
 UnitLevel=nil; alert:Hide(); OldKraken.listeners.GROUP_FINDER_NEW(group); assert(not alert:IsShown())
-group.category='quest'; OldKraken.listeners.GROUP_FINDER_NEW(group); assert(alert:IsShown())
+group.category='quest'; alert:Hide(); OldKraken.listeners.GROUP_FINDER_NEW(group); assert(not alert:IsShown())
+function UnitLevel() return 12 end
+alert:Hide(); OldKraken.listeners.GROUP_FINDER_NEW(group); assert(not alert:IsShown())
+function UnitLevel() return 15 end
+alert:Hide(); OldKraken.listeners.GROUP_FINDER_NEW(group); assert(alert:IsShown())
+group.minLevel, group.maxLevel = 1, 60
+function UnitLevel() return 5 end
+alert:Hide(); OldKraken.listeners.GROUP_FINDER_NEW(group); assert(alert:IsShown())
 ''')
-print('PASS: dungeon alerts respect inclusive level bounds; unknown levels suppressed; other categories unchanged')
+print('PASS: group alerts respect inclusive level bounds across categories; unknown levels suppressed')

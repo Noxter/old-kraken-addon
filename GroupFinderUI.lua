@@ -2641,7 +2641,7 @@ OldKraken:On('WORKSHOP_ALERT_SETTING', function() Finder:SyncAlertVisibility('wo
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not groupAlertsEnabled() then return end
-    if group.category == 'dungeon' then
+    if group.minLevel and group.maxLevel then
         local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
         if not level or level < group.minLevel or level > group.maxLevel then return end
     end
