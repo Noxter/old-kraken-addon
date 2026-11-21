@@ -18,6 +18,18 @@ local CLASS_ORDER = {
     "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
 }
 
+local CLASS_NAMES = {
+    DRUID = "Druid",
+    HUNTER = "Hunter",
+    MAGE = "Mage",
+    PALADIN = "Paladin",
+    PRIEST = "Priest",
+    ROGUE = "Rogue",
+    SHAMAN = "Shaman",
+    WARLOCK = "Warlock",
+    WARRIOR = "Warrior",
+}
+
 local STATUS_LABELS = {
     all = "усі",
     online = "онлайн",
@@ -162,18 +174,24 @@ local function SafeText(value, fallback)
     return tostring(value)
 end
 
-local function ClassLabel(classToken)
-    if not classToken or classToken == "" then
+local function ClassLabel(classToken, fallbackName)
+    if classToken == "ALL" then
         return T("Усі класи")
     end
 
-    for _, member in ipairs(rosterData) do
-        if member.classFile == classToken and member.class then
-            return member.class
-        end
+    if type(classToken) == "string" and CLASS_NAMES[classToken] then
+        return CLASS_NAMES[classToken]
     end
 
-    return classToken
+    if fallbackName ~= nil and fallbackName ~= "" then
+        return tostring(fallbackName)
+    end
+
+    if classToken ~= nil and classToken ~= "" then
+        return tostring(classToken)
+    end
+
+    return T("Усі класи")
 end
 
 local function UpdateFilterButtonLabels()
@@ -885,7 +903,9 @@ function Roster:RenderVisible()
         cells[1]:SetText(SafeText(member.name))
         cells[2]:SetText(SafeText(member.rank))
         cells[3]:SetText(SafeText(member.level))
-        cells[4]:SetText(SafeText(member.class))
+        local hasClass = (member.classFile ~= nil and member.classFile ~= "") or (member.class ~= nil and member.class ~= "")
+        local classText = hasClass and ClassLabel(member.classFile, member.class) or "-"
+        cells[4]:SetText(classText)
         local offlineText = not member.isOnline and formatOfflineDuration(member.lastOnline)
         local zoneText = SafeText(member.zone)
         local locationText = offlineText and (T('Офлайн') .. ' · ' .. offlineText) or zoneText
@@ -894,7 +914,7 @@ function Roster:RenderVisible()
         row.onlineDot:SetTexture(member.isOnline and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
-        row.cellHovers[4].fullText = SafeText(member.class)
+        row.cellHovers[4].fullText = classText
         if spec and spec.name then row.cellHovers[4].fullText = row.cellHovers[4].fullText .. '\n' .. (OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name) end
         row.cellHovers[5].fullText = offlineText and (T('Офлайн') .. ': ' .. offlineText .. (zoneText ~= '' and ('\n' .. zoneText) or '')) or zoneText
 
