@@ -125,7 +125,7 @@ OldKraken.GuildRoster:Load()
     # 3. Rows show English for known token, preserve fallback for unknown/missing, and keep member.class/classFile intact.
     lua.execute(
         """
-local rows = {}
+rows = {}
 for _, frame in ipairs(createdFrames) do
     if type(frame.member) == 'table' then rows[frame.member.name] = frame end
 end
@@ -174,7 +174,7 @@ assert(OldKraken.DB.settings.roster.class == 'ALL')
 function GetNumGuildMembers() return #allMembers end
 function GetGuildRosterInfo(i) return unpack(allMembers[i], 1, 11) end
 OldKraken.GuildRoster:Load()
-local rows = {}
+rows = {}
 for _, frame in ipairs(createdFrames) do
     if type(frame.member) == 'table' then rows[frame.member.classFile] = frame end
 end
