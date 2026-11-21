@@ -35,6 +35,17 @@ StaticPopupDialogs.OLDKRAKEN_EVENT_DELETE={
 for _,options in ipairs({catalog.dungeon,catalog.raid}) do
     for _,entry in ipairs(options) do if entry.value~='' then activityLabels[entry.value]=entry.label end end
 end
+local function displayEventTitle(e)
+    if type(e) ~= 'table' then return '' end
+    local title = type(e.title) == 'string' and e.title or ''
+    if catalog and type(catalog.IsCanonicalTitle) == 'function' and catalog.IsCanonicalTitle(e.activity, title) then
+        return activityLabels[e.activity] or title
+    end
+    return title
+end
+function Events:DisplayTitle(e)
+    return displayEventTitle(e)
+end
 local function validActivity(kind, id)
     if id=='' then return true end
     if type(id)~='string' then return false end
@@ -745,7 +756,7 @@ refresh=function()
         if entry then
             local e=entry.event
             catalog.SetArtwork(row.art,e.activity)
-            row.title:SetText(e.title)
+            row.title:SetText(displayEventTitle(e))
             row.meta:SetText((kinds[e.kind] or e.kind)..' · '..acceptedCount(e)..'/'..e.size)
             if row.date then row.date:SetText(date('%d.%m %H:%M',e.when)) end
             if OldKraken.UIStyle.ApplySelection then OldKraken.UIStyle.ApplySelection(row, selected==entry.key) end
@@ -769,7 +780,7 @@ refresh=function()
             lines[#lines+1]=participantLabel(name,role,e.statuses[name],classes)
         end
         local own=e.owner==identity
-        window.detailsTitle:SetText(e.title); window.detailsTitle:Show()
+        window.detailsTitle:SetText(displayEventTitle(e)); window.detailsTitle:Show()
         window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsTitle,'BOTTOMLEFT',0,-8)
         local description=e.description~='' and (T('\n\n|cff9ba9bcОпис:|r\n')..e.description) or ''
         local activity=kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')
@@ -1008,7 +1019,7 @@ local function createWindow(parent)
             local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; local e=entry and events[entry.key]
             if not active or not e or e.owner~=identity or e.cancelled then return end
             local key,expectedProfile,expectedIdentity=entry.key,profile,identity
-            local popup=StaticPopup_Show('OLDKRAKEN_EVENT_DELETE',e.title,nil,function()
+            local popup=StaticPopup_Show('OLDKRAKEN_EVENT_DELETE',displayEventTitle(e),nil,function()
                 if not active or profile~=expectedProfile or identity~=expectedIdentity or not Events:Cancel(key) then print(T('Old Kraken: не вдалося видалити подію.')); return end
                 if selected==key then selected=nil; refresh() end
             end)

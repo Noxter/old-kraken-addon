@@ -50,6 +50,12 @@ local function displayGroupTitle(group)
     end
     return title
 end
+local function displayEventTitle(event)
+    if OldKraken.GuildEvents and type(OldKraken.GuildEvents.DisplayTitle) == 'function' then
+        return OldKraken.GuildEvents:DisplayTitle(event)
+    end
+    return type(event) == 'table' and type(event.title) == 'string' and event.title or ''
+end
 local activityOptions = {}
 for _, options in ipairs({catalog.dungeon, catalog.raid}) do
     for i, entry in ipairs(options) do if #activityOptions == 0 or i > 1 then activityOptions[#activityOptions+1] = entry end end
@@ -2626,17 +2632,17 @@ end)
 OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
     if not eventAlertsEnabled() then return end
     local subtitle = event.owner .. ' · ' .. date('%d.%m.%Y %H:%M', event.when)
-    showAlert(T('Нова подія: ') .. event.title, subtitle, 'event', key)
+    showAlert(T('Нова подія: ') .. displayEventTitle(event), subtitle, 'event', key)
 end)
 OldKraken:On('GUILD_EVENTS_NEW_SIGNUP', function(key, event, name, role)
     if not eventAlertsEnabled() then return end
     refreshPeople()
     local signupRole=role=='flex' and T('Учасник') or roleLabel(role)
-    showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. event.title, 'event_signup', key)
+    showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. displayEventTitle(event), 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_CANCELLED', function(key, event)
     if not eventAlertsEnabled() then return end
-    showAlert(T('Подію скасовано'), event.title .. T(' · Автор: ') .. event.owner, 'event_signup', key)
+    showAlert(T('Подію скасовано'), displayEventTitle(event) .. T(' · Автор: ') .. event.owner, 'event_signup', key)
 end)
 OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
     Finder:SyncAlertVisibility('event')
