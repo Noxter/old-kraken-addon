@@ -84,10 +84,9 @@ def test_order_draft_restores_after_reload_and_is_scoped_to_character_and_guild(
     lua.execute("""
         OldKraken.WorkshopOrders:Show()
         local f=OldKrakenWorkshopOrdersFrame
-        f.item:SetText('Drafted item')
+        pickOrderRecipe(f.orderForm,'Drafted item',171,0,9201)
         f.quantity:SetText('4')
         f.note:SetText('Persist me')
-        selectOption(OldKrakenOrderProfession,171)
         selectOption(f.materialsMenu,'mixed')
         selectOption(f.deadlineMenu,604800)
         local scope=OldKraken.DB.workshop.guilds['Realm\\001Guild']
@@ -115,7 +114,7 @@ def test_order_draft_restores_after_reload_and_is_scoped_to_character_and_guild(
         -- A different character in the same guild must not inherit this draft.
         player='AnotherCharacter'
         OldKraken.WorkshopOrders:Show()
-        assert(OldKrakenWorkshopOrdersFrame.item:GetText()=='')
+        assert(OldKrakenWorkshopOrdersFrame.item:GetText()=='Обрати рецепт')
         assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderDrafts['DraftOwner Mon'].item=='Drafted item')
 
         -- The original character's draft remains available when switching back.
@@ -126,7 +125,7 @@ def test_order_draft_restores_after_reload_and_is_scoped_to_character_and_guild(
         -- The same character in another guild has an independent draft scope.
         function GetGuildInfo() return 'Other Guild' end
         OldKraken.WorkshopOrders:Show()
-        assert(OldKrakenWorkshopOrdersFrame.item:GetText()=='')
+        assert(OldKrakenWorkshopOrdersFrame.item:GetText()=='Обрати рецепт')
         function GetGuildInfo() return 'Guild' end
         OldKraken.WorkshopOrders:Show()
         assert(OldKrakenWorkshopOrdersFrame.item:GetText()=='Drafted item')
@@ -139,8 +138,7 @@ def test_successful_publish_clears_only_the_current_character_draft():
     lua.execute("""
         OldKraken.WorkshopOrders:Show()
         local f=OldKrakenWorkshopOrdersFrame
-        f.item:SetText('Ready to publish')
-        selectOption(OldKrakenOrderProfession,171)
+        pickOrderRecipe(f.orderForm,'Ready to publish',171,0,9202)
         local scope=OldKraken.DB.workshop.guilds['Realm\\001Guild']
         scope.orderDrafts['Other Mon']={item='Keep other character draft'}
         assert(scope.orderDrafts['Publisher Mon'].item=='Ready to publish')

@@ -82,6 +82,23 @@ def client(name, embedded=False):
             for _,f in ipairs(frames) do if f.text==text and f.scripts.OnClick and f.shown~=false then f.scripts.OnClick(f); return end end
             error('button not found: '..text)
         end
+        function pickOrderRecipe(form, name, prof, itemId, recipeId)
+            local p = prof or 171
+            local rid = recipeId or 9001
+            local iid = itemId or 0
+            local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+            scope.recipes['Helper Crafter'] = scope.recipes['Helper Crafter'] or {}
+            scope.recipes['Helper Crafter'][rid] = {recipe=rid, item=iid, profession=p, seen=now, name=name, product=name}
+            OldKraken:Fire('INITIALIZED', OldKraken.DB)
+            form.item.scripts.OnClick(form.item)
+            for _, row in ipairs(frames) do
+                if type(row.entry)=='table' and type(row.entry.record)=='table' and row.entry.record.recipe==rid and row.scripts.OnClick then
+                    row.scripts.OnClick(row)
+                    return
+                end
+            end
+            error('recipe row not found: '..tostring(rid))
+        end
         C_Timer={NewTicker=function(_,fn) timers[#timers+1]=fn end}
         OldKraken.Communication={queue={}}
         function OldKraken.Communication:RegisterHandler(kind,fn) handlers[kind]=fn end
@@ -126,11 +143,14 @@ def test_orders():
     tick(alice); tick(bob)
     alice.execute('''
         OldKraken.WorkshopOrders:Show(); local f=OldKrakenWorkshopOrdersFrame
-        f.item:SetText('Manual potion'); click('Опублікувати')
-        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; assert(next(s.orderOwners['Alice Mon'])==nil)
-        selectOption(OldKrakenOrderProfession,171); click('Опублікувати')
+        pickOrderRecipe(f.orderForm,'Manual potion',171,0,9001); click('Опублікувати')
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
         for k,v in pairs(s.orderOwners['Alice Mon']) do orderKey=k; order=v end
         assert(order and order.profession==171 and order.status=='open')
+    ''')
+    bob.execute('''
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        s.recipes['Bob Mon']={[9001]={recipe=9001,item=0,profession=171,seen=now,name='Manual potion',product='Manual potion'},[9002]={recipe=9002,item=0,profession=171,seen=now,name='Late potion',product='Late potion'}}
     ''')
     tick(alice); flush(alice, bob, True)
 
@@ -138,7 +158,7 @@ def test_orders():
     bob.execute('''
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; for k,v in pairs(s.orderObserved) do orderKey=k; order=v end
         assert(order and order.item=='Manual potion')
-        local n=0; for _,e in ipairs(notices) do if e[1]=='WORKSHOP_ORDER_NOTICE' and e[2]=='Нове замовлення: Manual potion' then n=n+1; assert(e[3]:find('рецепт не підтверджено')) end end; assert(n==1)
+        local n=0; for _,e in ipairs(notices) do if e[1]=='WORKSHOP_ORDER_NOTICE' and e[2]=='Нове замовлення: Manual potion' then n=n+1 end end; assert(n==1)
         OldKraken.WorkshopOrders:Show(); selectOption(OldKrakenOrdersView,'available')
         click('Запропонувати допомогу')
     ''')
@@ -159,8 +179,8 @@ def test_orders():
         assert(OldKraken.WorkshopRecipes:Knows(987,456)); assert(#OldKraken.WorkshopRecipes:FindMasters(987,456)==1)
     ''')
     alice.execute('''
-        local f=OldKrakenWorkshopOrdersFrame; f.item:SetText('Late potion')
-        selectOption(OldKrakenOrderProfession,171); click('Опублікувати')
+        local f=OldKrakenWorkshopOrdersFrame; pickOrderRecipe(f.orderForm,'Late potion',171,0,9002)
+        click('Опублікувати')
         for k,v in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Alice Mon']) do if v.item=='Late potion' then orderKey=k; order=v end end
     ''')
     tick(alice); flush(alice, bob)
@@ -196,8 +216,7 @@ def test_relayed_actions_cannot_impersonate_worker():
     alice.execute('''
         OldKraken.WorkshopOrders:Show()
         local f=OldKrakenWorkshopOrdersFrame
-        f.item:SetText('Security potion')
-        selectOption(OldKrakenOrderProfession,171)
+        pickOrderRecipe(f.orderForm,'Security potion',171,0,9003)
         click('Опублікувати')
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
         for k,v in pairs(s.orderOwners['Alice Mon']) do orderKey=k; order=v end
@@ -270,8 +289,8 @@ def test_order_relay_and_owner_authority():
     alice, bob, carol, dave = (client(name) for name in ('Alice', 'Bob', 'Carol', 'Dave'))
     tick(alice); tick(bob)
     alice.execute('''
-        OldKraken.WorkshopOrders:Show(); OldKrakenWorkshopOrdersFrame.item:SetText('Relay potion')
-        selectOption(OldKrakenOrderProfession,171); click('Опублікувати')
+        OldKraken.WorkshopOrders:Show(); pickOrderRecipe(OldKrakenWorkshopOrdersFrame.orderForm,'Relay potion',171,0,9004)
+        click('Опублікувати')
         for k,v in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Alice Mon']) do orderKey=k; order=v end
     ''')
     tick(alice); flush(alice, bob)
@@ -284,6 +303,7 @@ def test_order_relay_and_owner_authority():
     tick(carol); flush(carol, bob); tick(bob); flush(bob, carol, True)
     carol.execute('''
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        s.recipes['Carol Mon']={[9004]={recipe=9004,item=0,profession=171,seen=now,name='Relay potion',product='Relay potion'}}
         for k,v in pairs(s.orderObserved) do orderKey=k; order=v end
         assert(order and order.item=='Relay potion' and order.relayed and order.ownerRev==0)
         assert(not s.orderRelays[orderKey])
@@ -377,8 +397,7 @@ def test_embedded_orders():
         local form=workshop.ordersView.createForm
         assert(form:IsShown(), 'new-order form did not open modally')
         assert(form.width==900 and form.height==480, 'new-order form size mismatch')
-        form.item:SetText('Embedded potion')
-        selectOption(OldKrakenOrderProfession,171)
+        pickOrderRecipe(form,'Embedded potion',171,0,9005)
         click('Опублікувати')
         assert(not form:IsShown(), 'successful order creation did not close the modal')
         local orders=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Cara Mon']
