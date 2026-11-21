@@ -210,19 +210,28 @@ def test_role_selector_scenarios():
         assert(ui.roleSelector.badge:IsShown() and ui.roleSelector.badge.text.text:find('DPS', 1, true))
         for i = 1, 3 do assert(not ui.roleSelector.buttons[i]:IsShown()) end
         assert(ui.roleSelector.selectedRole == 'dps')
+        ui.join.scripts.OnClick(ui.join)
+        assert(sentRoles[#sentRoles] == 'dps' and store.intents[key2] and store.intents[key2].role == 'dps')
 
-        -- 6. Initial 'flex' / unavailable role is normalized to available role.
+        -- 6. Unavailable previous role is normalized to first available role on a fresh event.
+        assert(events:Create('Test Event 2b', 'Desc', GetServerTime() + 7200, 'raid', 20, ''))
+        local key2b, e2b
+        for k, v in pairs(store.owned) do
+            if k ~= key and k ~= key2 then key2b, e2b = k, v; break end
+        end
+        assert(key2b and e2b)
+        e2b.owner = 'Leader Realm'; e2b.people['Tester Realm'] = nil; e2b.statuses['Tester Realm'] = nil
         gameRoles = {tank = false, healer = true, dps = false}
-        events:ShowEvent(key2)
+        events:ShowEvent(key2b)
         assert(ui.roleSelector.selectedRole == 'healer')
         ui.join.scripts.OnClick(ui.join)
-        assert(sentRoles[#sentRoles] == 'healer' and store.intents[key2] and store.intents[key2].role == 'healer')
+        assert(sentRoles[#sentRoles] == 'healer' and store.intents[key2b] and store.intents[key2b].role == 'healer')
 
         -- 7. No available roles on a fresh event -> mode == 'none', join disabled, invalid signup blocked.
         assert(events:Create('Test Event 3', 'Desc', GetServerTime() + 7200, 'raid', 20, ''))
         local key3, e3
         for k, v in pairs(store.owned) do
-            if k ~= key and k ~= key2 then key3, e3 = k, v; break end
+            if k ~= key and k ~= key2 and k ~= key2b then key3, e3 = k, v; break end
         end
         assert(key3 and e3)
         e3.owner = 'Leader Realm'; e3.people['Tester Realm'] = nil; e3.statuses['Tester Realm'] = nil
