@@ -881,16 +881,13 @@ refresh=function()
         if detailsScrollBar and detailsScrollBar.SetShown then detailsScrollBar:SetShown(#names > 5) end
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.inviteAll:SetShown(own and e.kind=='raid')
-        if currentRole == 'flex' or not canPerformRole(identity, currentRole) then
-            currentRole = 'dps'
-            for _, candidate in ipairs({'tank', 'healer', 'dps'}) do
-                if canPerformRole(identity, candidate) then currentRole = candidate; break end
-            end
-            UIDropDownMenu_SetText(window.roleMenu, roles[currentRole])
-        end
+        window.roleSelector:Update()
         local canJoin=not e.relayed and not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
         window.join:SetShown(canJoin)
-        window.roleMenu:SetShown(canJoin)
+        window.roleSelector:SetShown(canJoin)
+        if canJoin then
+            if currentRole ~= '' and canPerformRole(identity, currentRole) then window.join:Enable() else window.join:Disable() end
+        end
         window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
         window.cancel:SetShown(e.owner==identity)
         if window.leaveBaseX and window.leaveY then
@@ -920,12 +917,114 @@ refresh=function()
         if window.participantsDivider then window.participantsDivider:Hide() end
         window.roleSummary:Hide(); window.roleFlex:Hide(); window.flexButton:Hide(); for _,button in ipairs(window.roleButtons) do button:Hide() end; for _,column in ipairs(window.roleColumns) do column:Hide() end
         window.participantHeader:Hide(); window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
-        window.details:SetText(T('Оберіть подію зі списку.')); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
+        window.details:SetText(T('Оберіть подію зі списку.')); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleSelector:Hide()
         local detailsScrollBar = _G.OldKrakenEventsDetailsScrollScrollBar
         if detailsScrollBar and detailsScrollBar.SetShown then detailsScrollBar:SetShown(false) end
         window.detailsContent:SetHeight(250)
     end
 end
+local function styleRoleSegment(b, active)
+    b.active = active and true or false
+    local colors = OldKraken.UIStyle and OldKraken.UIStyle.Colors
+    if not colors or type(b.fillParts) ~= 'table' then return end
+    local fill = active and colors.primaryButton or colors.button
+    local edge = active and colors.primaryButtonEdge or colors.buttonEdge
+    if fill then for _, t in ipairs(b.fillParts) do t:SetVertexColor(fill[1], fill[2], fill[3], fill[4] or 1); t.color = fill end end
+    if edge then for _, t in ipairs(b.ringParts or {}) do t:SetVertexColor(edge[1], edge[2], edge[3], edge[4] or 1); t.color = edge end end
+end
+local function roleChoiceLabel(value)
+    local icon = (catalog and catalog.roleIcons and catalog.roleIcons[value]) or ''
+    return (icon ~= '' and (icon .. ' ') or '') .. '|c' .. (roleColors[value] or 'ffb5b5b5') .. (roles[value] or T('Невідомо')) .. '|r'
+end
+local function createRoleSelector(parent, x, y, width)
+    local selector = CreateFrame('Frame', nil, parent)
+    selector:SetSize(width, 34)
+    selector:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y)
+    selector.buttons = {}
+    selector.allowedRoles = {}
+    selector.mode = 'none'
+    selector.selectedRole = ''
+    for i = 1, 3 do
+        local b = CreateFrame('Button', nil, selector, 'UIPanelButtonTemplate')
+        OldKraken.UIStyle.Button(b, nil, {rounded = true})
+        b:SetSize(42, 34)
+        b:SetScript('OnClick', function(self)
+            if not self.role or not canPerformRole(identity, self.role) then return end
+            currentRole = self.role
+            selector:Update()
+        end)
+        b:SetScript('OnEnter', function(self)
+            if GameTooltip and self.role then
+                GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+                GameTooltip:SetText(roles[self.role] or self.role)
+                GameTooltip:Show()
+            end
+        end)
+        b:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+        b:Hide()
+        selector.buttons[i] = b
+    end
+    local badge = CreateFrame('Frame', nil, selector)
+    if OldKraken.UIStyle and OldKraken.UIStyle.Panel then
+        OldKraken.UIStyle.Panel(badge, 0, 0, width, 34)
+    end
+    badge:SetSize(width, 34)
+    badge:SetPoint('TOPLEFT', selector, 'TOPLEFT', 0, 0)
+    badge.text = badge:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    readableFont(badge.text, 13)
+    badge.text:SetPoint('LEFT', badge, 'LEFT', 10, 0)
+    badge.text:SetPoint('RIGHT', badge, 'RIGHT', -10, 0)
+    badge.text:SetJustifyH('CENTER')
+    badge.text:SetWordWrap(false)
+    badge:Hide()
+    selector.badge = badge
+    function selector:Update()
+        local allowed = {}
+        for _, candidate in ipairs({'tank', 'healer', 'dps'}) do
+            if canPerformRole(identity, candidate) then allowed[#allowed + 1] = candidate end
+        end
+        self.allowedRoles = allowed
+        if currentRole == 'flex' or not canPerformRole(identity, currentRole) then
+            currentRole = allowed[1] or ''
+        end
+        self.selectedRole = currentRole
+        if #allowed >= 2 then
+            self.mode = 'buttons'
+            self.badge:Hide()
+            local gap = 4
+            local btnW = math.floor((width - gap * (#allowed - 1)) / #allowed)
+            for i = 1, 3 do
+                local b = self.buttons[i]
+                local r = allowed[i]
+                if r then
+                    b.role = r
+                    b:SetSize(btnW, 34)
+                    b:ClearAllPoints()
+                    b:SetPoint('TOPLEFT', self, 'TOPLEFT', (i - 1) * (btnW + gap), 0)
+                    b:SetText((catalog and catalog.roleIcons and catalog.roleIcons[r]) or (roles[r] or r))
+                    styleRoleSegment(b, r == currentRole)
+                    b:Show()
+                else
+                    b.role = nil
+                    b.active = false
+                    b:Hide()
+                end
+            end
+        elseif #allowed == 1 then
+            self.mode = 'badge'
+            for i = 1, 3 do self.buttons[i].role = nil; self.buttons[i].active = false; self.buttons[i]:Hide() end
+            self.badge.text:SetText(roleChoiceLabel(allowed[1]))
+            self.badge:Show()
+        else
+            self.mode = 'none'
+            for i = 1, 3 do self.buttons[i].role = nil; self.buttons[i].active = false; self.buttons[i]:Hide() end
+            self.badge.text:SetText(T('|cff9aa5b1Немає доступної ролі|r'))
+            self.badge:Show()
+        end
+    end
+    return selector
+end
+
 local function createWindow(parent)
     local f
     local embedded=parent~=nil
@@ -1100,8 +1199,8 @@ local function createWindow(parent)
     f.flexButton=roleButton(f.roleFlex,'flex'); f.flexButton:SetWidth(detailsWidth)
     f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT'); f.participantHeader:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.participantHeader,15)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP'); f.details:SetWordWrap(true); f.details:SetSpacing(4); readableFont(f.details,15)
-    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,embedded and -562 or -395,134,{'tank','healer','dps'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end,nil,{rounded=true})
-    f.join=action(f,T('Записатися'),450+shift+140,embedded and -562 or -395,116,function() if selected and not Events:Signup(selected,currentRole) then print(T('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.')) end end,'primary',{rounded=true,height=34})
+    f.roleSelector=createRoleSelector(f,450+shift,embedded and -562 or -395,134)
+    f.join=action(f,T('Записатися'),450+shift+140,embedded and -562 or -395,116,function() if selected and currentRole~='' and not Events:Signup(selected,currentRole) then print(T('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.')) end end,'primary',{rounded=true,height=34})
     f.leaveBaseX = 450 + shift
     f.leaveY = embedded and -562 or -395
     f.leave=action(f,T('Виписатися'),f.leaveBaseX+140,f.leaveY,116,function() if selected then Events:Signup(selected,'leave') end end,nil,{rounded=true,height=34})
@@ -1485,7 +1584,7 @@ local function createWindow(parent)
         f.description, f.description.label,
         f.summaryBar, f.cancelCreate, f.submit,
     }
-    f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleMenu,f.detailPanel}
+    f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleSelector,f.detailPanel}
     f.SetCreationMode=function(_,value) f.creationMode=value==true; refresh() end
     f:HookScript('OnShow',refresh)
     f:Hide(); return f
