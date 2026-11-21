@@ -39,6 +39,8 @@ def client(name, embedded=False):
         function date() return 'date' end
         function GetProfessions() return 1 end
         function GetProfessionInfo() return 'Alchemy',nil,50,300,nil,nil,171 end
+        local TEST_RECIPE_NAMES={[9001]='Manual potion',[9002]='Late potion',[9003]='Security potion',[9004]='Relay potion',[9005]='Embedded potion',[9101]='Profession check',[9102]='item:98765',[9201]='Drafted item',[9202]='Ready to publish'}
+        C_TradeSkillUI={GetRecipeOutputItemData=function(id) local n=TEST_RECIPE_NAMES[id]; if n then return {hyperlink='['..n..']'} end end}
         UIParent={}; UISpecialFrames={}; StaticPopupDialogs={}
         function StaticPopup_Show(name,a,b,callback)
             popup={callback=callback,GetFrameStrata=function() return 'DIALOG' end,SetFrameStrata=function() end,HookScript=function() end}

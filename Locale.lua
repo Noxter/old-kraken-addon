@@ -639,6 +639,7 @@ local english = {
     ["немає даних"] = "no data",
     ["\n|cffffc36bПошук за професією; знання рецепта не підтверджено.|r"] = "\n|cffffc36bProfession match only. Recipe knowledge is unconfirmed.|r",
     ["Завантаження назви…"] = "Loading name…",
+    ["Назва предмета недоступна"] = "Item name unavailable",
     ["\n|cff9ba9bcОбмін:|r речі "] = "\n|cff9ba9bcTrade:|r Items ",
     [" · оплата "] = " · Payment ",
     ["з "] = "g ",

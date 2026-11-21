@@ -48,10 +48,35 @@ local function orderItemName(id)
     end
     return nil
 end
+local function recipeOutputItemName(recipeID)
+    if not int(recipeID,1,100000000) or type(C_TradeSkillUI)~='table' then return nil end
+    if type(C_TradeSkillUI.GetRecipeOutputItemData)=='function' then
+        local ok,data=pcall(C_TradeSkillUI.GetRecipeOutputItemData,recipeID)
+        if ok and type(data)=='table' then
+            if int(data.itemID,1,100000000) then
+                return orderItemName(data.itemID) or T('Завантаження назви…')
+            end
+            if type(data.hyperlink)=='string' then
+                local linked=data.hyperlink:match('%[([^%]]+)%]')
+                if textOK(linked,1,160) then return linked end
+            end
+        end
+    end
+    if type(C_TradeSkillUI.GetRecipeSchematic)=='function' then
+        local ok,data=pcall(C_TradeSkillUI.GetRecipeSchematic,recipeID,false)
+        if ok and type(data)=='table' and int(data.outputItemID,1,100000000) then
+            return orderItemName(data.outputItemID) or T('Завантаження назви…')
+        end
+    end
+    return nil
+end
 local function displayOrderItem(o)
     if type(o)~='table' then return '' end
     if int(o.itemID,1,100000000) then
         return orderItemName(o.itemID) or T('Завантаження назви…')
+    end
+    if int(o.recipeID,1,100000000) then
+        return recipeOutputItemName(o.recipeID) or T('Назва предмета недоступна')
     end
     return o.item or ''
 end

@@ -236,11 +236,30 @@ def test_order_item_localization():
         assert(o.item == 'Зелье лечения')
         assert(scope.orderRelays['Alice Mon\\001ord-1']:find('Зелье лечения', 1, true))
 
-        -- 5. Old/manual order with itemID == 0 keeps textual fallback.
+        -- 5. Old/manual order with itemID == 0 and recipeID == 0 keeps textual fallback.
         local oldPayload = codec._pack({'Alice Mon', 'ord-old', 1, now, now + 86400, 171, 'Legacy Manual Item', 1, 0, 'customer', 'Old note', 'open', '', 0, 0, 0, 0, 0, 0, 0})
         handlers.WORDER('Alice Mon', 'GUILD', oldPayload)
         OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-old')
         assert(f.details.text:find('Legacy Manual Item', 1, true))
+
+        -- 5b. Recipe order with itemID == 0 and recipeID > 0 must NOT leak raw Russian o.item.
+        local noItemPayload = codec._pack({'Alice Mon', 'ord-noitem', 1, now, now + 86400, 171, 'Чары для нагрудника', 1, 0, 'customer', 'Коментар без itemID', 'open', '', 0, 0, 0, 2002, 0, 0, 0})
+        handlers.WORDER('Alice Mon', 'GUILD', noItemPayload)
+        OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-noitem')
+        assert(not f.details.text:find('Чары', 1, true), 'itemID==0, recipeID>0 leaked Russian raw o.item')
+        assert(f.details.text:find('Назва предмета недоступна', 1, true))
+        assert(f.details.text:find('Коментар без itemID', 1, true))
+
+        -- When C_TradeSkillUI provides a localized output item for recipeID > 0, it is used instead of placeholder.
+        C_TradeSkillUI = {
+            GetRecipeOutputItemData = function(id)
+                if id == 2002 then return {hyperlink = '|cffffffff|Hitem:118|h[Enchant Chest - Greater Stats]|h|r'} end
+            end
+        }
+        OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-noitem')
+        assert(f.details.text:find('Enchant Chest - Greater Stats', 1, true))
+        assert(not f.details.text:find('Чары', 1, true))
+        C_TradeSkillUI = nil
 
         -- 6. Status change notice and StaticPopup_Show use localized display name.
         local p = codec._pack({'Alice Mon', 'ord-1', 2, now, now + 86400, 171, 'Зелье лечения', 1, 0, 'customer', 'Коментар користувача', 'assigned', 'Bob Mon', 0, 0, 118, 2001, 0, 2, 0})
