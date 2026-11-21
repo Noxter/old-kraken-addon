@@ -927,17 +927,17 @@ local function recipeIcon(r)
     end
     return 134400
 end
+function Recipes:ItemName(id)
+    if not integer(id,1,100000000) then return nil end
+    local name=clientItemName(id)
+    if not name then requestItemData(id) end
+    return name
+end
 function Recipes:ItemLabel(id)
-    local name,icon
-    if C_Item and type(C_Item.GetItemNameByID)=='function' then
-        local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and safeText(value,1,160) then name=value end
-    end
-    if not name then
-        local ok,value=getItemInfo(id); if ok and safeText(value,1,160) then name=value end
-    end
+    local name=self:ItemName(id)
+    local icon
     local getIcon=C_Item and C_Item.GetItemIconByID or GetItemIcon
     if type(getIcon)=='function' then local ok,value=pcall(getIcon,id); if ok and (usable(value,'number') or usable(value,'string')) then icon=value end end
-    if not name then requestItemData(id) end
     return '|T'..tostring(icon or 134400)..':22:22:0:0|t |cffffffff'..(name or T('Завантаження назви…'))..'|r'
 end
 local itemEvents=CreateFrame('Frame')

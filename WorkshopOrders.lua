@@ -35,6 +35,26 @@ local function readableFont(text,size,spacing)
 end
 local function textOK(s,min,max) return type(s)=='string' and #s>=min and #s<=max and not s:find('[%z\1-\31\127]') end
 local function int(n,min,max) return type(n)=='number' and n==n and n%1==0 and n>=min and n<=max end
+local function orderItemName(id)
+    if not int(id,1,100000000) then return nil end
+    if OldKraken.WorkshopRecipes and type(OldKraken.WorkshopRecipes.ItemName)=='function' then
+        return OldKraken.WorkshopRecipes:ItemName(id)
+    end
+    if C_Item and type(C_Item.GetItemNameByID)=='function' then
+        local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and textOK(value,1,160) then return value end
+    end
+    if type(GetItemInfo)=='function' then
+        local ok,value=pcall(GetItemInfo,id); if ok and textOK(value,1,160) then return value end
+    end
+    return nil
+end
+local function displayOrderItem(o)
+    if type(o)~='table' then return '' end
+    if int(o.itemID,1,100000000) then
+        return orderItemName(o.itemID) or T('Завантаження назви…')
+    end
+    return o.item or ''
+end
 local function key(owner,id) return owner..'\001'..id end
 local function nameOK(s) return textOK(s,1,128) end
 local function idOK(s) return textOK(s,1,64) and s:match('^[%w%-]+$')~=nil end
@@ -359,7 +379,7 @@ local function confirmPending(k,o,direct)
         or (pending.action=='withdraw' and not o.candidates[identity] and o.worker~=identity)
         or (pending.action=='delivered' and (o.status=='delivered' or o.status=='done') and o.worker==identity)
     intents[k]=nil; requestDirty[k]=nil
-    if not applied and not relayedConfirmation then notify(T('Дію щодо замовлення не виконано'),o.item..T(' · стан змінився'),k) end
+    if not applied and not relayedConfirmation then notify(T('Дію щодо замовлення не виконано'),displayOrderItem(o)..T(' · стан змінився'),k) end
 end
 local function receiveOrder(sender,payload,isRelay)
     if not active or not nameOK(sender) or sender==identity or type(payload)~='string' or #payload>2560 then return end
@@ -391,14 +411,15 @@ local function receiveOrder(sender,payload,isRelay)
         local known=OldKraken.WorkshopRecipes and OldKraken.WorkshopRecipes:Knows(o.itemID or 0,o.recipeID or 0)
         local manual=not known
         if type(settings)=='table' and settings.workshopOrderAlerts~=false and matches then
-            notify(T('Нове замовлення: ')..o.item,professionNames[o.profession]..' · '..o.owner..(manual and T(' · рецепт не підтверджено') or ''),k)
+            notify(T('Нове замовлення: ')..displayOrderItem(o),professionNames[o.profession]..' · '..o.owner..(manual and T(' · рецепт не підтверджено') or ''),k)
         end
     elseif previous and o.rev>previous.rev then
-        if o.worker==identity and previous.worker~=identity and o.status=='assigned' then notify(T('Вас обрано майстром'),o.item..' · '..o.owner,k)
-        elseif previous.worker==identity and previous.status=='assigned' and o.status=='open' then notify(T('Замовлення перевідкрито'),o.item..' · '..o.owner,k)
-        elseif previous.candidates[identity] and o.status=='assigned' and o.worker~=identity and previous.status=='open' then notify(T('Обрано іншого майстра'),o.item..' · '..o.owner,k)
-        elseif (previous.worker==identity or previous.candidates[identity]) and (o.status=='cancelled' or o.status=='deleted') and previous.status~='cancelled' and previous.status~='done' and previous.status~='deleted' then notify(T('Замовлення скасовано'),o.item..' · '..o.owner,k)
-        elseif previous.worker==identity and o.status=='done' and previous.status~='done' then notify(T('Замовлення підтверджено'),o.item..' · '..o.owner,k) end
+        local itemTitle=displayOrderItem(o)
+        if o.worker==identity and previous.worker~=identity and o.status=='assigned' then notify(T('Вас обрано майстром'),itemTitle..' · '..o.owner,k)
+        elseif previous.worker==identity and previous.status=='assigned' and o.status=='open' then notify(T('Замовлення перевідкрито'),itemTitle..' · '..o.owner,k)
+        elseif previous.candidates[identity] and o.status=='assigned' and o.worker~=identity and previous.status=='open' then notify(T('Обрано іншого майстра'),itemTitle..' · '..o.owner,k)
+        elseif (previous.worker==identity or previous.candidates[identity]) and (o.status=='cancelled' or o.status=='deleted') and previous.status~='cancelled' and previous.status~='done' and previous.status~='deleted' then notify(T('Замовлення скасовано'),itemTitle..' · '..o.owner,k)
+        elseif previous.worker==identity and o.status=='done' and previous.status~='done' then notify(T('Замовлення підтверджено'),itemTitle..' · '..o.owner,k) end
     end
     persist(); changed()
 end
@@ -443,9 +464,9 @@ local function applyRequest(request)
     o.acks[sender]=version; o.rev=o.rev+1
     if not fits(o) then o.status,o.worker,o.candidates[sender],o.acks[sender],o.paidByWorker,o.assignment,o.rev=prevStatus,prevWorker,wasCandidate,prevAck,prevPaid,prevAssignment,o.rev-1; rememberResult(request,'capacity',o.rev); return end
     dirty[k]=true; rememberResult(request,applied and 'ok' or 'state',o.rev); persist(); changed()
-    if action=='offer' and not wasCandidate and o.candidates[sender] then notify(T('Майстер пропонує допомогу'),sender..' · '..o.item,k)
-    elseif action=='delivered' and prevStatus=='assigned' and o.status=='delivered' then notify(T('Майстер позначив передачу'),sender..' · '..o.item,k)
-    elseif action=='withdraw' and prevWorker==sender and o.status=='open' then notify(T('Майстер відмовився'),sender..' · '..o.item,k) end
+    if action=='offer' and not wasCandidate and o.candidates[sender] then notify(T('Майстер пропонує допомогу'),sender..' · '..displayOrderItem(o),k)
+    elseif action=='delivered' and prevStatus=='assigned' and o.status=='delivered' then notify(T('Майстер позначив передачу'),sender..' · '..displayOrderItem(o),k)
+    elseif action=='withdraw' and prevWorker==sender and o.status=='open' then notify(T('Майстер відмовився'),sender..' · '..displayOrderItem(o),k) end
 end
 local function decodeAction(actor,f,offset)
     local owner,id,action,version,assignment=f[offset],f[offset+1],f[offset+2],tonumber(f[offset+3]),tonumber(f[offset+4] or 0)
@@ -654,11 +675,14 @@ restoreDraft=function()
     profession=professionNames[draft.profession] and draft.profession or 0
     materials=materialNames[draft.materials] and draft.materials or 'customer'
     deadline=deadlineNames[draft.deadline] and draft.deadline or 86400
-    local item=value(draft.item,''); form.item:SetText(item~='' and item or (window.embedded and recipePlaceholder() or '')); form.quantity:SetText(value(draft.quantity,'1'))
+    local item=value(draft.item,'')
+    form.quantity:SetText(value(draft.quantity,'1'))
     form.note:SetText(value(draft.note,''))
     local recipe=draft.recipe
     chosenRecipe=type(recipe)=='table' and int(recipe.item,0,100000000) and int(recipe.recipe,1,100000000)
         and {item=recipe.item,recipe=recipe.recipe,owner=nameOK(recipe.owner) and recipe.owner or nil} or nil
+    local chosenText=chosenRecipe and (orderItemName(chosenRecipe.item) or (item~='' and item) or recipePlaceholder()) or recipePlaceholder()
+    form.item:SetText(chosenText)
     UIDropDownMenu_SetText(window.professionMenu,professionNames[profession] or T('Оберіть професію'))
     UIDropDownMenu_SetText(window.materialsMenu,materialNames[materials])
     UIDropDownMenu_SetText(window.deadlineMenu,deadlineNames[deadline])
@@ -715,7 +739,7 @@ local function confirmCardAction(k,action)
         if action=='cancel' or action=='finish' or action=='reopen' or action=='delete' then ok=ownerAction(k,action) else ok=intent(k,action) end
         if not ok then showError() end
     end
-    local popup=StaticPopup_Show(cardActionDialogs[action],o.item,nil,accept)
+    local popup=StaticPopup_Show(cardActionDialogs[action],displayOrderItem(o),nil,accept)
     if not popup then showError(); return end
     if not popup.oldKrakenRestoreHook then
         popup:HookScript('OnHide',function(self)
@@ -759,7 +783,7 @@ refresh=function()
             and canCraft(o)
         if o.status~='deleted' and not seen[k] and (view=='all' or (view=='mine' and o.owner==identity) or (view=='work' and (o.worker==identity or o.candidates[identity])) or (view=='available' and available))
             and (statusFilter=='all' or statusFilter==status) and (professionFilter==0 or professionFilter==o.profession)
-            and (searchQuery=='' or lower(o.item):find(searchQuery,1,true) or lower(o.owner):find(searchQuery,1,true)) then
+            and (searchQuery=='' or lower(displayOrderItem(o)):find(searchQuery,1,true) or lower(o.item):find(searchQuery,1,true) or lower(o.owner):find(searchQuery,1,true)) then
             seen[k]=true; list[#list+1]={key=k,order=o}
         end
     end end
@@ -781,7 +805,7 @@ refresh=function()
             if row.delete.SetAlpha then row.delete:SetAlpha(0) end
             local stateKey=displayStatus(o)
             row.order=o; row.icon:SetTexture(orderIcon(o))
-            row.title:SetText(o.item)
+            row.title:SetText(displayOrderItem(o))
             row.meta:SetText(professionNames[o.profession]..' · '..playerLabel(o.owner,classes))
             row.reward:SetText(o.quantity..T(' шт.')..(rewardCopper(o)>0 and (' · '..formatReward(o)) or '')..T(' · до ')..date('%d.%m %H:%M',o.deadline))
             local statusText=stateKey=='expired' and (o.status=='assigned' and T('У роботі · прострочено') or T('Термін минув')) or statusNames[stateKey]
@@ -866,7 +890,7 @@ refresh=function()
         local deadlineColor=statusKey=='expired' and '|cffff7770' or '|cffffffff'
         local note=o.note~='' and (T('\n\n|cff9ba9bcКоментар:|r ')..o.note) or ''
         local rewardLine=rewardCopper(o)>0 and (T('|cff9ba9bcВинагорода:|r |cffffd35a')..formatReward(o)..'|r\n') or ''
-        window.details:SetText('|cffffd35a'..o.item..' ×'..o.quantity..'|r\n|cff9ba9bc'..professionNames[o.profession]..'|r · '..coloredState..T('\n\n|cff9ba9bcЗамовник:|r ')..playerLabel(o.owner,classes)..(o.relayed and T('\n|cffffc36bДані через гільдію; можуть бути застарілими.|r') or '')..T('\n|cff9ba9bcМайстер:|r ')..(o.worker and (playerLabel(o.worker,classes)..' · '..onlineLabel(o.worker,online)) or T('|cff9ba9bcне обрано|r'))..'\n\n'..rewardLine..T('|cff9ba9bcРесурси:|r ')..materialNames[o.materials]..T('\n|cff9ba9bcТермін:|r ')..deadlineColor..date('%d.%m.%Y %H:%M',o.deadline)..'|r'..known..progress..note..(pending and (pending.receiptRev and T('\n\n|cffffc36bПідтверджено; очікується оновлення стану.|r') or T('\n\n|cffffc36bОчікується підтвердження замовника; дія передається через гільдію.|r')) or ''))
+        window.details:SetText('|cffffd35a'..displayOrderItem(o)..' ×'..o.quantity..'|r\n|cff9ba9bc'..professionNames[o.profession]..'|r · '..coloredState..T('\n\n|cff9ba9bcЗамовник:|r ')..playerLabel(o.owner,classes)..(o.relayed and T('\n|cffffc36bДані через гільдію; можуть бути застарілими.|r') or '')..T('\n|cff9ba9bcМайстер:|r ')..(o.worker and (playerLabel(o.worker,classes)..' · '..onlineLabel(o.worker,online)) or T('|cff9ba9bcне обрано|r'))..'\n\n'..rewardLine..T('|cff9ba9bcРесурси:|r ')..materialNames[o.materials]..T('\n|cff9ba9bcТермін:|r ')..deadlineColor..date('%d.%m.%Y %H:%M',o.deadline)..'|r'..known..progress..note..(pending and (pending.receiptRev and T('\n\n|cffffc36bПідтверджено; очікується оновлення стану.|r') or T('\n\n|cffffc36bОчікується підтвердження замовника; дія передається через гільдію.|r')) or ''))
         local choosing=o.owner==identity and o.status=='open'
         local detailsHeight=window.embedded and (choosing and 225 or 360) or (choosing and 110 or 215)
         window.detailsScroll:SetSize(350,detailsHeight)
@@ -1052,7 +1076,7 @@ local function createWindow(parent)
             if self.delete and self.delete:IsShown() and self.delete.SetAlpha then self.delete:SetAlpha(1) end
             local o=self.order; if not o or not GameTooltip then return end
             local _,classes=rosterPresentation()
-            GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(o.item)
+            GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(displayOrderItem(o))
             GameTooltip:AddLine(T('Замовник: ')..playerLabel(o.owner,classes),1,1,1,true)
             if o.worker then GameTooltip:AddLine(T('Майстер: ')..playerLabel(o.worker,classes),1,1,1,true) end
             local state=displayStatus(o); local color=statusColors[state] or statusColors.expired
@@ -1143,39 +1167,34 @@ local function createWindow(parent)
         OldKraken.WorkshopRecipes:Choose(function(r,owner)
             if not nameOK(owner) or owner==identity or not professionNames[r.profession] then return end
             profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
-            form.item:SetText(r.product~='' and r.product or r.name); chosenRecipe={item=r.item,recipe=r.recipe,owner=owner}
+            local label=orderItemName(r.item) or (r.product~='' and r.product or r.name)
+            form.item:SetText(label); chosenRecipe={item=r.item,recipe=r.recipe,owner=owner}
             if type(form.UpdateItemIcon)=='function' then form.UpdateItemIcon() end
             saveDraft()
         end,profession)
     end
-    if embedded then
-        local recipeLabel=formHost:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); recipeLabel:SetPoint('TOPLEFT',form,'TOPLEFT',20,formY(-420,-48)); recipeLabel:SetText(T('Рецепт'))
-        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(recipeLabel, 12) end
-        if colors.mutedText then recipeLabel:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
-        form.item=button(formHost,recipePlaceholder(),20,formY(-438,-68),700,chooseRecipe,nil,{rounded=true,height=34})
-        form.itemIcon=form.item:CreateTexture(nil,'ARTWORK')
-        form.itemIcon:SetSize(22,22); form.itemIcon:SetPoint('LEFT',form.item,'LEFT',10,0); form.itemIcon:Hide()
-        form.UpdateItemIcon=function()
-            local fs=type(form.item.GetFontString)=='function' and form.item:GetFontString()
-            if chosenRecipe then
-                form.itemIcon:SetTexture(orderIcon({itemID=chosenRecipe.item or 0,profession=profession}))
-                form.itemIcon:Show()
-                if type(fs)=='table' then fs:ClearAllPoints(); fs:SetPoint('LEFT',form.item,'LEFT',38,0); fs:SetPoint('RIGHT',form.item,'RIGHT',-12,0); fs:SetJustifyH('LEFT') end
-            else
-                form.itemIcon:Hide()
-                if type(fs)=='table' then fs:ClearAllPoints(); fs:SetPoint('CENTER',form.item,'CENTER',0,0); fs:SetJustifyH('CENTER') end
-            end
+    local recipeLabel=formHost:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); recipeLabel:SetPoint('TOPLEFT',form,'TOPLEFT',embedded and 20 or 18,formY(-420,-48)); recipeLabel:SetText(T('Рецепт'))
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(recipeLabel, 12) end
+    if colors.mutedText then recipeLabel:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+    form.item=button(formHost,recipePlaceholder(),embedded and 20 or 18,formY(-438,-68),embedded and 700 or 300,chooseRecipe,nil,{rounded=true,height=34})
+    form.itemIcon=form.item:CreateTexture(nil,'ARTWORK')
+    form.itemIcon:SetSize(22,22); form.itemIcon:SetPoint('LEFT',form.item,'LEFT',10,0); form.itemIcon:Hide()
+    form.UpdateItemIcon=function()
+        local fs=type(form.item.GetFontString)=='function' and form.item:GetFontString()
+        if chosenRecipe then
+            form.itemIcon:SetTexture(orderIcon({itemID=chosenRecipe.item or 0,profession=profession}))
+            form.itemIcon:Show()
+            if type(fs)=='table' then fs:ClearAllPoints(); fs:SetPoint('LEFT',form.item,'LEFT',38,0); fs:SetPoint('RIGHT',form.item,'RIGHT',-12,0); fs:SetJustifyH('LEFT') end
+        else
+            form.itemIcon:Hide()
+            if type(fs)=='table' then fs:ClearAllPoints(); fs:SetPoint('CENTER',form.item,'CENTER',0,0); fs:SetJustifyH('CENTER') end
         end
-    else
-        form.item=input(formHost,T('Предмет або посилання'),18,formY(-420,-64),300,'')
-        form.item:SetScript('OnTextChanged',function() if not restoringDraft then chosenRecipe=nil; saveDraft() end end)
-        button(formHost,T('Обрати рецепт'),560,formY(-438,-64),160,chooseRecipe)
     end
     form.quantity=input(formHost,T('Кількість'),embedded and 740 or 335,formY(-420,-48),embedded and 140 or 65,'1',{height=34})
     form.note=input(formHost,T('Коментар'),embedded and 20 or 18,formY(-475,-120),embedded and 500 or 360,'',{height=34})
     for _,field in ipairs({form.quantity,form.note}) do field:SetScript('OnTextChanged',saveDraft) end
     local professionChoices={[0]=T('Оберіть професію')}; for id,name in pairs(professionNames) do professionChoices[id]=name end
-    professionMenu=dropdown(formHost,'OldKrakenOrderProfession',embedded and 540 or 400,formY(-492,-138),embedded and 170 or 170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v and chosenRecipe then chosenRecipe=nil; form.item:SetText(embedded and recipePlaceholder() or ''); if type(form.UpdateItemIcon)=='function' then form.UpdateItemIcon() end end; profession=v; saveDraft() end,{rounded=true})
+    professionMenu=dropdown(formHost,'OldKrakenOrderProfession',embedded and 540 or 400,formY(-492,-138),embedded and 170 or 170,professionIDs,professionChoices,function() return profession end,function(v) if profession~=v and chosenRecipe then chosenRecipe=nil; form.item:SetText(recipePlaceholder()); if type(form.UpdateItemIcon)=='function' then form.UpdateItemIcon() end end; profession=v; saveDraft() end,{rounded=true})
     f.professionMenu=professionMenu
     f.orderForm=form
     local profLabel=formHost:CreateFontString(nil,'OVERLAY','GameFontNormalSmall'); profLabel:SetPoint('TOPLEFT',form,'TOPLEFT',embedded and 540 or 400,formY(-475,-120)); profLabel:SetText(T('Професія'))
@@ -1191,7 +1210,7 @@ local function createWindow(parent)
     if colors.mutedText then dueLabel:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
     button(formHost,T('Опублікувати'),embedded and 700 or 650,formY(-548,-212),180,function()
         if not professionNames[profession] then print(T('Old Kraken: оберіть професію або рецепт.')); return end
-        if form.item:GetText()==recipePlaceholder() or form.item:GetText()=='' then print(T('Old Kraken: оберіть рецепт для замовлення.')); return end
+        if not chosenRecipe or form.item:GetText()==recipePlaceholder() or form.item:GetText()=='' then print(T('Old Kraken: оберіть рецепт для замовлення.')); return end
         if chosenRecipe and chosenRecipe.owner==identity then print(T('Old Kraken: для замовлення оберіть рецепт іншого майстра.')); return end
         if create(form.item:GetText(),form.quantity:GetText(),'0',form.note:GetText(),chosenRecipe,'0') then
             clearDraft()
