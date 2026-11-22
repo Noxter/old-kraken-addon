@@ -331,6 +331,18 @@ ui.titleBox:SetText('Рейд на Оніксію')
 ui.descriptionBox:SetText(string.rep('Привіт ', 35))
 ui.createButton.scripts.OnClick()
 assert(type(sentGuildChat) == 'string' and #sentGuildChat <= 255, 'guild chat announce exceeded 255 bytes: ' .. tostring(sentGuildChat and #sentGuildChat))
+assert(sentGuildChat:find('(1/5', 1, true))
+sentGuildChat = nil
+function IsInGroup() return true end
+function GetNumGroupMembers() return 2 end
+ui.tabBar.tabs.create.scripts.OnClick()
+selectActivityCard('sfk')
+ui.titleBox:SetText('SFK party')
+ui.descriptionBox:SetText('')
+ui.createButton.scripts.OnClick()
+assert(type(sentGuildChat) == 'string' and sentGuildChat:find('(2/5', 1, true), 'expected 2/5 in guild chat announce: ' .. tostring(sentGuildChat))
+IsInGroup = nil
+GetNumGroupMembers = nil
 
 OldKraken.listeners.GROUP_FINDER_NEW(wcGroup)
 local alert

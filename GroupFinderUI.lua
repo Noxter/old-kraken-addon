@@ -2025,8 +2025,16 @@ local function createWindow(parent)
         local ok, err = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then
             if f.announceGuildEnabled then
+                local createdGroup = Finder.identity and err and Finder.groups and Finder.groups[Finder.identity .. '\001' .. err]
+                local currentCount = (type(createdGroup) == 'table' and type(createdGroup.members) == 'table' and #createdGroup.members) or 1
+                if type(IsInGroup) == 'function' and IsInGroup() and type(GetNumGroupMembers) == 'function' then
+                    local okCount, partyCount = pcall(GetNumGroupMembers)
+                    if okCount and type(partyCount) == 'number' and partyCount > currentCount then
+                        currentCount = math.min(tonumber(maxPlayers) or partyCount, partyCount)
+                    end
+                end
                 local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or T('Група'))
-                announceGroupInGuildChat(activityName, 1, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
+                announceGroupInGuildChat(activityName, currentCount, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
             end
             Finder:Changed(); tab='mine'; refresh()
         else print(createErrorMessage(err, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
