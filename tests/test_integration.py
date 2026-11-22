@@ -67,5 +67,26 @@ guild='Other'; login()
 assert(cleared==1 and f.active and next(f.groups)==nil)
 guild='Guild'; login()
 assert(cleared==2 and f.groups['Hok Mon'..'\\001'..oldGroup.id] and f.pending[rejectedKey]=='reject')
+-- SyncPartyNow immediately populates party members and assigned roles for a newly created group.
+local origUnitName=UnitName
+function IsInGroup() return true end
+function IsInRaid() return false end
+function GetNumGroupMembers() return 2 end
+function UnitName(u)
+    if u=='party1' then return 'Outside','Healer' end
+    return origUnitName(u)
+end
+function UnitGroupRolesAssigned(u)
+    if u=='player' then return 'TANK' end
+    if u=='party1' then return 'HEALER' end
+    return 'NONE'
+end
+f:Cancel(oldGroup.id)
+local okSync, syncId = f:Create('SFK', 'dungeon', '', 5, 22, 30, 'dps', 'sfk')
+assert(okSync)
+f:SyncPartyNow()
+local syncedGroup = f.groups['Hok Mon' .. '\\001' .. syncId]
+assert(syncedGroup and #syncedGroup.members == 2 and syncedGroup.memberRoles['Outside Healer'] == 'healer')
+UnitName=origUnitName
 ''')
 print('Integration checks passed')

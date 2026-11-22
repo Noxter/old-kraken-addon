@@ -349,7 +349,8 @@ local function reconcileParty(additionsOnly)
 end
 
 function finder:SyncPartyNow()
-    syncParty()
+    if not active then return end
+    reconcileParty(true)
 end
 
 function finder:PrintSyncStatus()
