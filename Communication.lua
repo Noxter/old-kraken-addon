@@ -19,6 +19,7 @@ local MAX_ERROR_ATTEMPTS = 5
 Communication.MAX_QUEUE = MAX_QUEUE
 Communication.BACKGROUND_LIMIT = MAX_QUEUE - ACTION_RESERVE
 Communication.pendingTransmissions = {}
+Communication.reservedReplaySlots = 0
 Communication.retryAt, Communication.backoff = 0, 0
 Communication.stats.deduplicated, Communication.stats.backpressure, Communication.stats.restarted = 0, 0, 0
 local PRIORITY = {JOIN=0,RESPONSE=0,CANCEL=0,CEVRSVP=0,CVCANCEL=0,
@@ -113,14 +114,12 @@ function Communication:RegisterHandler(kind, callback)
 end
 
 local function effectiveQueueSize(self)
-    local reserved,seen=0,{}
-    for _,job in pairs(self.pendingTransmissions) do
-        if not seen[job] and job.startedAt and job.remaining>0 then
-            reserved=reserved+#job.messages-job.remaining
-            seen[job]=true
-        end
-    end
-    return #self.queue+reserved
+    return #self.queue+self.reservedReplaySlots
+end
+
+local function releaseReplayReservation(self,job)
+    self.reservedReplaySlots=self.reservedReplaySlots-(job.replayReserved or 0)
+    job.replayReserved=0
 end
 
 function Communication:SendProtocol(kind, payload)
@@ -176,7 +175,10 @@ function Communication:ClearProtocolState()
             local job = entry.job
             if job then
                 job.remaining = job.remaining - 1
-                if job.remaining == 0 then self.pendingTransmissions[job.key] = nil end
+                if job.remaining == 0 then
+                    releaseReplayReservation(self,job)
+                    self.pendingTransmissions[job.key] = nil
+                end
             end
             table.remove(self.queue, i)
         end
@@ -277,7 +279,13 @@ local function finishEntry(self,index,accepted)
         local job=entry.job
         job.remaining=job.remaining-1
         if accepted and not job.startedAt then job.startedAt=GetTime() end
-        if job.remaining==0 then self.pendingTransmissions[job.key]=nil end
+        if job.remaining==0 then
+            releaseReplayReservation(self,job)
+            self.pendingTransmissions[job.key]=nil
+        elseif accepted then
+            job.replayReserved=(job.replayReserved or 0)+1
+            self.reservedReplaySlots=self.reservedReplaySlots+1
+        end
     end
 end
 local function deferEntry(self,entry,reason)
@@ -298,6 +306,7 @@ local function dropEntryOrJob(self,index,entry,reason,notifyCritical)
             if self.queue[i].job==job then table.remove(self.queue,i) end
         end
         job.remaining=0
+        releaseReplayReservation(self,job)
         if job.key and self.pendingTransmissions[job.key]==job then self.pendingTransmissions[job.key]=nil end
     end
     self.stats.dropped=self.stats.dropped+1
@@ -356,6 +365,7 @@ function Communication:Pump()
                 table.remove(self.queue,i)
             end
         end
+        releaseReplayReservation(self,job)
         job.remaining=#job.messages; job.startedAt=nil
         for part,message in ipairs(job.messages) do
             local state=errors[part]

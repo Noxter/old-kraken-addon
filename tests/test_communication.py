@@ -159,6 +159,20 @@ for setup in ("Enum=nil; result=77", "Enum.SendAddonMessageResult.ChannelThrottl
     scenario("assert(c:QueueMessage('x')); " + setup + "; c:Pump(); assert(c.queue[1].errorAttempts==1 and c.retryAt==0 and c.backoff==0)")
 for value in (1, 2, 3):
     scenario(f"assert(c:QueueMessage('x')); result={value}; c:Pump(); assert(c.retryAt>now and c.backoff==2 and not c.queue[1].errorAttempts)")
+# WoW Forever 1.60.1 build 71037 reports these actual Enum values.
+for value in (3, 8, 11):
+    scenario(f"""
+    Enum.SendAddonMessageResult={{Success=0,AddonMessageThrottle=3,ChannelThrottle=8,AddOnMessageLockdown=11}}
+    assert(c:QueueMessage('x')); result={value}; c:Pump()
+    assert(c.retryAt>now and c.backoff==2 and not c.queue[1].errorAttempts)
+    result=0; now=c.retryAt+1; c:Pump(); assert(#c.queue==0 and c.stats.dropped==0 and #sent==1)
+    """)
+for value in (1, 2):
+    scenario(f"""
+    Enum.SendAddonMessageResult={{Success=0,AddonMessageThrottle=3,ChannelThrottle=8,AddOnMessageLockdown=11}}
+    assert(c:QueueMessage('x')); result={value}; c:Pump()
+    assert(c.retryAt==0 and c.queue[1].errorAttempts==1)
+    """)
 scenario("assert(c:QueueMessage('x')); result=nil; c:Pump(); assert(#c.queue==0 and c.stats.sent==1)")
 scenario("assert(c:QueueMessage('x')); C_ChatInfo=nil; c:Pump(); assert(c.retryAt>now and c.stats.dropped==0 and not c.queue[1].errorAttempts)")
 scenario("assert(c:QueueMessage('x')); result=9; c:Pump(); now=c.queue[1].nextTryAt+1; result=0; c:Pump(); assert(c.stats.dropped==0 and #sent==1)")
@@ -183,6 +197,25 @@ for drop_first in (False, True):
     now=now+200; c:Pump(); c:Pump(); c:Pump()
     assert(sent[#sent]:find('GF2^JOIN^',1,true)==1)
     ''')
+
+scenario('''
+assert(c:SendProtocol('SYNC','2:id5:owner'..string.rep('a',100)))
+assert(c:SendProtocol('SYNC','2:id5:owner'..string.rep('b',100)))
+local first=c.queue[1].job; local last=c.queue[3].job
+assert(c:SendProtocol('JOIN','5:owner2:id'))
+c:Pump(); c:Pump(); assert(not c.pendingTransmissions[first.key])
+local failed=c.queue[1]; result=99
+for i=1,5 do
+    c:Pump()
+    if i<5 then
+        for _,e in ipairs(c.queue) do if e.job==last then e.nextTryAt=failed.nextTryAt end end
+        local n=#sent; c:Pump(); assert(#sent==n)
+        now=failed.nextTryAt+1
+    end
+end
+assert(c.stats.dropped==1 and not c.pendingTransmissions[last.key])
+result=0; c:Pump(); assert(sent[#sent]:find('GF2^JOIN^',1,true)==1)
+''')
 
 scenario('''
 assert(c:SendProtocol('SYNC','2:id5:owner'..string.rep('s',100)))
@@ -287,6 +320,34 @@ for cleanup in ('complete', 'drop', 'guild', 'clear'):
     assert(c:QueueMessage('reclaimed')); assert(c:QueueMessage('reclaimed again')); assert(not c:QueueMessage('full'))
     ''')
 
+# The maintained reservation matches independently reconstructed active jobs
+# throughout replay, subsequent accepts, cleanup, and another replay.
+scenario('''
+local function check(expected)
+    local computed,seen=0,{}
+    for _,e in ipairs(c.queue) do
+        local j=e.job
+        if j and not seen[j] then
+            seen[j]=true
+            if j.startedAt and j.remaining>0 then computed=computed+#j.messages-j.remaining end
+        end
+    end
+    assert(computed==expected and c.reservedReplaySlots==computed)
+    assert(#c.queue+computed<=c.MAX_QUEUE)
+end
+assert(c:SendProtocol('JOIN',string.rep('a',240))); local first=c.queue[1].job
+assert(c:SendProtocol('WOREQ',string.rep('b',240))); local second=c.queue[4].job
+check(0); c:Pump(); check(1)
+for _,e in ipairs(c.queue) do if e.job==first then e.nextTryAt=now+10 end end
+c:Pump(); check(2)
+for _,e in ipairs(c.queue) do if e.job==second then e.nextTryAt=now+1000 end end
+now=now+91; c:Pump(); check(1); assert(c.stats.restarted==1)
+c:Pump(); check(2)
+now=now+91; c:Pump(); check(1); assert(c.stats.restarted==2)
+guild='B'; c:Pump(); check(1); assert(first.remaining==0)
+now=now+1000; c:Pump(); check(0); assert(second.remaining==0)
+''')
+
 # Admission limits include replay reservations, deduplication wins over pressure,
 # and replayed parts join the end of the current equal-priority queue.
 scenario('''
@@ -300,6 +361,18 @@ size=#c.queue; assert(size==4095)
 assert(c:SendProtocol('JOIN',string.rep('a',160)))
 assert(not c:SendProtocol('JOIN','another') and #c.queue==size)
 ''')
+for kind in ('WORDER', 'SYNC'):
+    scenario(f"""
+    assert(c:SendProtocol('JOIN',string.rep('r',160))); c:Pump()
+    assert(c.reservedReplaySlots==1)
+    while #c.queue<c.BACKGROUND_LIMIT-3 do assert(c:QueueMessage('filler')) end
+    local before=#c.queue; local pressure=c.stats.backpressure
+    assert(c:SendProtocol('{kind}',string.rep('p',160)))
+    assert(#c.queue==before+2 and #c.queue+c.reservedReplaySlots==c.BACKGROUND_LIMIT)
+    local size=#c.queue
+    local ok,reason=c:SendProtocol('{kind}',string.rep('q',160))
+    assert(not ok and reason=='queue full' and #c.queue==size and c.stats.backpressure==pressure+1)
+    """)
 scenario('''
 assert(c:SendProtocol('WORDER',string.rep('a',160))); local first=c.queue[1].job
 c:Pump(); assert(c:SendProtocol('WORDER','b')); local second=c.queue[2].job
