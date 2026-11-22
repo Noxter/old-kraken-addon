@@ -348,6 +348,10 @@ local function reconcileParty(additionsOnly)
     if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
 end
 
+function finder:SyncPartyNow()
+    syncParty()
+end
+
 function finder:PrintSyncStatus()
     local total = 0
     for _ in pairs(self.groups or {}) do total = total + 1 end

@@ -1958,7 +1958,7 @@ local function createWindow(parent)
         end
         return text:sub(1, cut)
     end
-    local function announceGroupInGuildChat(activityName, currentCount, maxPlayers, minLv, maxLv, descText)
+    local function announceGroupInGuildChat(activityName, currentCount, maxPlayers, minLv, maxLv, descText, group)
         if type(IsInGuild) ~= 'function' or not IsInGuild() then return end
         local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
             or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
@@ -1966,13 +1966,46 @@ local function createWindow(parent)
             print(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
             return
         end
-        local metaParts = {(currentCount or 1) .. '/' .. (maxPlayers or 5)}
+        local maxSize = maxPlayers or 5
+        local count = currentCount or 1
+        local metaParts = {}
         if minLv and maxLv and minLv > 0 and maxLv > 0 then
-            metaParts[#metaParts + 1] = T('рівні ') .. minLv .. '–' .. maxLv
+            metaParts[#metaParts + 1] = minLv == maxLv and ('lvl ' .. minLv) or ('lvl ' .. minLv .. '–' .. maxLv)
+        end
+        if type(group) == 'table' and group.category == 'dungeon' and maxSize == 5 and type(Finder.DungeonSlots) == 'function' then
+            local slots = Finder:DungeonSlots(group)
+            local extra = math.max(0, count - (type(group.members) == 'table' and #group.members or 1))
+            local counts = {tank = 0, healer = 0, dps = 0}
+            for i = #slots, 1, -1 do
+                local slot = slots[i]
+                if not slot.member then
+                    if extra > 0 then
+                        extra = extra - 1
+                    elseif counts[slot.role] ~= nil then
+                        counts[slot.role] = counts[slot.role] + 1
+                    end
+                end
+            end
+            local roleParts = {}
+            for _, r in ipairs({'tank', 'healer', 'dps'}) do
+                local n = counts[r]
+                if n > 0 then
+                    local label = roleLabels[r] or r
+                    roleParts[#roleParts + 1] = n > 1 and (n .. ' ' .. label) or label
+                end
+            end
+            if #roleParts > 0 then
+                metaParts[#metaParts + 1] = T('потрібні: ') .. table.concat(roleParts, ', ')
+            end
+        else
+            local freeSlots = math.max(0, maxSize - count)
+            if freeSlots > 0 then
+                metaParts[#metaParts + 1] = string.format(T('вільно: %d'), freeSlots)
+            end
         end
         local cleanActivity = tostring(activityName or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
-        local prefix = T('[Old Kraken] Збір групи: ') .. cleanActivity .. ' (' .. table.concat(metaParts, ', ') .. ')'
-        local suffix = T(' — запис у вкладці «Групи» (/okr).')
+        local prefix = '{rt8} LFG ' .. cleanActivity .. (#metaParts > 0 and (' · ' .. table.concat(metaParts, ' · ')) or '')
+        local suffix = T(' »»» Old Kraken · Групи')
         local note = ((descText or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')):match('^%s*(.-)%s*$')
         local maxBytes = 255
         if #prefix + #suffix > maxBytes then
@@ -2024,6 +2057,7 @@ local function createWindow(parent)
         local maxPlayers = category == 'dungeon' and '5' or f.maxBox:GetText()
         local ok, err = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then
+            if type(Finder.SyncPartyNow) == 'function' then Finder:SyncPartyNow() end
             if f.announceGuildEnabled then
                 local createdGroup = Finder.identity and err and Finder.groups and Finder.groups[Finder.identity .. '\001' .. err]
                 local currentCount = (type(createdGroup) == 'table' and type(createdGroup.members) == 'table' and #createdGroup.members) or 1
@@ -2034,7 +2068,7 @@ local function createWindow(parent)
                     end
                 end
                 local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or T('Група'))
-                announceGroupInGuildChat(activityName, currentCount, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
+                announceGroupInGuildChat(activityName, currentCount, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText(), createdGroup)
             end
             Finder:Changed(); tab='mine'; refresh()
         else print(createErrorMessage(err, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
@@ -2146,7 +2180,7 @@ local function createWindow(parent)
         local ok, reason, seconds = Finder:Reannounce(group.id)
         if ok then
             local activityName = (group.title and group.title ~= '' and displayGroupTitle(group)) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or T('Група')
-            announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description)
+            announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description, group)
             print(T('Old Kraken: повторне оголошення додано до черги гільдії.'))
         elseif reason == 'cooldown' then print(T('Old Kraken: повторити оголошення можна через ') .. seconds .. T(' с.'))
         else print(T('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.')) end

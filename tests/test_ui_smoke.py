@@ -331,7 +331,7 @@ ui.titleBox:SetText('Рейд на Оніксію')
 ui.descriptionBox:SetText(string.rep('Привіт ', 35))
 ui.createButton.scripts.OnClick()
 assert(type(sentGuildChat) == 'string' and #sentGuildChat <= 255, 'guild chat announce exceeded 255 bytes: ' .. tostring(sentGuildChat and #sentGuildChat))
-assert(sentGuildChat:find('(1/5', 1, true))
+assert(sentGuildChat:find('^{rt8} LFG ') and sentGuildChat:find('потрібні: ', 1, true) and sentGuildChat:find(' »»» Old Kraken · Групи$', 1, false), 'unexpected guild chat format: ' .. tostring(sentGuildChat))
 sentGuildChat = nil
 function IsInGroup() return true end
 function GetNumGroupMembers() return 2 end
@@ -340,7 +340,7 @@ selectActivityCard('sfk')
 ui.titleBox:SetText('SFK party')
 ui.descriptionBox:SetText('')
 ui.createButton.scripts.OnClick()
-assert(type(sentGuildChat) == 'string' and sentGuildChat:find('(2/5', 1, true), 'expected 2/5 in guild chat announce: ' .. tostring(sentGuildChat))
+assert(type(sentGuildChat) == 'string' and sentGuildChat:find('^{rt8} LFG SFK party · lvl 22–30 · потрібні: Танк, Лікар, DPS »»» Old Kraken · Групи$'), 'unexpected guild chat announce: ' .. tostring(sentGuildChat))
 IsInGroup = nil
 GetNumGroupMembers = nil
 
