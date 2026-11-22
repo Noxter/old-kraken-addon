@@ -143,6 +143,9 @@ local function isGroupHiddenByOfflineOwner(key, group)
     local now = type(GetTime) == 'function' and GetTime() or 0
     return type(since) == 'number' and now - since >= OFFLINE_APPLICATION_TTL
 end
+function Finder:IsGroupHiddenByOfflineOwner(key, group)
+    return isGroupHiddenByOfflineOwner(key, group)
+end
 local function pruneOfflineApplications()
     if not guildRosterLoaded then
         for key in pairs(ownerOfflineSince) do ownerOfflineSince[key] = nil end
@@ -200,6 +203,7 @@ local function pruneOfflineApplications()
             refreshPeople()
             pruneOfflineApplications()
             if refresh then refresh() end
+            if type(OldKraken.Fire) == 'function' then OldKraken:Fire('GROUP_FINDER_OFFLINE_CHANGED') end
         end)
     end
     if changed then Finder:Changed() end

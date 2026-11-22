@@ -14,8 +14,9 @@ local function updateGroupIndicator()
         and type(finder.RoleAvailable) == 'function' then
         local available = {}
         for _, role in ipairs(roles) do available[role] = finder:CanPerformRole(finder.identity, role) end
-        for _, group in pairs(finder.groups) do
-            if not group.closed and not group.hidden and group.owner ~= finder.identity
+        for key, group in pairs(finder.groups) do
+            local hiddenOffline = type(finder.IsGroupHiddenByOfflineOwner) == 'function' and finder:IsGroupHiddenByOfflineOwner(key, group)
+            if not hiddenOffline and not group.closed and not group.hidden and group.owner ~= finder.identity
                 and type(group.members) == 'table' and type(group.maxSize) == 'number'
                 and #group.members < group.maxSize and type(group.minLevel) == 'number'
                 and type(group.maxLevel) == 'number' and level >= group.minLevel and level <= group.maxLevel then
@@ -109,6 +110,7 @@ OldKraken:On('INITIALIZED', function(db)
 end)
 
 OldKraken:On('GROUP_FINDER_CHANGED', updateGroupIndicator)
+OldKraken:On('GROUP_FINDER_OFFLINE_CHANGED', updateGroupIndicator)
 local indicatorEvents = CreateFrame('Frame')
 for _, event in ipairs({'PLAYER_ENTERING_WORLD', 'PLAYER_LEVEL_UP', 'GUILD_ROSTER_UPDATE',
     'GROUP_ROSTER_UPDATE', 'PLAYER_ROLES_ASSIGNED', 'ROLE_CHANGED_INFORM',

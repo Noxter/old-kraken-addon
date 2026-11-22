@@ -99,4 +99,145 @@ assert(not indicator.shown, 'level change updates the indicator immediately')
 button.scripts.OnEnter(button)
 for _,line in ipairs(GameTooltip.lines) do assert(not line:find('Підходящих груп',1,true)) end
 ''')
+
+
+def test_offline_owner_hides_minimap_indicator():
+    ui_lua = LuaRuntime(unpack_returned_tuples=True)
+    ui_lua.execute('''
+        OldKraken = {
+            name = 'OldKraken',
+            _listeners = {},
+            UIStyle = {
+                Colors = {
+                    window = {0, 0, 0, 1}, brandGold = {1, 1, 0, 1}, text = {1, 1, 1, 1},
+                    mutedText = {0.6, 0.6, 0.6}, success = {0, 1, 0, 1}, neutral = {0.6, 0.6, 0.6, 1},
+                    danger = {1, 0, 0, 1}, sel = {0.2, 0.3, 0.6, 0.5}, selEdge = {0.5, 0.6, 1, 1},
+                    buttonEdge = {0.2, 0.2, 0.3, 0.8},
+                },
+                Window = function() end, Button = function() end, Dropdown = function() end,
+                Input = function() end, Panel = function() end, Font = function() end,
+                EmblemPath = function() return 'emblem' end,
+                PanelFrame = function(p) return CreateFrame('Frame', nil, p) end,
+                ApplySelection = function() end,
+            },
+        }
+        function OldKraken:On(name, fn)
+            self._listeners[name] = self._listeners[name] or {}
+            table.insert(self._listeners[name], fn)
+        end
+        function OldKraken:Fire(name, ...)
+            for _, fn in ipairs(self._listeners[name] or {}) do fn(...) end
+        end
+        now = 100
+        ownerOnline = true
+        function GetTime() return now end
+        function GetServerTime() return 1700000000 end
+        function UnitLevel() return 25 end
+        function UnitGetAvailableRoles() return false, true, false end
+        function UnitName() return 'Me', 'Realm' end
+        function GetRealmName() return 'Realm' end
+        function GetGuildInfo() return 'Guild' end
+        function IsInGuild() return true end
+        function IsInInstance() return false, 'none' end
+        function InCombatLockdown() return false end
+        function PlaySound() end
+        function GetNumGuildMembers() return 1 end
+        function GetGuildRosterInfo() return 'Other-Realm', 'Member', 1, 25, 'Warrior', 'City', '', '', ownerOnline, '', 'WARRIOR' end
+        function UIDropDownMenu_SetWidth() end
+        function UIDropDownMenu_JustifyText() end
+        function UIDropDownMenu_Initialize() end
+        function UIDropDownMenu_SetText() end
+        function UIDropDownMenu_CreateInfo() return {} end
+        function print() end
+        StaticPopupDialogs = {}
+        UISpecialFrames = {}
+        UIParent = {}
+        afterCallbacks = {}
+        C_Timer = {
+            After = function(_, fn) table.insert(afterCallbacks, fn) end,
+            NewTicker = function(_, fn) indicatorTick = fn end,
+        }
+        Minimap = {GetFrameLevel = function() return 1 end, GetWidth = function() return 100 end, GetHeight = function() return 100 end}
+        GameTooltip = {lines = {}, SetOwner = function(self) self.lines = {} end, SetText = function(self, t) self.title = t end, AddLine = function(self, t) self.lines[#self.lines + 1] = t end, Show = function() end, Hide = function() end}
+        local methods = {}
+        function methods:SetScript(k, v) self.scripts[k] = v end
+        function methods:HookScript(k, v) local o = self.scripts[k]; self.scripts[k] = function(...) if o then o(...) end; v(...) end end
+        function methods:RegisterEvent(k) self.events[k] = true end
+        function methods:CreateTexture() return CreateFrame() end
+        function methods:CreateFontString() return CreateFrame() end
+        function methods:Show() self.shown = true end
+        function methods:Hide() self.shown = false end
+        function methods:SetShown(v) self.shown = v and true or false end
+        function methods:IsShown() return self.shown == true end
+        function methods:SetTexture(t) self.texture = t end
+        function methods:GetHeight() return 400 end
+        function methods:GetVerticalScroll() return 0 end
+        local meta = {__index = function(_, k) return methods[k] or function() end end}
+        frames = {}
+        function CreateFrame(_, name)
+            local f = setmetatable({scripts = {}, events = {}}, meta)
+            if name then _G[name] = f end
+            frames[#frames + 1] = f
+            return f
+        end
+    ''')
+    for name in ('Locale.lua', 'ActivityCatalog.lua', 'GroupFinder.lua', 'GroupFinderUI.lua', 'Minimap.lua'):
+        ui_lua.execute((root / name).read_text(encoding='utf-8'))
+    ui_lua.execute('''
+        local db = {settings = {minimapAngle = 225, groupFinderNotifications = false}}
+        OldKraken.InitializeLocale(db)
+        OldKraken.DB = db
+        local f = OldKraken.GroupFinder
+        f:Initialize('Me Realm', function() return true end)
+        f.active = true
+        OldKraken:Fire('INITIALIZED', db)
+
+        local indicator = OldKrakenMinimapButton.groupIndicator
+        f.groups['Other Realm\0011'] = {
+            owner = 'Other Realm', id = '1', category = 'dungeon', maxSize = 5,
+            minLevel = 20, maxLevel = 30, role = 'tank', members = {'Other Realm'}, memberRoles = {}, seenAt = now,
+        }
+        local function flushAfter()
+            local batch = afterCallbacks
+            afterCallbacks = {}
+            for _, fn in ipairs(batch) do fn() end
+        end
+        local function fireRosterUpdate()
+            for _, fr in ipairs(frames) do
+                if fr.events and fr.events.GUILD_ROSTER_UPDATE and fr.scripts.OnEvent then
+                    fr.scripts.OnEvent(fr, 'GUILD_ROSTER_UPDATE')
+                end
+            end
+        end
+        OldKraken:Fire('GROUP_FINDER_CHANGED', f.groups['Other Realm\0011'])
+        fireRosterUpdate()
+        flushAfter()
+        assert(indicator.shown, 'online owner group should trigger indicator')
+
+        -- Owner goes offline: still shown before 300s grace expires.
+        ownerOnline = false
+        now = 200
+        fireRosterUpdate()
+        flushAfter()
+        assert(indicator.shown, 'indicator stays visible during 300s offline grace')
+
+        now = 499
+        indicatorTick()
+        assert(indicator.shown, 'indicator stays visible at 299s offline')
+
+        -- At 300s offline, GroupFinderUI hides the group and indicator must turn off.
+        now = 500
+        flushAfter()
+        assert(not indicator.shown, 'indicator must hide when offline owner exceeds 300s')
+
+        -- Owner comes back online and roster updates -> indicator reappears.
+        ownerOnline = true
+        now = 505
+        fireRosterUpdate()
+        flushAfter()
+        assert(indicator.shown, 'indicator reappears when owner returns online')
+    ''')
+
+
+test_offline_owner_hides_minimap_indicator()
 print('Minimap group indicator checks passed')
