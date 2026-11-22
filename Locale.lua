@@ -514,6 +514,7 @@ local english = {
     ["Ростер"] = "Roster",
     ["Ліва кнопка: відкрити / закрити Old Kraken"] = "Left-click: Toggle the addon window",
     ["Права кнопка: відкрити / закрити групи"] = "Right-click: Toggle Groups",
+    ["Підходящих груп за рівнем і роллю: "] = "Groups matching your level and role: ",
     ["Перетягніть, щоб перемістити"] = "Drag to move",
     ["Масштаб вікна: "] = "Window scale: ",
     ["Лівий клік — змінити (85%–140%)"] = "Left-click — Change (85%–140%)",

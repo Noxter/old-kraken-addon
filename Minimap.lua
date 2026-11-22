@@ -1,6 +1,37 @@
 local T = OldKraken.Translate or function(text) return text end
 -- Minimap shortcut; its angle is stored in the addon's existing settings.
 local button
+local matchingGroups = 0
+local roles = {'tank', 'healer', 'dps'}
+
+local function updateGroupIndicator()
+    if not button then return end
+    local finder = OldKraken.GroupFinder
+    local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
+    local count = 0
+    if finder and finder.active and finder.identity and level and level > 0
+        and type(finder.groups) == 'table' and type(finder.CanPerformRole) == 'function'
+        and type(finder.RoleAvailable) == 'function' then
+        local available = {}
+        for _, role in ipairs(roles) do available[role] = finder:CanPerformRole(finder.identity, role) end
+        for _, group in pairs(finder.groups) do
+            if not group.closed and not group.hidden and group.owner ~= finder.identity
+                and type(group.members) == 'table' and type(group.maxSize) == 'number'
+                and #group.members < group.maxSize and type(group.minLevel) == 'number'
+                and type(group.maxLevel) == 'number' and level >= group.minLevel and level <= group.maxLevel then
+                local member = false
+                for _, name in ipairs(group.members) do if name == finder.identity then member = true; break end end
+                if not member then
+                    for _, role in ipairs(roles) do
+                        if available[role] and finder:RoleAvailable(group, role) then count = count + 1; break end
+                    end
+                end
+            end
+        end
+    end
+    matchingGroups = count
+    if count > 0 then button.groupIndicator:Show() else button.groupIndicator:Hide() end
+end
 
 local function place(angle)
     local radians = math.rad(angle)
@@ -49,6 +80,11 @@ OldKraken:On('INITIALIZED', function(db)
     border:SetTexture('Interface\\Minimap\\MiniMap-TrackingBorder')
     border:SetSize(54, 54); border:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
     button.border = border
+    local indicator = button:CreateTexture(nil, 'OVERLAY', nil, 2)
+    indicator:SetTexture('Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga')
+    indicator:SetSize(12, 12); indicator:SetPoint('BOTTOMRIGHT', button, 'BOTTOMRIGHT', -1, 1)
+    indicator:Hide()
+    button.groupIndicator = indicator
     button:SetHighlightTexture('Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight')
     button:SetScript('OnClick', function(_, mouseButton)
         local target = mouseButton == 'RightButton' and OldKraken.GroupFinder or OldKraken.GuildRoster
@@ -58,6 +94,7 @@ OldKraken:On('INITIALIZED', function(db)
         GameTooltip:SetOwner(self, 'ANCHOR_LEFT')
         local gold = OldKraken.UIStyle.Colors.brandGold
         GameTooltip:SetText(OldKraken.GetGuildDisplayName and OldKraken.GetGuildDisplayName() or 'Old Kraken', gold[1], gold[2], gold[3])
+        if matchingGroups > 0 then GameTooltip:AddLine(T('Підходящих груп за рівнем і роллю: ') .. matchingGroups, 0.41, 0.86, 0.55) end
         GameTooltip:AddLine(T('Ліва кнопка: відкрити / закрити Old Kraken'), 1, 1, 1)
         GameTooltip:AddLine(T('Права кнопка: відкрити / закрити групи'), 1, 1, 1)
         GameTooltip:AddLine(T('Перетягніть, щоб перемістити'), 0.75, 0.75, 0.75)
@@ -67,4 +104,15 @@ OldKraken:On('INITIALIZED', function(db)
     button:SetScript('OnDragStart', function(self) self:SetScript('OnUpdate', updatePosition) end)
     button:SetScript('OnDragStop', function(self) self:SetScript('OnUpdate', nil) end)
     place(angle)
+    updateGroupIndicator()
+    if C_Timer and type(C_Timer.NewTicker) == 'function' then C_Timer.NewTicker(10, updateGroupIndicator) end
 end)
+
+OldKraken:On('GROUP_FINDER_CHANGED', updateGroupIndicator)
+local indicatorEvents = CreateFrame('Frame')
+for _, event in ipairs({'PLAYER_ENTERING_WORLD', 'PLAYER_LEVEL_UP', 'GUILD_ROSTER_UPDATE',
+    'GROUP_ROSTER_UPDATE', 'PLAYER_ROLES_ASSIGNED', 'ROLE_CHANGED_INFORM',
+    'PLAYER_SPECIALIZATION_CHANGED', 'ACTIVE_TALENT_GROUP_CHANGED'}) do
+    pcall(indicatorEvents.RegisterEvent, indicatorEvents, event)
+end
+indicatorEvents:SetScript('OnEvent', updateGroupIndicator)
