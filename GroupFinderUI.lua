@@ -1326,14 +1326,17 @@ refresh=function()
     if showCards then window.UpdateActivityCards() end
     local advanced=tab=='create' and window.advancedCreation
     window.creationOptions:SetShown(advanced)
-    for _,box in ipairs({window.titleBox,window.maxBox,window.minBox,window.maxLevelBox}) do
+    for _,box in ipairs({window.titleBox,window.minBox,window.maxLevelBox}) do
         box:SetShown(advanced); box.label:SetShown(advanced)
     end
+    local showMaxBox = advanced and category ~= 'dungeon'
+    window.maxBox:SetShown(showMaxBox); window.maxBox.label:SetShown(showMaxBox)
+    window.titleBox:SetWidth(category == 'dungeon' and 320 or 240)
     window.descriptionBox:SetShown(tab=='create'); window.descriptionBox.label:Hide()
     if window.commentHint then window.commentHint:SetShown(tab=='create' and (window.descriptionBox:GetText() or '')=='') end
     window.categoryButton:SetShown(advanced); window.categoryLabel:SetShown(advanced)
     window.dungeonLabel:Hide()
-    window.maxBox.label:SetText(category=='dungeon' and T('Місць (5)') or T('Місць'))
+    window.maxBox.label:SetText(T('Місць'))
     window.createButton:SetShown(tab=='create')
     window.createButton:SetText(T('Зібрати групу'))
     local colors = OldKraken.UIStyle.Colors or {}
@@ -1748,6 +1751,14 @@ local function createWindow(parent)
     f.titleBox = input(f, T('Назва'), 20, -330, 240, '')
     f.descriptionBox = input(f, T('Опис'), 275, -330, 250, '')
     f.maxBox = input(f, T('Місць'), 20, -385, 65, '5')
+    f.maxBox:SetScript('OnEnter', function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+            GameTooltip:SetText(T('Загальний розмір групи разом із вами (1–200).'))
+            GameTooltip:Show()
+        end
+    end)
+    f.maxBox:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     f.minBox = input(f, T('Мін. рівень'), 105, -385, 80, '1')
     f.maxLevelBox = input(f, T('Макс. рівень'), 205, -385, 80, '60')
     f.createFields = {f.titleBox, f.descriptionBox, f.maxBox, f.minBox, f.maxLevelBox}
@@ -1787,6 +1798,7 @@ local function createWindow(parent)
         local recommended = dungeonLevels[value]
         if recommended then
             f.minBox:SetText(tostring(recommended.min)); f.maxLevelBox:SetText(tostring(recommended.max))
+            if recommended.size then f.maxBox:SetText(tostring(recommended.size)) end
         end
         f.dungeonSelection:SetText(value~='' and dungeonLabels[value] or T('Без конкретного підземелля'))
         f.UpdateActivityCards()
@@ -1979,17 +1991,41 @@ local function createWindow(parent)
         local sent, err = pcall(sendChat, msg, 'GUILD')
         if not sent then print(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
     end
+    local function createErrorMessage(err, titleText, maxText, minText, maxLevelText)
+        if err == 'role' then return T('Old Kraken: оберіть вашу роль у групі.') end
+        if err == 'class_role' then return T('Old Kraken: обрана роль недоступна для вашого класу.') end
+        if err == 'dungeon_size' then return T('Old Kraken: для підземелля кількість місць має дорівнювати 5.') end
+        if err == 'roles' then return T('Old Kraken: для підземелля потрібна роль танка, лікаря або DPS.') end
+        if err == 'capacity' then return T('Old Kraken: досягнуто ліміт активних оголошень.') end
+        if err == 'queue' then return T('Old Kraken: не вдалося надіслати оголошення. Перевірте, чи ви в гільдії та стан зв’язку (/okr comm status).') end
+        if err == 'invalid' then
+            if titleText == '' or #titleText > 100 then
+                return T('Old Kraken: введіть назву групи (1–100 символів) або оберіть підземелля.')
+            end
+            local maxNum = tonumber(maxText)
+            if not maxNum or maxNum % 1 ~= 0 or maxNum < 1 or maxNum > 200 then
+                return T('Old Kraken: кількість місць має бути цілим числом від 1 до 200.')
+            end
+            local minLv, maxLv = tonumber(minText), tonumber(maxLevelText)
+            if not minLv or not maxLv or minLv % 1 ~= 0 or maxLv % 1 ~= 0 or minLv < 1 or maxLv > 255 or minLv > maxLv then
+                return T('Old Kraken: перевірте діапазон рівнів (мін. <= макс., від 1 до 255).')
+            end
+            return T('Old Kraken: перевірте коректність заповнених полів.')
+        end
+        return T('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.')
+    end
     f.announceGuildEnabled = true
     f.createButton = button(f, T('Створити'), 550, -455, 150, function()
         local titleText = (f.titleBox:GetText() or ''):match('^%s*(.-)%s*$')
-        local ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
+        local maxPlayers = category == 'dungeon' and '5' or f.maxBox:GetText()
+        local ok, err = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then
             if f.announceGuildEnabled then
                 local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or T('Група'))
-                announceGroupInGuildChat(activityName, 1, tonumber(f.maxBox:GetText()) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
+                announceGroupInGuildChat(activityName, 1, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
             end
             Finder:Changed(); tab='mine'; refresh()
-        else print(T('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.')) end
+        else print(createErrorMessage(err, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
     end, nil, 'primary')
     f.advancedCreation=false
     local colors = OldKraken.UIStyle.Colors or {}

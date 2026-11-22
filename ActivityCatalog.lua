@@ -32,9 +32,9 @@ local dungeons = {
 }
 local raids = {
     {value='', label='Усі / не вибрано'},
-    {value='barrowdeeps', label='Курганні глибини (BD)', min=60, max=60},
-    {value='hyjalsummit', label='Вершина Гіджала (HS)', min=60, max=60},
-    {value='onyxia', label='Лігво Оніксії (Ony)', min=60, max=60},
+    {value='barrowdeeps', label='Курганні глибини (BD)', min=60, max=60, size=10},
+    {value='hyjalsummit', label='Вершина Гіджала (HS)', min=60, max=60, size=20},
+    {value='onyxia', label='Лігво Оніксії (Ony)', min=60, max=60, size=40},
 }
 OldKraken.ActivityCatalog = {dungeon=dungeons, raid=raids, roleIcons={
     tank='|TInterface\\AddOns\\OldKraken\\Media\\RoleIcons.tga:16:16:0:0:64:16:0:16:0:16|t',
