@@ -2543,7 +2543,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
         groupAlert.alertAccent:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 2, -2)
         groupAlert.alertAccent:SetPoint('TOPRIGHT', groupAlert, 'TOPRIGHT', -2, -2)
         groupAlert.alertAccent:SetHeight(2)
-        groupAlert.alertAccent:SetColorTexture(0.85, 0.5, 0.18, 0.9)
+        groupAlert.alertAccent:SetColorTexture(0.88, 0.69, 0.32, 0.75)
         groupAlert.alertArt = groupAlert:CreateTexture(nil, 'ARTWORK')
         groupAlert.alertArt:SetSize(60, 60)
         groupAlert.alertArt:SetPoint('LEFT', groupAlert, 'LEFT', 8, 0)
@@ -2649,15 +2649,21 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     end
     for _,control in ipairs(groupAlert.roleSlots or {}) do control:Hide() end
     local graphical=kind=='group' and rosterGroup~=nil
-    groupAlert:SetSize(graphical and 620 or 560,graphical and 204 or 112)
-    groupAlert.alertAccent:SetShown(not graphical)
-    groupAlert.alertArt:SetSize(graphical and 90 or 60,graphical and 118 or 60)
-    groupAlert.alertChrome:SetShown(graphical)
-    local highlight=groupAlert:GetHighlightTexture(); if highlight then highlight:SetAlpha(graphical and 0 or 1) end
+    groupAlert:SetSize(graphical and 620 or 460, graphical and 204 or 112)
+    groupAlert.alertAccent:SetShown(true)
+    groupAlert.alertArt:SetSize(graphical and 90 or 52, graphical and 118 or 52)
+    groupAlert.alertArt:ClearAllPoints()
+    groupAlert.alertArt:SetPoint('LEFT', groupAlert, 'LEFT', graphical and 10 or 12, 0)
+    groupAlert.alertChrome:SetShown(true)
+    local highlight=groupAlert:GetHighlightTexture(); if highlight then highlight:SetAlpha(0) end
     groupAlert.kind, groupAlert.groupKey = kind, key
-    local hasGroupArt = kind == 'group'
-    groupAlert.alertArt:SetShown(hasGroupArt)
-    if hasGroupArt then catalog.SetArtwork(groupAlert.alertArt, dungeonId) end
+    groupAlert.alertArt:Show()
+    if kind == 'group' or (isEvent and type(dungeonId) == 'string' and dungeonId ~= '') then
+        catalog.SetArtwork(groupAlert.alertArt, dungeonId)
+    elseif OldKraken.UIStyle and OldKraken.UIStyle.EmblemPath then
+        groupAlert.alertArt:SetTexture(OldKraken.UIStyle.EmblemPath())
+        if groupAlert.alertArt.SetTexCoord then groupAlert.alertArt:SetTexCoord(0, 1, 0, 1) end
+    end
     groupAlert.positionKind = isWorkshop and 'workshop' or (isEvent and 'event' or (kind == 'group' and 'group' or 'request'))
     local settings = OldKraken.DB and OldKraken.DB.settings
     local positions = type(settings) == 'table' and settings.alertPositions
@@ -2669,7 +2675,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     else
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
     end
-    local textLeft = graphical and 116 or (hasGroupArt and 82 or 18)
+    local textLeft = graphical and 116 or 76
     groupAlert.alertCaption:ClearAllPoints()
     groupAlert.alertTitle:ClearAllPoints()
     groupAlert.alertSubtitle:ClearAllPoints()
@@ -2677,19 +2683,18 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     groupAlert.alertTitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', textLeft, -28)
     groupAlert.alertTitle:SetPoint('RIGHT', groupAlert, 'RIGHT', -12, 0)
     groupAlert.alertSubtitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', textLeft, -51)
-    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, 8)
+    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, graphical and 12 or 34)
     groupAlert.alertCaption:SetText(alertCaptions[kind] or 'OLD KRAKEN')
     groupAlert.alertTitle:SetText(title)
     groupAlert.alertFooter:ClearAllPoints()
     groupAlert.alertFooter:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft-7,7)
     groupAlert.alertFooter:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-7,7)
-    groupAlert.alertFooter:SetHeight(graphical and 32 or 58)
+    groupAlert.alertFooter:SetHeight(graphical and 32 or 26)
     groupAlert.alertHint:ClearAllPoints()
-    groupAlert.alertHint:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft,12)
+    groupAlert.alertHint:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft,10)
     groupAlert.alertHint:SetPoint('RIGHT',groupAlert,'RIGHT',-12,0)
     groupAlert.alertHint:SetHeight(16)
-    groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or T('Клік — відкрити'))..T('|r  |cffb0baca· перетягніть, щоб перемістити|r'))
-    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,12)
+    groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or T('ЛКМ — відкрити'))..T('|r  |cffb0baca· ПКМ — сховати · перетягніть|r'))
     if graphical then
         paintAlertRoster(rosterGroup)
         groupAlert.alertSubtitle:ClearAllPoints()
@@ -2728,17 +2733,26 @@ end)
 OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
     if not eventAlertsEnabled() then return end
     local subtitle = event.owner .. ' · ' .. date('%d.%m.%Y %H:%M', event.when)
-    showAlert(T('Нова подія: ') .. displayEventTitle(event), subtitle, 'event', key)
+    showAlert(T('Нова подія: ') .. displayEventTitle(event), subtitle, 'event', key, event.activity)
 end)
 OldKraken:On('GUILD_EVENTS_NEW_SIGNUP', function(key, event, name, role)
     if not eventAlertsEnabled() then return end
     refreshPeople()
+    local accepted = 0
+    if type(event.statuses) == 'table' then
+        for _, st in pairs(event.statuses) do
+            if st == 'accepted' then accepted = accepted + 1 end
+        end
+    end
+    local countText = (type(event.size) == 'number' and event.size > 0)
+        and (' (' .. accepted .. '/' .. event.size .. ')')
+        or (accepted > 0 and (' (' .. accepted .. ')') or '')
     local signupRole=role=='flex' and T('Учасник') or roleLabel(role)
-    showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. displayEventTitle(event), 'event_signup', key)
+    showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. displayEventTitle(event) .. countText, 'event_signup', key, event.activity)
 end)
 OldKraken:On('GUILD_EVENTS_CANCELLED', function(key, event)
     if not eventAlertsEnabled() then return end
-    showAlert(T('Подію скасовано'), displayEventTitle(event) .. T(' · Автор: ') .. event.owner, 'event_signup', key)
+    showAlert(T('Подію скасовано'), displayEventTitle(event) .. T(' · Автор: ') .. event.owner, 'event_signup', key, event.activity)
 end)
 OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
     Finder:SyncAlertVisibility('event')
