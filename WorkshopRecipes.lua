@@ -1,4 +1,7 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 local function chatError(msg)
     if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
 end
@@ -481,7 +484,7 @@ local function search(value)
     offset=0; addCached(q,nil,selectRecipe and pickerProfession or nil)
     if now-lastQuery<10 then
         if activeQuery and activeQuery.query~=q then activeQuery=nil end
-        changed(); chatError(T('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.')); return false
+        changed(); chatInfo(T('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.')); return false
     end
     sequence=sequence+1
     local token=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence

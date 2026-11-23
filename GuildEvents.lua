@@ -1631,6 +1631,7 @@ function Events:PrintRelayDiagnostics()
     local s=self:GetRelayDiagnostics()
     chatInfo('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
     for _,reason in ipairs({'invalid_payload','rejected_relay_cancelled','rejected_relay_sender','rejected_relay_mismatch','rejected_relay_stale','rejected_relay_equivocation','rejected_direct_stale','rejected_direct_equivocation','rejected_capacity'}) do
+        -- Indented diagnostic sub-lines intentionally omit the addon prefix.
         print('  '..reason..': '..s[reason])
     end
 end

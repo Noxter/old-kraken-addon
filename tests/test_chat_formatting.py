@@ -55,9 +55,41 @@ lua_en.execute('''
     assert(T('[Групи]') == '[Groups]' and T('[Івенти]') == '[Events]' and T('[Майстерня]') == '[Workshop]')
 ''')
 
-# 3. GroupFinderUI logAlert uses readable module labels instead of /okr commands
-ui_src = (ROOT / 'GroupFinderUI.lua').read_text(encoding='utf-8')
-assert '. /okr events' not in ui_src and '. /okr orders' not in ui_src and '. /okr group' not in ui_src
-assert "T('[Івенти]')" in ui_src and "T('[Майстерня]')" in ui_src and "T('[Групи]')" in ui_src
+# 3. Runtime logAlert formatting for group, event, and workshop alerts
+ui_lua = LuaRuntime(unpack_returned_tuples=True)
+ui_lua.execute('''
+    printed = {}
+    function print(...)
+        local parts = {}
+        for i = 1, select('#', ...) do parts[#parts + 1] = tostring(select(i, ...)) end
+        printed[#printed + 1] = table.concat(parts, ' ')
+    end
+    function CreateFrame()
+        return { RegisterEvent = function() end, SetScript = function() end }
+    end
+    function InCombatLockdown() return true end
+    function GetServerTime() return 1700000000 end
+    function date() return '20:00' end
+    StaticPopupDialogs = {}
+    UIParent = {}
+    OldKraken = { DB = { settings = { smartNotifications = true } } }
+''')
+ui_lua.execute(LOCALE)
+ui_lua.execute('OldKraken.InitializeLocale({ settings = { language = "ukUA" } })')
+ui_lua.execute(CORE)
+ui_lua.execute((ROOT / 'ActivityCatalog.lua').read_text(encoding='utf-8'))
+ui_lua.execute((ROOT / 'GroupFinder.lua').read_text(encoding='utf-8'))
+ui_lua.execute((ROOT / 'GroupFinderUI.lua').read_text(encoding='utf-8'))
+ui_lua.execute('''
+    OldKraken:Fire('GROUP_FINDER_APPLICATION_STATUS', { owner = 'Alice', id = 'g1', title = 'Kara' }, 'reject')
+    OldKraken:Fire('GUILD_EVENTS_NEW', 'e1', { id = 'e1', owner = 'Bob', title = 'MC', when = 1700000000 })
+    OldKraken:Fire('WORKSHOP_ORDER_NOTICE', 'Нове замовлення', 'Flask x5', 'o1')
+    assert(printed[1]:find('|cff2ec4b6Old Kraken|r: %[Групи%] ', 1) == 1, printed[1])
+    assert(printed[2]:find('|cff2ec4b6Old Kraken|r: %[Івенти%] ', 1) == 1, printed[2])
+    assert(printed[3]:find('|cff2ec4b6Old Kraken|r: %[Майстерня%] ', 1) == 1, printed[3])
+    for i = 1, 3 do
+        assert(not printed[i]:find('/okr ', 1, true), printed[i])
+    end
+''')
 
 print('Chat formatting checks passed')
