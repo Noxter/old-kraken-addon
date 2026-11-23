@@ -3,7 +3,7 @@
 [![WoW Forever](https://img.shields.io/badge/WoW_Forever-1.60.1-blue.svg)](https://github.com/Noxter/old-kraken-addon)
 [![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)](https://github.com/Noxter/old-kraken-addon)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-58%20test%20files-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-60%20test%20files-brightgreen.svg)](tests/)
 
 **Old Kraken** — аддон для гри World of Warcraft (клієнт **WoW Forever 1.60.1**, Interface `16001`), створений для об'єднання ключових активностей гільдії в одному зручному інтерфейсі: реєстр учасників, гільдійний пошук груп, календар подій, розумні сповіщення та майстерня професій.
 
@@ -118,7 +118,7 @@
 
 ## Тестування та надійність
 
-Проєкт містить **58 автоматизованих тестових файлів** (`tests/test_*.py`), які CI (`.github/workflows/validate-pr.yml`) запускає через Python/Lupa на середовищі Lua 5.1. Вони перевіряють:
+Проєкт містить **60 автоматизованих тестових файлів** (`tests/test_*.py`), які CI (`.github/workflows/validate-pr.yml`) запускає через Python/Lupa на середовищі Lua 5.1. Вони перевіряють:
 - Цілісність бази даних та міграції схеми (`Database.lua`).
 - Кодек, чергу, фрагментацію та обробку пакетів (`Communication.lua`).
 - Моделі станів груп, monotonic fence та дедуплікацію (`GroupFinder.lua`).
@@ -143,6 +143,7 @@ OldKraken/
 ├── ActivityCatalog.lua          # Довідник підземель, рейдів, рекомендованих рівнів та іконок
 ├── GroupFinder.lua              # Модель гільдійного пошуку груп та валідація станів
 ├── GroupFinderIntegration.lua   # Синхронізація зі складом поточної ігрової паті/рейду
+├── GroupFinderChat.lua          # Форматування та клікабельні посилання оголошень у /g
 ├── GroupFinderUI.lua            # Інтерфейс карток та деталей Group Finder
 ├── GroupFinderAPI.lua           # Безпечна read-only діагностика нативного C_LFGList
 ├── GuildEvents.lua              # Календар подій гільдії та облік заявок
