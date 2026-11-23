@@ -124,16 +124,20 @@ end)
 local function attachCommunitiesButton()
     if communitiesButton or not CommunitiesFrame then return end
     communitiesButton = CreateFrame('Button', 'OldKrakenCommunitiesButton', CommunitiesFrame)
-    communitiesButton:SetSize(32, 32)
+    local lastTab = (type(CommunitiesFrame.GuildBenefitsTab) == 'table' and type(CommunitiesFrame.GuildBenefitsTab.IsShown) == 'function'
+        and CommunitiesFrame.GuildBenefitsTab:IsShown() and CommunitiesFrame.GuildBenefitsTab)
+        or (type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetPoint) == 'function' and CommunitiesFrame.GuildInfoTab)
+    local tabW = lastTab and type(lastTab.GetWidth) == 'function' and tonumber(lastTab:GetWidth()) or 0
+    local tabH = lastTab and type(lastTab.GetHeight) == 'function' and tonumber(lastTab:GetHeight()) or 0
+    local btnW = (tabW and tabW >= 32) and tabW or 40
+    local btnH = (tabH and tabH >= 32) and tabH or 40
+    communitiesButton:SetSize(btnW, btnH)
     if type(CommunitiesFrame.GetFrameStrata) == 'function' then
         communitiesButton:SetFrameStrata(CommunitiesFrame:GetFrameStrata() or 'MEDIUM')
     end
     local level = (type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetFrameLevel) == 'function' and CommunitiesFrame.GuildInfoTab:GetFrameLevel())
         or (type(CommunitiesFrame.GetFrameLevel) == 'function' and CommunitiesFrame:GetFrameLevel()) or 1
     communitiesButton:SetFrameLevel(level + 5)
-    local lastTab = (type(CommunitiesFrame.GuildBenefitsTab) == 'table' and type(CommunitiesFrame.GuildBenefitsTab.IsShown) == 'function'
-        and CommunitiesFrame.GuildBenefitsTab:IsShown() and CommunitiesFrame.GuildBenefitsTab)
-        or (type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetPoint) == 'function' and CommunitiesFrame.GuildInfoTab)
     if lastTab == CommunitiesFrame.GuildBenefitsTab and lastTab then
         communitiesButton:SetPoint('TOP', lastTab, 'BOTTOM', 0, -16)
     elseif lastTab then
@@ -162,7 +166,7 @@ local function attachCommunitiesButton()
     end
     local icon = communitiesButton:CreateTexture(nil, 'ARTWORK')
     icon:SetPoint('CENTER')
-    icon:SetSize(26, 26)
+    icon:SetSize(math.floor(btnW * 0.8), math.floor(btnH * 0.8))
     icon:SetTexture(OldKraken.UIStyle.EmblemPath())
     communitiesButton:SetHighlightTexture('Interface\\Buttons\\ButtonHilight-Square', 'ADD')
     communitiesButton:SetScript('OnClick', function(_, mouseButton)
