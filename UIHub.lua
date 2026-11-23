@@ -405,6 +405,7 @@ local function createSettings(parent)
     if OldKraken.UIStyle and OldKraken.UIStyle.Panel then
         OldKraken.UIStyle.Panel(page, 0, -48, 560, 166)
         OldKraken.UIStyle.Panel(page, 0, -230, 560, 276)
+        OldKraken.UIStyle.Panel(page, 576, -48, 324, 212)
     end
 
     local label = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
@@ -463,17 +464,22 @@ local function createSettings(parent)
     local previewButton = button('', 18, -450, 256)
     local resetPositionsButton = button(T('Скинути позиції банерів'), 286, -450, 256)
 
+    local versionTitle = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    versionTitle:SetPoint('TOPLEFT', page, 'TOPLEFT', 594, -64)
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(versionTitle, 15, true) end
+    versionTitle:SetText(T('Оновлення аддона'))
+
     local versionLabel = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -498)
-    versionLabel:SetWidth(396)
+    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 594, -92)
+    versionLabel:SetWidth(288)
     versionLabel:SetJustifyH('LEFT')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(versionLabel, 13) end
-    local curseForgeButton = button(T('CurseForge'), 422, -492, 120)
-    local versionIndicatorButton = button('', 18, -530, 256)
-    local versionChatButton = button('', 286, -530, 256)
+    local curseForgeButton = button(T('CurseForge'), 594, -120, 288)
+    local versionIndicatorButton = button('', 594, -164, 288)
+    local versionChatButton = button('', 594, -208, 288)
 
     local minimapHint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    minimapHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -574)
+    minimapHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -520)
     minimapHint:SetWidth(524)
     minimapHint:SetJustifyH('LEFT')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(minimapHint, 13) end

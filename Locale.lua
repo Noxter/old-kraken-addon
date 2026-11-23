@@ -865,6 +865,7 @@ local english = {
     ["Версія аддона: %s"] = "Addon version: %s",
     ["Індикатор оновлення"] = "Update indicator",
     ["Оновлення в чаті"] = "Update in chat",
+    ["Оновлення аддона"] = "Addon Updates",
     ["Відкрити профіль"] = "Open profile",
     ["‹ Назад до ростера"] = "‹ Back to roster",
     ["В мережі"] = "Online",
