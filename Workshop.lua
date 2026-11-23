@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Guild profession directory. Each character publishes only their own snapshot.
 local Workshop = {currentView='professions', navigationStack={}}
 OldKraken.Workshop = Workshop
@@ -487,7 +493,7 @@ local function createWindow(parent)
             end
         end)
     end
-    button(content,T('Оновити'),embedded and 770 or 590,embedded and -50 or y(-43),embedded and 130 or 120,function() forceBroadcast=true; nextScan=0; queryPending=true; print(T('Old Kraken: запит професій поставлено в чергу.')) end,nil,{rounded=true,height=34})
+    button(content,T('Оновити'),embedded and 770 or 590,embedded and -50 or y(-43),embedded and 130 or 120,function() forceBroadcast=true; nextScan=0; queryPending=true; chatInfo(T('Old Kraken: запит професій поставлено в чергу.')) end,nil,{rounded=true,height=34})
     f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlight')
     f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 0 or 20,embedded and -104 or y(-52))
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.heading, 13) end
@@ -653,7 +659,7 @@ function Workshop:Back()
     if entry.recipes and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:RestoreView(entry.recipes) end
 end
 function Workshop:Show(view)
-    connect(); if not active then print(T('Old Kraken: майстерня доступна після входу до гільдії.')); return end
+    connect(); if not active then chatError(T('Old Kraken: майстерня доступна після входу до гільдії.')); return end
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('workshop')
         self.navigationStack={}

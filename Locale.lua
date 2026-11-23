@@ -818,6 +818,9 @@ local english = {
     ["Міграцію Майстерні завершено."] = "Workshop migration completed.",
     ["Міграцію Майстерні завершено, але не всі конфлікти вмістилися у сховище конфліктів. Старі дані збережено без змін."] = "Workshop migration completed, but not all conflicts fit into the conflict storage. The old data was kept unchanged.",
     ["Немає очікуваної міграції Майстерні для поточного світу."] = "No pending Workshop migration for the current realm.",
+    ["[Групи]"] = "[Groups]",
+    ["[Івенти]"] = "[Events]",
+    ["[Майстерня]"] = "[Workshop]",
 }
 
 local language = 'ukUA'

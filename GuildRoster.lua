@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 local ADDON_NAME = ...
 
 local Roster = {}
@@ -1012,7 +1018,7 @@ end
 
 function Roster:RequestUpdate()
     if not IsInGuild or not IsInGuild() then
-        print(T("|cff2ec4b6Old Kraken|r: персонаж не перебуває в гільдії."))
+        chatInfo(T("|cff2ec4b6Old Kraken|r: персонаж не перебуває в гільдії."))
         return
     end
 
@@ -1022,13 +1028,13 @@ function Roster:RequestUpdate()
     elseif GuildRoster then
         GuildRoster()
     else
-        print(T("|cff2ec4b6Old Kraken|r: API оновлення ростера недоступний."))
+        chatError(T("|cff2ec4b6Old Kraken|r: API оновлення ростера недоступний."))
     end
 end
 
 function Roster:Show()
     if not GetSettings() then
-        print(T("|cff2ec4b6Old Kraken|r: база даних ще не ініціалізована."))
+        chatError(T("|cff2ec4b6Old Kraken|r: база даних ще не ініціалізована."))
         return
     end
 
@@ -1104,11 +1110,11 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         if OldKraken.Database and type(OldKraken.Database.ConfirmWorkshopMigration) == 'function' then
             local ok, status = OldKraken.Database:ConfirmWorkshopMigration()
             if ok and status == 'completedWithOverflow' then
-                print('|cff2ec4b6Old Kraken|r: ' .. T('Міграцію Майстерні завершено, але не всі конфлікти вмістилися у сховище конфліктів. Старі дані збережено без змін.'))
+                chatInfo(T('Міграцію Майстерні завершено, але не всі конфлікти вмістилися у сховище конфліктів. Старі дані збережено без змін.'))
             elseif ok then
-                print('|cff2ec4b6Old Kraken|r: ' .. T('Міграцію Майстерні завершено.'))
+                chatInfo(T('Міграцію Майстерні завершено.'))
             else
-                print('|cff2ec4b6Old Kraken|r: ' .. T('Немає очікуваної міграції Майстерні для поточного світу.'))
+                chatInfo(T('Немає очікуваної міграції Майстерні для поточного світу.'))
             end
         end
         return

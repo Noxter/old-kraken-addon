@@ -95,7 +95,11 @@ function API:PrintStatus()
     local status = self:GetStatus()
 
     local function line(message)
-        print("|cff2ec4b6Old Kraken|r: " .. message)
+        if OldKraken.Print then
+            OldKraken:Print(message)
+        else
+            print("|cff2ec4b6Old Kraken|r: " .. tostring(message or ""))
+        end
     end
 
     line(T("Native Group Finder API — лише діагностика; пошук і створення не запускаються."))

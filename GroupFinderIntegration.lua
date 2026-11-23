@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Experimental integration; requires validation against the target client.
 local finder = OldKraken.GroupFinder
 local comm = OldKraken.Communication
@@ -342,7 +348,7 @@ local function reconcileParty(additionsOnly)
     local complete, changed, reason = finder:SyncPartyMembers(party, partyRoles)
     partyDirty = not complete
     if reason == 'payload' and diagnostics.partySyncError ~= 'payload' then
-        print(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
+        chatError(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
     end
     diagnostics.partySyncError = reason
     if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
@@ -357,25 +363,25 @@ function finder:PrintSyncStatus()
     local total = 0
     for _ in pairs(self.groups or {}) do total = total + 1 end
     local realm = GetRealmName and GetRealmName() or T('невідомо')
-    print('|cff2ec4b6Old Kraken|r: Group Finder: ' .. (active and T('активний') or T('не ініціалізований')) ..
+    chatInfo('|cff2ec4b6Old Kraken|r: Group Finder: ' .. (active and T('активний') or T('не ініціалізований')) ..
         T('; гравець: ') .. tostring(self.identity or '-') .. '; realm: ' .. tostring(realm) .. T('; груп: ') .. total)
-    print(T('|cff2ec4b6Old Kraken|r: отримано оголошень: ') .. diagnostics.received ..
+    chatInfo(T('|cff2ec4b6Old Kraken|r: отримано оголошень: ') .. diagnostics.received ..
         T('; додано/оновлено: ') .. diagnostics.accepted .. T('; не додано (включно з повторами): ') .. diagnostics.rejected)
-    print(T('|cff2ec4b6Old Kraken|r: останній sender: ') .. tostring(diagnostics.lastSender or '-') ..
+    chatInfo(T('|cff2ec4b6Old Kraken|r: останній sender: ') .. tostring(diagnostics.lastSender or '-') ..
         T('; після перевірки: ') .. tostring(diagnostics.lastNormalized or T('не визначено')))
     if diagnostics.partySyncError == 'payload' then
-        print(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
+        chatError(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
     elseif diagnostics.partySyncError == 'unavailable' then
-        print(T('|cffff5555Old Kraken|r: Гра не повернула повний склад паті або рейду; аддон повторить перевірку.'))
+        chatError(T('|cffff5555Old Kraken|r: Гра не повернула повний склад паті або рейду; аддон повторить перевірку.'))
     end
 end
 
 function finder:RequestSyncNow()
-    if not active then print(T('|cffff5555Old Kraken|r: Group Finder не ініціалізований.')); return false end
+    if not active then chatError(T('|cffff5555Old Kraken|r: Group Finder не ініціалізований.')); return false end
     if C_GuildInfo and type(C_GuildInfo.GuildRoster) == 'function' then pcall(C_GuildInfo.GuildRoster) end
-    if not comm:RequestSync() then print(T('|cffff5555Old Kraken|r: не вдалося додати запит синхронізації до черги.')); return false end
+    if not comm:RequestSync() then chatError(T('|cffff5555Old Kraken|r: не вдалося додати запит синхронізації до черги.')); return false end
     self:OnQuery()
-    print(T('|cff2ec4b6Old Kraken|r: запит синхронізації додано до черги.'))
+    chatInfo(T('|cff2ec4b6Old Kraken|r: запит синхронізації додано до черги.'))
     return true
 end
 
@@ -621,7 +627,7 @@ frame:SetScript('OnEvent', function(_, event)
                 -- At the protocol limit the local closure is retained, but peers
                 -- holding the same revision cannot accept a newer snapshot.
                 if group.revision < 2147483647 then group.revision = group.revision + 1
-                else print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.')) end
+                else chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.')) end
                 comm:SendProtocol('CANCEL', finder:EncodeGroup(group))
             else finder.lastActivity[group.id] = ts end
         end
@@ -659,7 +665,7 @@ frame:SetScript('OnEvent', function(_, event)
                             finder.lastActivity[group.id] = nil
                             activityChanged = true
                             OldKraken:Fire('GROUP_FINDER_CHANGED')
-                            print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+                            chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
                         elseif finder:Cancel(group.id) then
                             OldKraken:Fire('GROUP_FINDER_CHANGED')
                             local title = group.title or group.id
@@ -671,7 +677,7 @@ frame:SetScript('OnEvent', function(_, event)
                                     end
                                 end
                             end
-                            print(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності.'), title))
+                            chatInfo(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності.'), title))
                         end
                     end
                 end

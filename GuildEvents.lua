@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Guild-only event calendar. The event owner is authoritative for signups.
 local Events = {}
 OldKraken.GuildEvents = Events
@@ -322,15 +328,15 @@ function Events:PumpRaidInvites()
     local e=events[job.key]
     if not active or not e or e.owner~=identity or e.cancelled or e.kind~='raid' or GetTime()>job.expires then raidInvites=nil; return end
     if type(InCombatLockdown)=='function' and InCombatLockdown() then return end
-    if not canLeadInvites() then raidInvites=nil; print(T('Old Kraken: для запрошень потрібні права лідера або помічника рейду.')); return end
+    if not canLeadInvites() then raidInvites=nil; chatError(T('Old Kraken: для запрошень потрібні права лідера або помічника рейду.')); return end
     local inRaid=type(IsInRaid)=='function' and IsInRaid()
     local count=type(GetNumGroupMembers)=='function' and GetNumGroupMembers() or 0
     if not inRaid and count and count>0 then
         if not job.convertAt or GetTime()-job.convertAt>=5 then
             local convert=C_PartyInfo and C_PartyInfo.ConvertToRaid or ConvertToRaid
-            if type(convert)~='function' then raidInvites=nil; print(T('Old Kraken: перетворіть групу на рейд вручну.')); return end
+            if type(convert)~='function' then raidInvites=nil; chatError(T('Old Kraken: перетворіть групу на рейд вручну.')); return end
             local ok,result=pcall(convert); job.convertAt=GetTime()
-            if not ok or result==false then raidInvites=nil; print(T('Old Kraken: не вдалося перетворити групу на рейд.')); end
+            if not ok or result==false then raidInvites=nil; chatError(T('Old Kraken: не вдалося перетворити групу на рейд.')); end
         end
         return
     end
@@ -340,9 +346,9 @@ function Events:PumpRaidInvites()
         local name=job.names[job.index]; job.index=job.index+1
         if e.people[name] and e.statuses[name]=='accepted' and name~=identity and not alreadyGrouped(name) then
             local invite=C_PartyInfo and C_PartyInfo.InviteUnit or InviteUnit
-            if type(invite)~='function' then raidInvites=nil; print(T('Old Kraken: API запрошень недоступний.')); return end
+            if type(invite)~='function' then raidInvites=nil; chatError(T('Old Kraken: API запрошень недоступний.')); return end
             local ok,result=pcall(invite,name)
-            if not ok or result==false then raidInvites=nil; print(T('Old Kraken: не вдалося надіслати запрошення в рейд.')); return end
+            if not ok or result==false then raidInvites=nil; chatError(T('Old Kraken: не вдалося надіслати запрошення в рейд.')); return end
             if not inRaid then job.sentSolo=job.sentSolo+1 end
             return
         end
@@ -846,7 +852,7 @@ refresh=function()
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-118,30); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
                     row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
-                    row.accept=action(row,T('Прийняти'),0,-40,24,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print(T('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.')) end end,nil,{rounded=true,capWidth=4,height=24})
+                    row.accept=action(row,T('Прийняти'),0,-40,24,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then chatError(T('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.')) end end,nil,{rounded=true,capWidth=4,height=24})
                     row.reserve=action(row,T('Резерв'),100,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end,nil,{rounded=true,capWidth=4,height=24})
                     row.reject=action(row,T('Відхилити'),200,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end,nil,{rounded=true,capWidth=4,height=24})
                     row.invite=action(row,T('Інвайт у рейд'),0,-68,24,function(self) Events:InviteMember(selected,self:GetParent().member) end,'primary',{rounded=true,capWidth=4,height=24})
@@ -1122,10 +1128,10 @@ local function createWindow(parent)
             if not active or not e or e.owner~=identity or e.cancelled then return end
             local key,expectedProfile,expectedIdentity=entry.key,profile,identity
             local popup=StaticPopup_Show('OLDKRAKEN_EVENT_DELETE',displayEventTitle(e),nil,function()
-                if not active or profile~=expectedProfile or identity~=expectedIdentity or not Events:Cancel(key) then print(T('Old Kraken: не вдалося видалити подію.')); return end
+                if not active or profile~=expectedProfile or identity~=expectedIdentity or not Events:Cancel(key) then chatError(T('Old Kraken: не вдалося видалити подію.')); return end
                 if selected==key then selected=nil; refresh() end
             end)
-            if not popup then print(T('Old Kraken: не вдалося відкрити підтвердження видалення.')); return end
+            if not popup then chatError(T('Old Kraken: не вдалося відкрити підтвердження видалення.')); return end
             if not popup.oldKrakenRestoreHook then
                 popup:HookScript('OnHide',function(self) if self.oldKrakenStrata then self:SetFrameStrata(self.oldKrakenStrata); self.oldKrakenStrata=nil end end)
                 popup.oldKrakenRestoreHook=true
@@ -1203,7 +1209,7 @@ local function createWindow(parent)
     f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT'); f.participantHeader:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.participantHeader,15)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP'); f.details:SetWordWrap(true); f.details:SetSpacing(4); readableFont(f.details,15)
     f.roleSelector=createRoleSelector(f,450+shift,embedded and -562 or -395,134)
-    f.join=action(f,T('Записатися'),450+shift+140,embedded and -562 or -395,116,function() if selected and currentRole~='' and not Events:Signup(selected,currentRole) then print(T('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.')) end end,'primary',{rounded=true,height=34})
+    f.join=action(f,T('Записатися'),450+shift+140,embedded and -562 or -395,116,function() if selected and currentRole~='' and not Events:Signup(selected,currentRole) then chatError(T('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.')) end end,'primary',{rounded=true,height=34})
     f.leaveBaseX = 450 + shift
     f.leaveY = embedded and -562 or -395
     f.leave=action(f,T('Виписатися'),f.leaveBaseX+140,f.leaveY,116,function() if selected then Events:Signup(selected,'leave') end end,nil,{rounded=true,height=34})
@@ -1534,7 +1540,7 @@ local function createWindow(parent)
     end, nil, {rounded = true, height = 38})
 
     local function showSubmitError(msg)
-        print('|cffff5555Old Kraken|r: ' .. msg)
+        chatError(msg)
         if f.summaryLine then
             local d = (OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.danger) or {1, 0.48, 0.43, 1}
             f.summaryLine:SetTextColor(d[1], d[2], d[3])
@@ -1562,13 +1568,13 @@ local function createWindow(parent)
                 local msg = (T('[Old Kraken] Новий івент: ') .. eventTitle .. ' · ' .. date('%d.%m %H:%M', when) .. sizePart .. T(' — запис у вкладці «Івенти» (/okr).')):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
                 if sendChat then
                     local sent, err = pcall(sendChat, msg, 'GUILD')
-                    if not sent then print(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
+                    if not sent then chatError(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
                 else
-                    print(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
+                    chatError(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
                 end
             end
             resetDraft(); refresh()
-            print(T('Old Kraken: подію збережено; синхронізацію поставлено в чергу.'))
+            chatInfo(T('Old Kraken: подію збережено; синхронізацію поставлено в чергу.'))
         else
             showSubmitError(T('Перевірте назву, дату, кількість місць і належність до гільдії.'))
         end
@@ -1594,7 +1600,7 @@ local function createWindow(parent)
 end
 function Events:Show()
     if not active then connect() end
-    if not active then print(T('Old Kraken: календар доступний після входу до гільдії.')); return end
+    if not active then chatError(T('Old Kraken: календар доступний після входу до гільдії.')); return end
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('events')
     else
@@ -1623,7 +1629,7 @@ end
 
 function Events:PrintRelayDiagnostics()
     local s=self:GetRelayDiagnostics()
-    print('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
+    chatInfo('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
     for _,reason in ipairs({'invalid_payload','rejected_relay_cancelled','rejected_relay_sender','rejected_relay_mismatch','rejected_relay_stale','rejected_relay_equivocation','rejected_direct_stale','rejected_direct_equivocation','rejected_capacity'}) do
         print('  '..reason..': '..s[reason])
     end

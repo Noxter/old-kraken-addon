@@ -205,7 +205,11 @@ local function FullPlayerName()
 end
 
 local function Print(message)
-    print("|cff2ec4b6Old Kraken|r: " .. message)
+    if OldKraken.Print then
+        OldKraken:Print(message)
+    else
+        print("|cff2ec4b6Old Kraken|r: " .. tostring(message or ""))
+    end
 end
 
 local function IsOurMessagePrefix(prefix)

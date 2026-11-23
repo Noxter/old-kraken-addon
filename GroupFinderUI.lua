@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
 local function memberSpecText(name)
@@ -515,7 +521,7 @@ local function refreshRequests()
 end
 
 local function showRequests()
-    if not Finder.active then print(T('Old Kraken: пошук груп не ініціалізовано.')); return end
+    if not Finder.active then chatError(T('Old Kraken: пошук груп не ініціалізовано.')); return end
     if not window or not window:IsShown() then Finder:Show() end
     if not window or not window:IsShown() then return end
     if tab == 'create' then tab='mine'; selected=nil end
@@ -584,7 +590,7 @@ local function showRequests()
                     Finder:Changed()
                     if accept then invitePlayer(entry.name) end
                     refreshRequests()
-                else print(T('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.')) end
+                else chatError(T('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.')) end
             end
             row.accept = button(f, T('Прийняти'), 142, y - 12, 74, function() decide(true) end, 26, 'primary', {rounded = true})
             row.reject = button(f, T('Відхилити'), 222, y - 12, 76, function() decide(false) end, 26, 'danger', {rounded = true})
@@ -731,7 +737,7 @@ local function ensureGroupCard(f, index)
             for _, name in ipairs(group.members) do if name == Finder.identity then return end end
             if self.requiredRole then
                 if Finder:Apply(group.owner, group.id, self.requiredRole) then Finder:Changed(); refresh()
-                else print(T('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.')) end
+                else chatError(T('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.')) end
                 return
             end
             f.slotMenu.groupKey = self.groupKey
@@ -768,7 +774,7 @@ local function ensureGroupCard(f, index)
             if Finder:DismissApplication(group.owner, group.id) then
                 if selected == entry.key then selected = nil end
                 Finder:Changed(); refresh()
-            else print(T('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.')) end
+            else chatError(T('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.')) end
             return
         end
         if not group or group.owner ~= Finder.identity then return end
@@ -777,7 +783,7 @@ local function ensureGroupCard(f, index)
             Finder:Changed()
             refresh()
         else
-            print(T('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.'))
+            chatError(T('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.'))
         end
     end)
     remove:SetScript('OnEnter', function(self)
@@ -1168,24 +1174,24 @@ refresh=function()
                     for j = 2, #current.members do if current.members[j] == name then present = true; break end end
                     if not present then return end
                     if not current.partyObserved then
-                        print(T('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.'))
+                        chatError(T('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.'))
                     elseif current.partyObserved[name] then
                         if type(UnitIsGroupLeader) == 'function' and not UnitIsGroupLeader('player') then
-                            print(T('|cffff5555Old Kraken|r: Для виключення гравця потрібні права лідера групи.'))
+                            chatError(T('|cffff5555Old Kraken|r: Для виключення гравця потрібні права лідера групи.'))
                         elseif not C_PartyInfo or type(C_PartyInfo.UninviteUnit) ~= 'function' then
-                            print(T('|cffff5555Old Kraken|r: API виключення недоступний. Видаліть гравця з паті вручну.'))
+                            chatError(T('|cffff5555Old Kraken|r: API виключення недоступний. Видаліть гравця з паті вручну.'))
                         else
                             local ok, result = pcall(C_PartyInfo.UninviteUnit, name)
                             if ok and result ~= false then
-                                print(T('|cff2ec4b6Old Kraken|r: Спроба виключити ') .. name .. T(' з паті. Перевірте повідомлення гри.'))
+                                chatInfo(T('|cff2ec4b6Old Kraken|r: Спроба виключити ') .. name .. T(' з паті. Перевірте повідомлення гри.'))
                             else
-                                print(T('|cffff5555Old Kraken|r: Не вдалося виключити ') .. name .. T(' з паті.'))
+                                chatError(T('|cffff5555Old Kraken|r: Не вдалося виключити ') .. name .. T(' з паті.'))
                             end
                         end
                     elseif Finder:RemoveMember(current.id, name) then
                         Finder:Changed(); refresh()
                     else
-                        print(T('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.'))
+                        chatError(T('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.'))
                     end
                     end
                     local popup = StaticPopup_Show('OLDKRAKEN_REMOVE_MEMBER', name, nil, remove)
@@ -1445,7 +1451,7 @@ local function createWindow(parent)
     -- Header notification chip (right side of the shared header row)
     f.alertButton = button(f, T('Сповіщення: увімк.'), 732, 0, 168, function()
         if Finder:SetGroupAlertsEnabled(not Finder:GroupAlertsEnabled()) then refresh()
-        else print(T('Old Kraken: не вдалося зберегти налаштування сповіщень.')) end
+        else chatError(T('Old Kraken: не вдалося зберегти налаштування сповіщень.')) end
     end, 31)
     local alertLabel = f.alertButton:GetFontString()
     if alertLabel then
@@ -1478,7 +1484,7 @@ local function createWindow(parent)
                     or Finder.pending[key] == 'pending' then return end
                 for _, name in ipairs(group.members) do if name == Finder.identity then return end end
                 if Finder:Apply(group.owner, group.id, choice) then Finder:Changed(); refresh()
-                else print(T('Old Kraken: не вдалося подати заявку. Перевірте зв’язок.')) end
+                else chatError(T('Old Kraken: не вдалося подати заявку. Перевірте зв’язок.')) end
             end
             UIDropDownMenu_AddButton(info, level)
         end
@@ -1624,9 +1630,9 @@ local function createWindow(parent)
             Finder:Changed()
             refresh()
         elseif reason == 'revision' then
-            print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+            chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
         else
-            print(T('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.'))
+            chatError(T('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.'))
         end
     end
     f.editDescBox:SetScript('OnEnterPressed', saveEditedDescription)
@@ -1970,7 +1976,7 @@ local function createWindow(parent)
         local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
             or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
         if not sendChat then
-            print(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
+            chatError(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
             return
         end
         local maxSize = maxPlayers or 5
@@ -2033,7 +2039,7 @@ local function createWindow(parent)
         end
         local msg = prefix .. notePart .. suffix
         local sent, err = pcall(sendChat, msg, 'GUILD')
-        if not sent then print(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
+        if not sent then chatError(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
     end
     local function createErrorMessage(err, titleText, maxText, minText, maxLevelText)
         if err == 'role' then return T('Old Kraken: оберіть вашу роль у групі.') end
@@ -2078,7 +2084,7 @@ local function createWindow(parent)
                 announceGroupInGuildChat(activityName, currentCount, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText(), createdGroup)
             end
             Finder:Changed(); tab='mine'; refresh()
-        else print(createErrorMessage(err, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
+        else chatError(createErrorMessage(err, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
     end, nil, 'primary')
     f.advancedCreation=false
     local colors = OldKraken.UIStyle.Colors or {}
@@ -2164,18 +2170,18 @@ local function createWindow(parent)
             return
         end
         if role == '' or not Finder:CanPerformRole(Finder.identity, role) then
-            print(T('Old Kraken: оберіть доступну роль для подачі заявки.'))
+            chatError(T('Old Kraken: оберіть доступну роль для подачі заявки.'))
             return
         end
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
-        elseif g then print(T('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.')) end
+        elseif g then chatError(T('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.')) end
     end, 40, 'primary')
     f.applicationActionButton = button(f, T('Відкликати'), 739, -550, 144, function()
         local g=selected and Finder.groups[selected]
         if not g or g.owner == Finder.identity or not Finder.pending[selected] then return end
         if Finder:DismissApplication(g.owner, g.id) then
             Finder:Changed(); selected=nil; refresh()
-        else print(T('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.')) end
+        else chatError(T('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.')) end
     end, 40)
     f.cancelButton = button(f, T('Закрити набір'), 587, -554, 144, function()
         local g=selected and Finder.groups[selected]
@@ -2188,9 +2194,9 @@ local function createWindow(parent)
         if ok then
             local activityName = (group.title and group.title ~= '' and displayGroupTitle(group)) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or T('Група')
             announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description, group)
-            print(T('Old Kraken: повторне оголошення додано до черги гільдії.'))
-        elseif reason == 'cooldown' then print(T('Old Kraken: повторити оголошення можна через ') .. seconds .. T(' с.'))
-        else print(T('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.')) end
+            chatInfo(T('Old Kraken: повторне оголошення додано до черги гільдії.'))
+        elseif reason == 'cooldown' then chatError(T('Old Kraken: повторити оголошення можна через ') .. seconds .. T(' с.'))
+        else chatError(T('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.')) end
         UpdateReannounceButton(f.bumpButton)
     end, 36)
     f.reopenButton = button(f, T('Відкрити набір знову'), 587, -550, 296, function()
@@ -2198,9 +2204,9 @@ local function createWindow(parent)
         if not group or group.owner ~= Finder.identity or not group.closed or group.hidden then return end
         local ok, reason = Finder:Reopen(group.id)
         if ok then Finder:Changed(); refresh()
-        elseif reason == 'payload' then print(T('Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір.'))
-        elseif reason == 'revision' then print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
-        else print(T('Old Kraken: не вдалося відкрити набір знову. Перевірте зв’язок.')) end
+        elseif reason == 'payload' then chatError(T('Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір.'))
+        elseif reason == 'revision' then chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+        else chatError(T('Old Kraken: не вдалося відкрити набір знову. Перевірте зв’язок.')) end
     end, 40, 'primary', {rounded = true})
     f.bumpButton:SetScript('OnUpdate', function(self, elapsed)
         self.countdownElapsed = (self.countdownElapsed or 0) + elapsed
@@ -2217,7 +2223,7 @@ local function createWindow(parent)
 end
 
 function Finder:Show()
-    if not self.active then print(T('Old Kraken: пошук груп не ініціалізовано.')) return end
+    if not self.active then chatError(T('Old Kraken: пошук груп не ініціалізовано.')) return end
     refreshPeople()
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('groups')
@@ -2339,27 +2345,27 @@ local function paintAlertRoster(group)
                     local current=key and Finder.groups[key]
                     if not current or current.closed then
                         groupAlert:Hide()
-                        print(T('Old Kraken: набір уже недоступний.')); return
+                        chatError(T('Old Kraken: набір уже недоступний.')); return
                     end
                     if current.category=='dungeon' and current.maxSize==5 then
                         local live=Finder:DungeonSlots(current)[self.slotIndex]
                         if not live or live.member or live.role~=self.role then
                             paintAlertRoster(current)
                             if refreshAlertRoster then refreshAlertRoster() end
-                            print(T('Old Kraken: це місце вже зайняте.')); return
+                            chatError(T('Old Kraken: це місце вже зайняте.')); return
                         end
                     elseif #current.members>=current.maxSize then
                         if refreshAlertRoster then refreshAlertRoster() end
-                        print(T('Old Kraken: групу вже зібрано.')); return
+                        chatError(T('Old Kraken: групу вже зібрано.')); return
                     end
                     if Finder.pending[key]=='pending' then
-                        print(T('Old Kraken: заявку вже подано; очікуйте рішення автора.')); return
+                        chatError(T('Old Kraken: заявку вже подано; очікуйте рішення автора.')); return
                     end
                     if Finder:Apply(current.owner,current.id,self.role) then
                         Finder:Changed()
                         groupAlert:Hide()
                     else
-                        print(T('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.'))
+                        chatError(T('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.'))
                     end
                     return
                 end
@@ -2494,7 +2500,8 @@ end
 local function logAlert(title, subtitle, kind)
     local isEvent = kind == 'event' or kind == 'event_signup'
     local isWorkshop = kind == 'workshop'
-    print('|cff2ec4b6Old Kraken|r: ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or '') .. (isEvent and '. /okr events' or (isWorkshop and '. /okr orders' or '. /okr group')))
+    local label = isEvent and T('[Івенти]') or (isWorkshop and T('[Майстерня]') or T('[Групи]'))
+    chatInfo(label .. ' ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or ''))
 end
 
 local function playAlertSound()

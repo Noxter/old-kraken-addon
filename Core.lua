@@ -11,6 +11,21 @@ end
 OldKraken._listeners = OldKraken._listeners or {}
 local T = OldKraken.Translate or function(text) return text end
 
+local function formatChatMessage(prefix, selfOrMessage, maybeMessage)
+    local message = selfOrMessage == OldKraken and maybeMessage or selfOrMessage
+    local text = tostring(message or "")
+    text = text:gsub("^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*", ""):gsub("^Old Kraken:%s*", "")
+    return prefix .. text
+end
+
+function OldKraken.Print(selfOrMessage, maybeMessage)
+    print(formatChatMessage("|cff2ec4b6Old Kraken|r: ", selfOrMessage, maybeMessage))
+end
+
+function OldKraken.PrintError(selfOrMessage, maybeMessage)
+    print(formatChatMessage("|cffff5555Old Kraken|r: ", selfOrMessage, maybeMessage))
+end
+
 -- Shared dark theme for the addon's native controls.
 OldKraken.UIStyle = {}
 OldKraken.UIStyle.Colors = {
@@ -1208,15 +1223,15 @@ end
 function OldKraken:InvitePlayer(name)
     if type(name) ~= 'string' or name == '' then return false end
     if not C_PartyInfo or type(C_PartyInfo.InviteUnit) ~= 'function' then
-        print(T('|cffff5555Old Kraken|r: API запрошення недоступний. Запросіть ') .. name .. T(' вручну.'))
+        OldKraken:PrintError(T('|cffff5555Old Kraken|r: API запрошення недоступний. Запросіть ') .. name .. T(' вручну.'))
         return false
     end
     local ok, result = pcall(C_PartyInfo.InviteUnit, name)
     if ok and result ~= false then
-        print(T('|cff2ec4b6Old Kraken|r: Спроба запросити ') .. name .. T(' у паті. Перевірте повідомлення гри.'))
+        OldKraken:Print(T('|cff2ec4b6Old Kraken|r: Спроба запросити ') .. name .. T(' у паті. Перевірте повідомлення гри.'))
         return true
     end
-    print(T('|cffff5555Old Kraken|r: Не вдалося запросити ') .. name .. T('. Запросіть гравця вручну.'))
+    OldKraken:PrintError(T('|cffff5555Old Kraken|r: Не вдалося запросити ') .. name .. T('. Запросіть гравця вручну.'))
     return false
 end
 
@@ -1278,7 +1293,7 @@ frame:SetScript("OnEvent", function(self, event, loadedAddon)
     end
 
     if not OldKraken.Database or not OldKraken.Database.Initialize then
-        print(T("|cffff5555Old Kraken|r: помилка ініціалізації бази даних."))
+        OldKraken:PrintError(T("|cffff5555Old Kraken|r: помилка ініціалізації бази даних."))
         self:UnregisterEvent("ADDON_LOADED")
         return
     end
@@ -1287,6 +1302,6 @@ frame:SetScript("OnEvent", function(self, event, loadedAddon)
     if OldKraken.InitializeLocale then OldKraken.InitializeLocale(OldKraken.DB) end
     OldKraken:Fire("INITIALIZED", OldKraken.DB)
 
-    print(T("|cff2ec4b6Old Kraken|r: аддон завантажено."))
+    OldKraken:Print(T("|cff2ec4b6Old Kraken|r: аддон завантажено."))
     self:UnregisterEvent("ADDON_LOADED")
 end)

@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Guild crafting requests; the customer owns the authoritative order state.
 local Orders={}
 OldKraken.WorkshopOrders=Orders
@@ -729,7 +735,7 @@ clearDraft=function()
     if active and scope and identity then scope.orderDrafts[identity]=nil end
     restoreDraft()
 end
-local function showError() print(T('Old Kraken: дію не виконано. Оновіть дані або перевірте стан замовлення.')) end
+local function showError() chatError(T('Old Kraken: дію не виконано. Оновіть дані або перевірте стан замовлення.')) end
 StaticPopupDialogs.OLDKRAKEN_ORDER_CARD_CANCEL={
     text='Скасувати замовлення «%s»?', button1='Скасувати', button2='Назад',
     timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
@@ -1016,7 +1022,7 @@ local function createWindow(parent)
     else
         f.alerts=button(f,T('Нові: увімк.'),235,y(-42),145,function() local s=OldKraken.DB.settings; s.workshopOrderAlerts=s.workshopOrderAlerts==false; OldKraken:Fire('WORKSHOP_ALERT_SETTING') end,nil,{rounded=true,height=34})
     end
-    button(f,T('Оновити'),embedded and 792 or 390,embedded and -107 or y(-42),embedded and 98 or 100,function() nextSync=0; print(T('Old Kraken: запит замовлень поставлено в чергу.')) end,nil,{rounded=true,height=34})
+    button(f,T('Оновити'),embedded and 792 or 390,embedded and -107 or y(-42),embedded and 98 or 100,function() nextSync=0; chatInfo(T('Old Kraken: запит замовлень поставлено в чергу.')) end,nil,{rounded=true,height=34})
     f.empty=f:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.empty:SetPoint('TOPLEFT',f,'TOPLEFT',embedded and 16 or 25,embedded and -180 or y(-88)); f.empty:SetWidth(430); f.empty:SetJustifyH('LEFT'); f.empty:SetText(T('Замовлень не знайдено. Змініть фільтри або створіть замовлення.'))
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.empty, 13) end
     if colors.mutedText then f.empty:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
@@ -1245,13 +1251,13 @@ local function createWindow(parent)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(dueLabel, 12) end
     if colors.mutedText then dueLabel:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
     button(formHost,T('Опублікувати'),embedded and 700 or 650,formY(-548,-212),180,function()
-        if not professionNames[profession] then print(T('Old Kraken: оберіть професію або рецепт.')); return end
-        if not chosenRecipe or form.item:GetText()==recipePlaceholder() or form.item:GetText()=='' then print(T('Old Kraken: оберіть рецепт для замовлення.')); return end
-        if chosenRecipe and chosenRecipe.owner==identity then print(T('Old Kraken: для замовлення оберіть рецепт іншого майстра.')); return end
+        if not professionNames[profession] then chatError(T('Old Kraken: оберіть професію або рецепт.')); return end
+        if not chosenRecipe or form.item:GetText()==recipePlaceholder() or form.item:GetText()=='' then chatError(T('Old Kraken: оберіть рецепт для замовлення.')); return end
+        if chosenRecipe and chosenRecipe.owner==identity then chatError(T('Old Kraken: для замовлення оберіть рецепт іншого майстра.')); return end
         if create(form.item:GetText(),form.quantity:GetText(),'0',form.note:GetText(),chosenRecipe,'0') then
             clearDraft()
             if embedded and OldKraken.Workshop then OldKraken.Workshop:Show('orders') end
-            print(T('Old Kraken: замовлення збережено та поставлено в чергу.'))
+            chatInfo(T('Old Kraken: замовлення збережено та поставлено в чергу.'))
         else showError() end
     end,'primary',{rounded=true,height=38})
     local note=formHost:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall'); note:SetPoint('TOPLEFT',form,'TOPLEFT',embedded and 20 or 18,formY(-603,-264)); note:SetText(T('|cffffc36bВажливо:|r передачу реагентів і готової речі гравці виконують у грі самостійно (обмін або пошта).'))
@@ -1262,7 +1268,7 @@ local function createWindow(parent)
     f:Hide(); return f
 end
 function Orders:Show(k)
-    connect(); if not active then print(T('Old Kraken: замовлення доступні учасникам гільдії.')); return end
+    connect(); if not active then chatError(T('Old Kraken: замовлення доступні учасникам гільдії.')); return end
     if k and get(k) then selected=k end
     if OldKraken.UIHub and OldKraken.Workshop then
         OldKraken.Workshop:Show('orders')
@@ -1287,11 +1293,11 @@ function Orders:GetOpenCounts()
 end
 function Orders:ShowRecipe(r,owner)
     if type(r)~='table' or not professionNames[r.profession] or not int(r.recipe,1,100000000) or not int(r.item,0,100000000) then
-        print(T('Old Kraken: замовлення для цієї професії недоступне.')); return
+        chatError(T('Old Kraken: замовлення для цієї професії недоступне.')); return
     end
     connect(); if not active then return end
     if not nameOK(owner) or owner==identity then
-        print(T('Old Kraken: для замовлення оберіть рецепт іншого майстра.')); return
+        chatError(T('Old Kraken: для замовлення оберіть рецепт іншого майстра.')); return
     end
     if OldKraken.UIHub and OldKraken.Workshop then
         OldKraken.UIHub:ShowPage('workshop')
@@ -1316,7 +1322,7 @@ function Orders:RefreshEmbedded()
 end
 function Orders:OpenCreateForm()
     if not window or not window.createForm then
-        print(T('Old Kraken: форма нового замовлення недоступна; відкрийте вкладку замовлень у Hub.'))
+        chatError(T('Old Kraken: форма нового замовлення недоступна; відкрийте вкладку замовлень у Hub.'))
         return false
     end
     if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Navigate('orderCreate')
