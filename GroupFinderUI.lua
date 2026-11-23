@@ -2649,7 +2649,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     end
     for _,control in ipairs(groupAlert.roleSlots or {}) do control:Hide() end
     local graphical=kind=='group' and rosterGroup~=nil
-    groupAlert:SetSize(graphical and 620 or 460, graphical and 204 or 112)
+    groupAlert:SetSize(graphical and 620 or 480, graphical and 204 or 112)
     groupAlert.alertAccent:SetShown(true)
     groupAlert.alertArt:SetSize(graphical and 90 or 52, graphical and 118 or 52)
     groupAlert.alertArt:ClearAllPoints()

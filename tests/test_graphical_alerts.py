@@ -43,7 +43,7 @@ OldKraken.listeners.GROUP_FINDER_NEW(group)
 assert(alert.roleSlots[5].role=='' and alert.roleSlots[5].memberName=='Unknown Role')
 assert(alert.roleSlots[5].icon.texture:find('QuestionMark',1,true),'must not invent a role')
 OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(group,'Applicant','healer')
-assert(alert.width==460 and alert.height==112 and alert.alertChrome:IsShown() and alert.alertFooter.height==26)
+assert(alert.width==480 and alert.height==112 and alert.alertChrome:IsShown() and alert.alertFooter.height==26)
 assert(alert.alertArt:IsShown() and alert.alertArt.width==52 and alert.alertArt.height==52)
 for _,slot in ipairs(alert.roleSlots) do assert(not slot:IsShown()) end
 OldKraken.listeners.GUILD_EVENTS_NEW_SIGNUP('e1',{owner='Owner',title='MC',activity='mc',size=10,statuses={Owner='accepted',Person='accepted'}},'Person','dps')
