@@ -277,4 +277,117 @@ lua.execute('''
     assert(okAgain == true and statusAgain == 'completedWithOverflow')
 ''')
 
+# 7. Direct confirmed=true call without a pending marker must not migrate
+lua = make_client(realm='Evermoon', guild='Kraken', player='Alice')
+lua.execute('''
+    OldKraken.DB.workshop.guilds = {
+        ['\\001Kraken'] = { orderSequences = { ['Alice Tester'] = 42 } },
+    }
+    local ok, status = OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', true)
+    assert(ok == false and status == 'unconfirmed', 'confirmed=true without pending marker must be refused, got ' .. tostring(status))
+    local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+    assert(canon == nil or canon.orderSequences == nil, 'refused call must not touch canonical scope')
+    local meta = OldKraken.DB.workshop.legacyMigrations['\\001Kraken']
+    assert(meta.status['Evermoon\\001Kraken'] == nil and meta.inProgress['Evermoon\\001Kraken'] == nil)
+    -- the proper two-step path still works
+    assert(select(2, OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', false)) == 'pending')
+    local ok2, status2 = OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', true)
+    assert(ok2 == true and status2 == 'completed')
+    assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderSequences['Alice Tester'] == 42)
+    assert(meta.pendingConfirmation['Evermoon\\001Kraken'] == nil, 'pending marker is cleared only on completion')
+''')
+
+# 8. Missing canonical order but present legacy order: tally limits use the legacy quantity
+lua = make_client(realm='Evermoon', guild='Kraken', player='Alice')
+lua.execute('''
+    local id = 'Alice Tester'
+    local k = 'Carol Tester\\001ord7'
+    OldKraken.DB.workshop.guilds = {
+        ['\\001Kraken'] = {
+            orderObserved = { [k] = { owner = 'Carol Tester', id = 'ord7', rev = 1, ownerRev = 1, quantity = 3, status = 'assigned', worker = id, candidates = {}, acks = {} } },
+            orderDeliveryTallies = { [id] = { [k] = { worker = id, assignment = 1, materials = {}, items = 5, money = 0 } } },
+        },
+    }
+    OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', false)
+    assert(OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', true))
+    local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+    assert(canon.orderObserved[k].quantity == 3, 'legacy observed order must be migrated')
+    assert(canon.orderDeliveryTallies[id][k] == nil, 'items=5 exceeds legacy order quantity 3 and must not become active')
+    assert(canon.migrationConflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. k].legacy.items == 5)
+    assert(OldKraken.DB.workshop.guilds['\\001Kraken'].orderDeliveryTallies[id][k].items == 5, 'legacy tally stays intact')
+''')
+
+# 9. Tally validity matrix: invalid/invalid, valid canonical + invalid legacy, invalid canonical + valid legacy
+lua = make_client(realm='Evermoon', guild='Kraken', player='Alice')
+lua.execute('''
+    local id = 'Alice Tester'
+    local both, keepCanon, takeLegacy = id .. '\\001both', id .. '\\001keep', id .. '\\001take'
+    OldKraken.DB.workshop.guilds = {
+        ['\\001Kraken'] = { orderDeliveryTallies = { [id] = {
+            [both] = { worker = 'Bob Tester', assignment = 1, materials = { [5] = -1 }, items = 1, money = 0 },
+            [keepCanon] = { worker = 'Bob Tester', assignment = 1, materials = {}, items = 1, money = -7 },
+            [takeLegacy] = { worker = 'Bob Tester', assignment = 2, materials = { [7] = 3 }, items = 2, money = 10 },
+        } } },
+        ['Evermoon\\001Kraken'] = { orderDeliveryTallies = { [id] = {
+            [both] = { worker = 'Bob Tester', assignment = 'x', materials = {}, items = 1, money = 0 },
+            [keepCanon] = { worker = 'Bob Tester', assignment = 1, materials = { [9] = 2 }, items = 1, money = 50 },
+            [takeLegacy] = { worker = 'Bob Tester', assignment = 2, materials = {}, items = 2, money = 2000000000 },
+        } } },
+    }
+    OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', false)
+    assert(OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', true))
+    local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+    local active = canon.orderDeliveryTallies[id]
+    local conflicts = canon.migrationConflicts
+    assert(active[both] == nil, 'invalid/invalid must leave no active tally')
+    assert(conflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. both].canonical.assignment == 'x', 'invalid canonical preserved for diagnostics')
+    assert(conflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. both].legacy.materials[5] == -1, 'invalid legacy preserved for diagnostics')
+    assert(active[keepCanon].money == 50 and active[keepCanon].materials[9] == 2, 'valid canonical must stay active')
+    assert(active[takeLegacy].money == 10 and active[takeLegacy].materials[7] == 3, 'valid legacy must replace invalid canonical')
+    assert(conflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. takeLegacy].canonical.money == 2000000000, 'replaced invalid canonical must be preserved')
+''')
+
+# 10. Real interruption mid-merge, then resume: no double accumulation, originals kept
+lua = make_client(realm='Evermoon', guild='Kraken', player='Alice')
+lua.execute('''
+    local id = 'Alice Tester'
+    local k = id .. '\\001ord1'
+    OldKraken.DB.workshop.guilds = {
+        ['\\001Kraken'] = {
+            orderSequences = { [id] = 900 },
+            orderDeliveryTallies = { [id] = { [k] = { worker = 'Bob Tester', assignment = 1, materials = { [1] = 6 }, items = 1, money = 300 } } },
+            orderDrafts = { [id] = setmetatable({}, { __index = function() error('simulated interruption') end }) },
+        },
+        ['Evermoon\\001Kraken'] = {
+            orderSequences = { [id] = 500 },
+            orderDeliveryTallies = { [id] = { [k] = { worker = 'Bob Tester', assignment = 1, materials = { [1] = 2 }, items = 4, money = 100 } } },
+        },
+    }
+    OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', false)
+    local okRun = pcall(OldKraken.Database.MigrateWorkshopScope, OldKraken.Database, 'Evermoon', 'Kraken', true)
+    assert(okRun == false, 'expected simulated interruption')
+    local meta = OldKraken.DB.workshop.legacyMigrations['\\001Kraken']
+    assert(meta.inProgress['Evermoon\\001Kraken'] == true and meta.status['Evermoon\\001Kraken'] == nil)
+    assert(meta.pendingConfirmation['Evermoon\\001Kraken'] == true, 'pending marker survives an interrupted run')
+    local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+    -- tallies were merged before the interruption (partial state)
+    assert(canon.orderDeliveryTallies[id][k].items == 4 and canon.orderDeliveryTallies[id][k].money == 300)
+
+    -- the bad section is repaired; an ordinary connect-style call resumes the confirmed run
+    OldKraken.DB.workshop.guilds['\\001Kraken'].orderDrafts = { [id] = { item = 'Elixir', quantity = '2' } }
+    local ok, status = OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', false)
+    assert(ok == true and status == 'completed', 'interrupted run must resume, got ' .. tostring(status))
+    local t = canon.orderDeliveryTallies[id][k]
+    assert(t.items == 4 and t.money == 300 and t.materials[1] == 6, 'resume must not accumulate counters twice')
+    assert(canon.orderSequences[id] == 900)
+    assert(canon.orderDrafts[id].item == 'Elixir')
+    local c = canon.migrationConflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. k]
+    assert(c.canonical.items == 4 and c.canonical.money == 100 and c.canonical.materials[1] == 2, 'pre-migration canonical original must survive resume')
+    local n = 0; for _ in pairs(canon.migrationConflicts) do n = n + 1 end
+    assert(n == 1, 'resume must not duplicate conflicts')
+    assert(meta.inProgress['Evermoon\\001Kraken'] == nil and meta.pendingConfirmation['Evermoon\\001Kraken'] == nil)
+    -- legacy scope untouched apart from the repaired test fixture
+    assert(OldKraken.DB.workshop.guilds['\\001Kraken'].orderDeliveryTallies[id][k].money == 300)
+''')
+
 print('Workshop migration checks passed')

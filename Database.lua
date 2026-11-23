@@ -229,19 +229,26 @@ local function IsEmptyDraft(draft)
         and (draft.deadline == nil or draft.deadline == 86400)
 end
 
-local function FindOrderQuantity(target, source, identity, orderKey)
-    local candidates = {
-        target.orderOwners and target.orderOwners[identity] and target.orderOwners[identity][orderKey],
-        source.orderOwners and source.orderOwners[identity] and source.orderOwners[identity][orderKey],
-        target.orderObserved and target.orderObserved[orderKey],
-        source.orderObserved and source.orderObserved[orderKey],
-    }
-    for _, ord in ipairs(candidates) do
-        if type(ord) == "table" and IsIntRange(ord.quantity, 1, 200) then
-            return ord.quantity
-        end
+local function OrderQuantityIn(scope, identity, orderKey)
+    if type(scope) ~= "table" then
+        return nil
     end
-    return 200
+    local owners = scope.orderOwners
+    local ord = type(owners) == "table" and type(owners[identity]) == "table" and owners[identity][orderKey] or nil
+    if type(ord) == "table" and IsIntRange(ord.quantity, 1, 200) then
+        return ord.quantity
+    end
+    ord = type(scope.orderObserved) == "table" and scope.orderObserved[orderKey] or nil
+    if type(ord) == "table" and IsIntRange(ord.quantity, 1, 200) then
+        return ord.quantity
+    end
+    return nil
+end
+
+-- Each scope is checked separately: a missing canonical order must not hide the legacy one.
+-- Without any known order the code-level cap of 200 items per order applies.
+local function FindOrderQuantity(target, source, identity, orderKey)
+    return OrderQuantityIn(target, identity, orderKey) or OrderQuantityIn(source, identity, orderKey) or 200
 end
 
 local function IsValidTally(tally, maxItems)
@@ -276,8 +283,9 @@ local function RecordConflict(target, section, recordKey, canonicalVal, legacyVa
     local conflictKey = section .. "\001" .. tostring(recordKey)
     local existing = conflicts[conflictKey]
     if type(existing) == "table" then
-        if not (DeepEqual(existing.canonical, canonicalVal) and DeepEqual(existing.legacy, legacyVal)) then
-            existing.canonical = DeepCopy(canonicalVal)
+        -- A resumed run sees the already merged canonical value; the first recorded
+        -- canonical is the pre-migration original and must never be replaced.
+        if not DeepEqual(existing.legacy, legacyVal) then
             existing.legacy = DeepCopy(legacyVal)
             existing.detectedAt = ServerTime()
         end
@@ -660,6 +668,32 @@ local function MergeOrderResults(target, source, section)
     return overflow
 end
 
+local function MaxTally(tgt, src)
+    local mergedMats = {}
+    for itemId, cnt in pairs(tgt.materials) do
+        mergedMats[itemId] = cnt
+    end
+    for itemId, cnt in pairs(src.materials) do
+        mergedMats[itemId] = math.max(mergedMats[itemId] or 0, cnt)
+    end
+    return {
+        worker = tgt.worker,
+        assignment = tgt.assignment,
+        materials = mergedMats,
+        items = math.max(tgt.items, src.items),
+        money = math.max(tgt.money, src.money),
+    }
+end
+
+-- Tally counters are cumulative and carry no operation IDs, so they are never summed.
+-- The active canonical value is replaced or removed only after its original has been
+-- stored in migrationConflicts; on overflow the canonical value stays as it was and the
+-- legacy scope remains the recovery source.
+-- Validity matrix (legacy / canonical):
+--   valid / valid     -> merge rules (higher assignment, else component max for same worker, else keep canonical)
+--   valid / invalid   -> legacy becomes active
+--   invalid / valid   -> canonical stays active
+--   invalid / invalid -> no active tally
 local function MergeDeliveryTallies(target, source)
     if type(source.orderDeliveryTallies) ~= "table" then
         return false
@@ -675,35 +709,25 @@ local function MergeDeliveryTallies(target, source)
                 local src, tgt = srcMap[orderKey], dstMap[orderKey]
                 local srcValid = IsValidTally(src, maxItems)
                 local tgtValid = IsValidTally(tgt, maxItems)
-                if not srcValid then
-                    if src ~= nil then
-                        if RecordConflict(target, "orderDeliveryTallies", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
-                            overflow = true
-                        end
-                    end
-                elseif not tgtValid then
+                local conflictKey = tostring(identity) .. "\001" .. tostring(orderKey)
+                if srcValid and tgt == nil then
                     dstMap[orderKey] = DeepCopy(src)
-                elseif not DeepEqual(tgt, src) then
-                    if RecordConflict(target, "orderDeliveryTallies", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
+                elseif srcValid and tgtValid and DeepEqual(tgt, src) then
+                    -- identical duplicate
+                else
+                    local preserved = not RecordConflict(target, "orderDeliveryTallies", conflictKey, tgt, src)
+                    if not preserved then
                         overflow = true
-                    end
-                    if src.assignment > tgt.assignment then
+                    elseif srcValid and not tgtValid then
                         dstMap[orderKey] = DeepCopy(src)
-                    elseif src.assignment == tgt.assignment and src.worker == tgt.worker then
-                        local mergedMats = {}
-                        for itemId, cnt in pairs(tgt.materials) do
-                            mergedMats[itemId] = cnt
+                    elseif not srcValid and not tgtValid then
+                        dstMap[orderKey] = nil
+                    elseif srcValid and tgtValid then
+                        if src.assignment > tgt.assignment then
+                            dstMap[orderKey] = DeepCopy(src)
+                        elseif src.assignment == tgt.assignment and src.worker == tgt.worker then
+                            dstMap[orderKey] = MaxTally(tgt, src)
                         end
-                        for itemId, cnt in pairs(src.materials) do
-                            mergedMats[itemId] = math.max(mergedMats[itemId] or 0, cnt)
-                        end
-                        dstMap[orderKey] = {
-                            worker = tgt.worker,
-                            assignment = tgt.assignment,
-                            materials = mergedMats,
-                            items = math.max(tgt.items, src.items),
-                            money = math.max(tgt.money, src.money),
-                        }
                     end
                 end
             end
@@ -770,12 +794,20 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
         return true, status
     end
 
-    if confirmed ~= true then
-        pendingMap[canonicalKey] = true
-        return false, "pending"
+    -- A confirmed run that was interrupted resumes on the next call; the user already
+    -- agreed to this exact realm and guild. Otherwise confirmation is valid only for a
+    -- canonical key that was previously offered through pendingConfirmation.
+    local resume = inProgressMap[canonicalKey] == true
+    if not resume then
+        if confirmed ~= true then
+            pendingMap[canonicalKey] = true
+            return false, "pending"
+        end
+        if pendingMap[canonicalKey] ~= true then
+            return false, "unconfirmed"
+        end
     end
 
-    pendingMap[canonicalKey] = nil
     inProgressMap[canonicalKey] = true
 
     local target = EnsureTable(db.workshop.guilds, canonicalKey)
@@ -799,6 +831,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
     if MergeOrderDrafts(target, source) then overflow = true end
 
     inProgressMap[canonicalKey] = nil
+    pendingMap[canonicalKey] = nil
     if overflow or target.migrationConflictsOverflow then
         statusMap[canonicalKey] = "completedWithOverflow"
     else

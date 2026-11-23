@@ -1103,8 +1103,10 @@ SlashCmdList["OLDKRAKEN"] = function(message)
     elseif command == 'workshop migrate' then
         if OldKraken.Database and type(OldKraken.Database.ConfirmWorkshopMigration) == 'function' then
             local ok, status = OldKraken.Database:ConfirmWorkshopMigration()
-            if ok then
-                print('|cff2ec4b6Old Kraken|r: ' .. T('Міграцію Майстерні завершено: ') .. tostring(status))
+            if ok and status == 'completedWithOverflow' then
+                print('|cff2ec4b6Old Kraken|r: ' .. T('Міграцію Майстерні завершено, але не всі конфлікти вмістилися у сховище конфліктів. Старі дані збережено без змін.'))
+            elseif ok then
+                print('|cff2ec4b6Old Kraken|r: ' .. T('Міграцію Майстерні завершено.'))
             else
                 print('|cff2ec4b6Old Kraken|r: ' .. T('Немає очікуваної міграції Майстерні для поточного світу.'))
             end
