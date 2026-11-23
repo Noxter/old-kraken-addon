@@ -390,4 +390,44 @@ lua.execute('''
     assert(OldKraken.DB.workshop.guilds['\\001Kraken'].orderDeliveryTallies[id][k].money == 300)
 ''')
 
+# 11. Overflow specifically during MergeDeliveryTallies when 200 conflicts are already recorded
+lua = make_client(realm='Evermoon', guild='Kraken', player='Alice')
+lua.execute('''
+    local id = 'Alice Tester'
+    local tk = id .. '\\001tallyOrd'
+    local preConflicts = {}
+    for i = 1, 200 do
+        preConflicts['orderOwners\\001' .. id .. '\\001ord' .. i] = {
+            section = 'orderOwners', key = id .. '\\001ord' .. i,
+            canonical = { rev = 1 }, legacy = { rev = 1 }, detectedAt = 100, resolved = false,
+        }
+    end
+    OldKraken.DB.workshop.guilds = {
+        ['\\001Kraken'] = {
+            orderDeliveryTallies = {
+                [id] = {
+                    [tk] = { worker = 'Bob Tester', assignment = 2, materials = { [1] = 5 }, items = 3, money = 999 },
+                },
+            },
+        },
+        ['Evermoon\\001Kraken'] = {
+            migrationConflicts = preConflicts,
+            orderDeliveryTallies = {
+                [id] = {
+                    [tk] = { worker = 'Bob Tester', assignment = 1, materials = { [1] = 2 }, items = 1, money = 100 },
+                },
+            },
+        },
+    }
+    OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', false)
+    local ok, status = OldKraken.Database:ConfirmWorkshopMigration()
+    assert(ok == true and status == 'completedWithOverflow', 'expected completedWithOverflow, got ' .. tostring(status))
+    local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+    assert(canon.migrationConflictsOverflow == true)
+    assert(canon.orderDeliveryTallies[id][tk].assignment == 1 and canon.orderDeliveryTallies[id][tk].money == 100,
+        'canonical tally must remain unchanged when conflict cannot be recorded due to overflow')
+    assert(OldKraken.DB.workshop.guilds['\\001Kraken'].orderDeliveryTallies[id][tk].money == 999,
+        'legacy tally must remain intact on overflow')
+''')
+
 print('Workshop migration checks passed')

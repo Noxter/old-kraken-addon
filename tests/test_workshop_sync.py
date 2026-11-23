@@ -213,12 +213,21 @@ def test_index_count_limit_dedup_dequeue_reset_and_zero_full_scans():
             end
             return real_pairs(t)
         end
-        -- 3 WRQs -> 1500 entries, then 1 WRQ -> 2000 entries (boundary 1999 -> 2000)
-        for s = 1, 4 do
+        -- Exact 1999 -> 2000 -> 2001 boundary check with single-key increments
+        for s = 1, 3 do
             handlers['WRQ']('Sender' .. s .. ' Realm', 'request', '')
         end
-        -- 5th WRQ -> 2000 entries already full, all 500 new keys rejected
-        handlers['WRQ']('Sender5 Realm', 'request', '')
+        -- Add 499 entries from Sender4 (own + 498 snapshots) -> 1999 total
+        local removed = snapshots['Crafter499 Realm']
+        snapshots['Crafter499 Realm'] = nil
+        handlers['WRQ']('Sender4 Realm', 'request', '')
+        snapshots['Crafter499 Realm'] = removed
+        -- 2000th key (1999 -> 2000) must be accepted; 2001st must be rejected
+        local savedSnapshots = OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots
+        OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots = {}
+        handlers['WRQ']('Exact2000 Realm', 'request', '')
+        handlers['WRQ']('Exact2001 Realm', 'request', '')
+        OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots = savedSnapshots
         -- Re-adding the same key for an existing sender when at 2000 must not increment or fail
         now = now + 70
         handlers['WRQ']('Sender1 Realm', 'request', '')
