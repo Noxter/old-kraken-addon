@@ -590,9 +590,20 @@ local function RosterStorage()
     return roster
 end
 
+local function ResolveRealmScope()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope) == 'function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm = GetRealmName and GetRealmName()
+    if Secret(realm) then return nil end
+    if realm == '' then return 'Forever' end
+    if type(realm) ~= 'string' or realm == '' then return nil end
+    return realm
+end
+
 local function LocalSpecKey()
     local name = FullPlayerName()
-    local realm = GetRealmName and GetRealmName()
+    local realm = ResolveRealmScope()
     if Secret(realm) or type(realm) ~= 'string' or realm == '' or not name then return nil end
     return realm .. '\001' .. name
 end
@@ -715,7 +726,7 @@ end
 function Communication:RecordRosterSpec2(sender, seq, icon, points, name, payload)
     EnsurePresenceGuild(self)
     local key, roster = PresenceKey(sender), RosterStorage()
-    local realm = GetRealmName and GetRealmName()
+    local realm = ResolveRealmScope()
     if self.presenceGuild == '' or key == '' or not roster or Secret(realm) or type(realm) ~= 'string' or realm == '' then return false end
     local seqKey = realm .. '\001' .. self.presenceGuild .. '\001' .. key
     local sequences, now = roster.specSequences, GetServerTime()

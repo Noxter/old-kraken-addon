@@ -672,6 +672,7 @@ function Workshop:Back()
     end
     local entry=table.remove(self.navigationStack)
     if not entry then return end
+    if type(entry.onBack)=='function' then entry.onBack(); return end
     self:SetView(entry.view)
     if entry.recipes and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:RestoreView(entry.recipes) end
 end

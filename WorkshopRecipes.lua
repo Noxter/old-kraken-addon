@@ -1837,9 +1837,12 @@ function Recipes:ShowProfession(profession,forceNavigation)
     frame.status:SetText(professionNames[profession]..T(': збережені рецепти та відповіді онлайн-майстрів; список може бути неповним.'))
     search('prof:'..profession); frame:Raise(); render()
 end
-function Recipes:ShowMemberProfession(name,profession)
+function Recipes:ShowMemberProfession(name,profession,onBack)
     if not safeText(name,1,128) or not professionNames[profession] then return end
     self:ShowProfession(profession,true)
+    if type(onBack)=='function' and OldKraken.Workshop and type(OldKraken.Workshop.navigationStack)=='table' and #OldKraken.Workshop.navigationStack>0 then
+        OldKraken.Workshop.navigationStack[#OldKraken.Workshop.navigationStack]={onBack=onBack}
+    end
     if active and frame then
         viewOwner=name; selectedEntry=nil
         frame.status:SetText(name..' · '..professionNames[profession]..T(': збережені рецепти; список може бути неповним.'))

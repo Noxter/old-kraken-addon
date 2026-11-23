@@ -333,7 +333,8 @@ function Hub:ShowUpdateLink(newest)
         box.title = title
 
         local closeBtn = CreateFrame('Button', nil, box, 'UIPanelButtonTemplate')
-        OldKraken.UIStyle.Button(closeBtn, '×', {rounded = true})
+        OldKraken.UIStyle.Button(closeBtn, nil, {rounded = true})
+        closeBtn:SetText('X')
         closeBtn:SetSize(22, 22)
         closeBtn:SetPoint('TOPRIGHT', box, 'TOPRIGHT', -8, -8)
         closeBtn:SetScript('OnClick', function() box:Hide() end)
@@ -405,7 +406,6 @@ local function createSettings(parent)
     if OldKraken.UIStyle and OldKraken.UIStyle.Panel then
         OldKraken.UIStyle.Panel(page, 0, -48, 560, 166)
         OldKraken.UIStyle.Panel(page, 0, -230, 560, 276)
-        OldKraken.UIStyle.Panel(page, 576, -48, 324, 212)
     end
 
     local label = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
@@ -464,27 +464,21 @@ local function createSettings(parent)
     local previewButton = button('', 18, -450, 256)
     local resetPositionsButton = button(T('Скинути позиції банерів'), 286, -450, 256)
 
-    local versionTitle = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
-    versionTitle:SetPoint('TOPLEFT', page, 'TOPLEFT', 594, -64)
-    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(versionTitle, 15, true) end
-    versionTitle:SetText(T('Оновлення аддона'))
-
     local versionLabel = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 594, -92)
-    versionLabel:SetWidth(288)
+    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -520)
+    versionLabel:SetWidth(524)
     versionLabel:SetJustifyH('LEFT')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(versionLabel, 13) end
-    local curseForgeButton = button(T('CurseForge'), 594, -120, 288)
-    local versionIndicatorButton = button('', 594, -164, 288)
-    local versionChatButton = button('', 594, -208, 288)
-
-    local minimapHint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    minimapHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -520)
-    minimapHint:SetWidth(524)
-    minimapHint:SetJustifyH('LEFT')
-    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(minimapHint, 13) end
-    if colors and colors.mutedText then minimapHint:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
-    minimapHint:SetText(T('Підказка: відкривайте Old Kraken командою /okr або кнопкою у вікні гільдії.'))
+    if colors and colors.mutedText then versionLabel:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+    minimapButton:SetScript('OnEnter', function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+            GameTooltip:SetText(T('Кнопка на мінімапі'))
+            GameTooltip:AddLine(T('Підказка: відкривайте Old Kraken командою /okr або кнопкою у вікні гільдії.'), 1, 1, 1, true)
+            GameTooltip:Show()
+        end
+    end)
+    minimapButton:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     local previewKinds = {'group', 'request', 'event', 'workshop'}
     local previewLabels = {'група', 'заявка', 'подія', 'майстерня'}
     local previewIndex = 1
@@ -515,12 +509,10 @@ local function createSettings(parent)
         local newest, localVersion = comm and type(comm.GetNewestKnownVersion) == 'function' and comm:GetNewestKnownVersion()
         local localText = tostring(localVersion or OldKraken.version or 'unknown')
         if newest then
-            versionLabel:SetText(string.format(T('Версія аддона: %s (доступна %s)'), localText, newest))
+            versionLabel:SetText(string.format(T('Версія аддона: %s'), localText) .. ' |cff22c55e' .. string.format(T('(доступна %s)'), newest) .. '|r')
         else
             versionLabel:SetText(string.format(T('Версія аддона: %s'), localText))
         end
-        versionIndicatorButton:SetText(T('Індикатор оновлення') .. ': ' .. state(type(settings) ~= 'table' or settings.versionIndicator ~= false))
-        versionChatButton:SetText(T('Оновлення в чаті') .. ': ' .. state(type(settings) ~= 'table' or settings.versionChatNotifications ~= false))
         if type(Hub.RefreshVersionIndicator) == 'function' then Hub.RefreshVersionIndicator() end
     end
     groupFinderButton:SetScript('OnClick', function()
@@ -572,25 +564,6 @@ local function createSettings(parent)
         local finder = OldKraken.GroupFinder
         if finder and type(finder.ResetAlertPositions) == 'function' then finder:ResetAlertPositions()
         elseif OldKraken.DB and type(OldKraken.DB.settings) == 'table' then OldKraken.DB.settings.alertPositions = {} end
-    end)
-    curseForgeButton:SetScript('OnClick', function()
-        local comm = OldKraken.Communication
-        local newest = comm and type(comm.GetNewestKnownVersion) == 'function' and comm:GetNewestKnownVersion()
-        Hub:ShowUpdateLink(newest)
-    end)
-    versionIndicatorButton:SetScript('OnClick', function()
-        local settings = OldKraken.DB and OldKraken.DB.settings
-        if type(settings) ~= 'table' then return end
-        settings.versionIndicator = settings.versionIndicator == false
-        if type(OldKraken.Fire) == 'function' then OldKraken:Fire('VERSION_SETTING_CHANGED') end
-        refreshAlertButtons()
-    end)
-    versionChatButton:SetScript('OnClick', function()
-        local settings = OldKraken.DB and OldKraken.DB.settings
-        if type(settings) ~= 'table' then return end
-        settings.versionChatNotifications = settings.versionChatNotifications == false
-        if type(OldKraken.Fire) == 'function' then OldKraken:Fire('VERSION_SETTING_CHANGED') end
-        refreshAlertButtons()
     end)
     if type(OldKraken.On) == 'function' then
         OldKraken:On('GROUP_FINDER_ALERT_SETTING', refreshAlertButtons)

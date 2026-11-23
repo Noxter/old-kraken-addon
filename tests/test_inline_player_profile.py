@@ -188,8 +188,8 @@ lua.execute('''
     assert(not rf.scrollFrame:IsShown())
     local p = rf.profilePanel
     assert(p.specName.text ~= '' and p.specPoints.text:find('31/0/20', 1, true))
-    assert(p.profRows[1]:IsShown() and p.profRows[1].text:GetText():find('275/300', 1, true))
-    assert(p.profRows[2]:IsShown() and p.profRows[2].text:GetText():find('Із ігрового ростера', 1, true))
+    assert(p.profRows[1]:IsShown() and p.profRows[1].value:GetText():find('275/300', 1, true))
+    assert(p.profRows[2]:IsShown() and p.profRows[2].value:GetText():find('Із ігрового ростера', 1, true))
     assert(p.whisperButton.enabled and p.inviteButton.enabled and p.recipesButton.enabled and p.orderButton.enabled)
 
     -- Quick actions: whisper, invite, recipes, create order
@@ -322,7 +322,7 @@ lua_inactive.execute('''
     for _, f in ipairs(frames) do
         if f.scripts and f.scripts.OnUpdate then f.scripts.OnUpdate(f, 0.2) end
     end
-    assert(not p.profEmpty:IsShown() and p.profRows[1]:IsShown() and p.profRows[1].text:GetText():find('275/300', 1, true))
+    assert(not p.profEmpty:IsShown() and p.profRows[1]:IsShown() and p.profRows[1].value:GetText():find('275/300', 1, true))
 ''')
 
 # Real Communication.lua: UnitName('player') -> ("Alice", "Tester") must match roster row "Alice Tester"

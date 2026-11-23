@@ -644,7 +644,7 @@ local function CreateRosterWindow(parent)
     local function createProfilePanel(parent)
         local colors = OldKraken.UIStyle.Colors or {}
         local panel = CreateFrame('Frame', nil, parent)
-        panel:SetPoint('TOPLEFT', parent, 'TOPLEFT', 0, -56)
+        panel:SetPoint('TOPLEFT', parent, 'TOPLEFT', 0, -48)
         panel:SetPoint('BOTTOMRIGHT', parent, 'BOTTOMRIGHT', 0, 0)
         panel:SetFrameLevel((type(parent.GetFrameLevel) == 'function' and parent:GetFrameLevel() or 1) + 12)
         panel:EnableMouse(true)
@@ -742,12 +742,22 @@ local function CreateRosterWindow(parent)
             prow.icon:SetPoint('LEFT', prow, 'LEFT', 0, 0)
             prow.text = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
             prow.text:SetPoint('LEFT', prow.icon, 'RIGHT', 8, 0)
-            prow.text:SetWidth(360)
+            prow.text:SetWidth(240)
             prow.text:SetJustifyH('LEFT')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.text, 13) end
+            prow.value = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+            prow.value:SetPoint('RIGHT', prow, 'RIGHT', -2, 0)
+            prow.value:SetWidth(118)
+            prow.value:SetJustifyH('RIGHT')
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.value, 13) end
+            if colors.mutedText then prow.value:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
             prow:SetScript('OnClick', function(self)
                 if self.memberName and self.professionID and not self.isGathering and OldKraken.WorkshopRecipes then
-                    OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName, self.professionID)
+                    local targetMember = panel.member
+                    OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName, self.professionID, function()
+                        Roster:Show()
+                        if targetMember and OpenMemberProfile then OpenMemberProfile(targetMember) end
+                    end)
                 end
             end)
             prow:Hide()
@@ -775,7 +785,11 @@ local function CreateRosterWindow(parent)
         end)
         panel.recipesButton = makeActionBtn(T('Переглянути рецепти'), 350, 180, 'primary', function()
             if panel.member and panel.firstCraftProfessionID and OldKraken.WorkshopRecipes then
-                OldKraken.WorkshopRecipes:ShowMemberProfession(panel.member.name, panel.firstCraftProfessionID)
+                local targetMember = panel.member
+                OldKraken.WorkshopRecipes:ShowMemberProfession(panel.member.name, panel.firstCraftProfessionID, function()
+                    Roster:Show()
+                    if targetMember and OpenMemberProfile then OpenMemberProfile(targetMember) end
+                end)
             end
         end)
         panel.orderButton = makeActionBtn(T('Створити замовлення'), 540, 180, nil, function()
@@ -866,18 +880,35 @@ RenderMemberProfile = function(member)
         panel.addonText:SetText(T('Аддон: ') .. T('Не виявлено'))
     end
 
+    local selfMember = isSelfMember(member.name)
     local spec = comm and comm.GetRosterSpec and comm:GetRosterSpec(member.name)
     if type(spec) == 'table' and spec.icon and type(spec.name) == 'string' and spec.name ~= '' then
         local specLabel = OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name
         panel.specIcon:SetTexture(spec.icon)
         panel.specIcon:Show()
+        if type(panel.specName.ClearAllPoints) == 'function' then
+            panel.specName:ClearAllPoints()
+            panel.specName:SetPoint('TOPLEFT', panel, 'TOPLEFT', 78, -222)
+        end
+        if type(panel.specPoints.ClearAllPoints) == 'function' then
+            panel.specPoints:ClearAllPoints()
+            panel.specPoints:SetPoint('TOPLEFT', panel, 'TOPLEFT', 78, -244)
+        end
         panel.specName:SetText(specLabel)
         panel.specPoints:SetText(type(spec.points) == 'string' and spec.points ~= '' and (T('Розподіл очок: ') .. spec.points) or '')
     else
         panel.specIcon:SetTexture(nil)
         panel.specIcon:Hide()
+        if type(panel.specName.ClearAllPoints) == 'function' then
+            panel.specName:ClearAllPoints()
+            panel.specName:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -222)
+        end
+        if type(panel.specPoints.ClearAllPoints) == 'function' then
+            panel.specPoints:ClearAllPoints()
+            panel.specPoints:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -244)
+        end
         panel.specName:SetText(T('Дані спеціалізації відсутні.'))
-        panel.specPoints:SetText('')
+        panel.specPoints:SetText(selfMember and T('Відкрийте таланти (N), щоб оновити спек.') or T('Гравець ще не оновив таланти з аддоном.'))
     end
 
     local firstCraftID = nil
@@ -895,29 +926,55 @@ RenderMemberProfile = function(member)
         local isGathering = function(id)
             return OldKraken.Workshop and OldKraken.Workshop.IsGatheringProfession and OldKraken.Workshop:IsGatheringProfession(id)
         end
-        for i = 1, math.min(5, #professions) do
-            local p = professions[i]
+        local isSecondary = function(id)
+            return OldKraken.Workshop and OldKraken.Workshop.IsSecondaryProfession and OldKraken.Workshop:IsSecondaryProfession(id)
+        end
+        local function profTier(id)
+            if isSecondary(id) then return 3 end
+            if isGathering(id) then return 2 end
+            return 1
+        end
+        local ordered = {}
+        for i = 1, #professions do ordered[i] = professions[i] end
+        table.sort(ordered, function(a, b)
+            local ta, tb = profTier(a.id), profTier(b.id)
+            if ta ~= tb then return ta < tb end
+            return (a.id or 0) < (b.id or 0)
+        end)
+        for i = 1, math.min(5, #ordered) do
+            local p = ordered[i]
             local prow = panel.profRows[i]
             local pname, picon = OldKraken.Workshop:ProfessionInfo(p.id)
-            local gathering = isGathering(p.id)
-            if not gathering and not firstCraftID then firstCraftID = p.id end
+            local nonCraft = isGathering(p.id) or isSecondary(p.id)
+            if not nonCraft and not firstCraftID then firstCraftID = p.id end
             prow.memberName = member.name
             prow.professionID = p.id
-            prow.isGathering = gathering
+            prow.isGathering = nonCraft
             prow.icon:SetTexture(picon or 134400)
             local detail = p.native and T('Із ігрового ростера') or (p.rank and (tostring(p.rank) .. '/' .. tostring(p.maximum or '?')) or '')
-            prow.text:SetText(pname .. (detail ~= '' and (' — ' .. detail) or ''))
+            prow.text:SetText(pname)
+            if prow.value then prow.value:SetText(detail) end
             prow:Show()
         end
     end
     panel.firstCraftProfessionID = firstCraftID
 
-    local selfMember = isSelfMember(member.name)
     setButtonEnabled(panel.whisperButton, member.isOnline and not selfMember)
     setButtonEnabled(panel.inviteButton, member.isOnline and not selfMember)
     setButtonEnabled(panel.recipesButton, firstCraftID ~= nil and OldKraken.WorkshopRecipes ~= nil)
     setButtonEnabled(panel.orderButton, not selfMember and OldKraken.WorkshopOrders ~= nil)
     setButtonEnabled(panel.copyButton, true)
+    if type(panel.whisperButton.SetShown) == 'function' then panel.whisperButton:SetShown(not selfMember) end
+    if type(panel.inviteButton.SetShown) == 'function' then panel.inviteButton:SetShown(not selfMember) end
+    if type(panel.orderButton.SetShown) == 'function' then panel.orderButton:SetShown(not selfMember) end
+    if type(panel.recipesButton.ClearAllPoints) == 'function' then
+        panel.recipesButton:ClearAllPoints()
+        panel.recipesButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 32 or 350, -400)
+    end
+    if type(panel.copyButton.ClearAllPoints) == 'function' then
+        panel.copyButton:ClearAllPoints()
+        panel.copyButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 222 or 730, -400)
+    end
 end
 
 OpenMemberProfile = function(member)
@@ -929,6 +986,9 @@ OpenMemberProfile = function(member)
     if rosterFrame.scrollFrame then rosterFrame.scrollFrame:Hide() end
     if rosterFrame.emptyText then rosterFrame.emptyText:Hide() end
     if rosterFrame.emptyReset then rosterFrame.emptyReset:Hide() end
+    if rosterFrame.totalChip and type(rosterFrame.totalChip.Hide) == 'function' then rosterFrame.totalChip:Hide() end
+    if rosterFrame.onlineChip and type(rosterFrame.onlineChip.Hide) == 'function' then rosterFrame.onlineChip:Hide() end
+    if rosterFrame.shownChip and type(rosterFrame.shownChip.Hide) == 'function' then rosterFrame.shownChip:Hide() end
     RenderMemberProfile(member)
     rosterFrame.profilePanel:Show()
 end
@@ -937,6 +997,9 @@ CloseMemberProfile = function()
     selectedProfileName = nil
     if not rosterFrame then return end
     if rosterFrame.profilePanel then rosterFrame.profilePanel:Hide() end
+    if rosterFrame.totalChip and type(rosterFrame.totalChip.Show) == 'function' then rosterFrame.totalChip:Show() end
+    if rosterFrame.onlineChip and type(rosterFrame.onlineChip.Show) == 'function' then rosterFrame.onlineChip:Show() end
+    if rosterFrame.shownChip and type(rosterFrame.shownChip.Show) == 'function' then rosterFrame.shownChip:Show() end
     if rosterFrame.scrollFrame then
         rosterFrame.scrollFrame:Show()
         if type(rosterFrame.scrollFrame.SetVerticalScroll) == 'function' then
