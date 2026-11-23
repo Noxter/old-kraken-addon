@@ -795,7 +795,7 @@ function Database.IsValidRealm(selfOrRealm, maybeRealm)
     return IsValidText(realm, 1, 128)
 end
 
-function Database.GetWorkshopRealmScope()
+function Database.GetRealmScope()
     local realm = type(GetRealmName) == "function" and GetRealmName() or nil
     if Database.IsValidRealm(realm) then
         return realm
@@ -812,19 +812,8 @@ function Database.GetWorkshopRealmScope()
         if Database.IsValidRealm(cvar) then
             return cvar
         end
-        -- An unknown realm cannot safely identify a guild across different realms.
-        -- Existing realm-less and Forever scopes remain untouched until a real realm is known.
-        return nil
+        return "Forever"
     end
-    return nil
-end
-
-function Database.GetRealmScope()
-    local realm = Database.GetWorkshopRealmScope()
-    if realm then return realm end
-    local raw = type(GetRealmName) == "function" and GetRealmName() or nil
-    if type(issecretvalue) == "function" and issecretvalue(raw) then return nil end
-    if raw == "" then return "Forever" end
     return nil
 end
 
@@ -864,7 +853,7 @@ local function OfferWorkshopMigration(realm,guild,profile)
         OnAccept=function(_,data)
             if type(data)~='table' then return end
             migrationPopups[data.profile]=nil
-            local currentRealm=Database.GetWorkshopRealmScope()
+            local currentRealm=Database.GetRealmScope()
             local currentGuild=type(GetGuildInfo)=='function' and GetGuildInfo('player') or nil
             if not IsValidText(currentGuild,1,128) or currentRealm~=data.realm or currentGuild~=data.guild then
                 MigrationMessage('Світ або гільдія змінилися. Старі дані не перенесено.')
@@ -996,7 +985,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
 end
 
 function Database.ConfirmWorkshopMigration()
-    local realm = Database.GetWorkshopRealmScope()
+    local realm = Database.GetRealmScope()
     local guild = type(GetGuildInfo) == "function" and GetGuildInfo("player") or nil
     if not IsValidText(realm, 1, 128) or not IsValidText(guild, 1, 128) then
         return false, "invalid"
@@ -1013,7 +1002,7 @@ function Database.ConfirmWorkshopMigration()
 end
 
 local function CurrentWorkshopScope()
-    local realm = Database.GetWorkshopRealmScope()
+    local realm = Database.GetRealmScope()
     local guild = type(GetGuildInfo) == 'function' and GetGuildInfo('player') or nil
     if not IsValidText(realm,1,128) or not IsValidText(guild,1,128) then return nil end
     local db = OldKraken.DB
