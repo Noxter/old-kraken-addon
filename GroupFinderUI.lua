@@ -521,6 +521,7 @@ local function refreshRequests()
 end
 
 local function showRequests()
+    if not Finder.active and type(Finder.Connect) == 'function' then Finder:Connect() end
     if not Finder.active then chatError(T('Old Kraken: пошук груп не ініціалізовано.')); return end
     if not window or not window:IsShown() then Finder:Show() end
     if not window or not window:IsShown() then return end
@@ -2224,6 +2225,7 @@ local function createWindow(parent)
 end
 
 function Finder:Show()
+    if not self.active and type(self.Connect) == 'function' then self:Connect() end
     if not self.active then chatError(T('Old Kraken: пошук груп не ініціалізовано.')) return end
     refreshPeople()
     if OldKraken.UIHub then

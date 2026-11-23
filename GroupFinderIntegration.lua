@@ -396,32 +396,28 @@ end
 
 local frame = CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
+frame:RegisterEvent('PLAYER_ENTERING_WORLD')
+pcall(frame.RegisterEvent, frame, 'PLAYER_GUILD_UPDATE')
 frame:RegisterEvent('GUILD_ROSTER_UPDATE')
 frame:RegisterEvent('GROUP_ROSTER_UPDATE')
 pcall(frame.RegisterEvent, frame, 'PLAYER_ROLES_ASSIGNED')
 pcall(frame.RegisterEvent, frame, 'ROLE_CHANGED_INFORM')
-frame:SetScript('OnEvent', function(_, event)
-    if event == 'GROUP_ROSTER_UPDATE' or event == 'PLAYER_ROLES_ASSIGNED' or event == 'ROLE_CHANGED_INFORM' then
-        partyDirty = true
-        -- Capture a confirmed join or role update; defer removals until the
-        -- next tick so transient, incomplete roster updates cannot disband it.
-        if active then reconcileParty(event == 'GROUP_ROSTER_UPDATE') end
-        return
-    end
+
+local function connect()
     local identity, name = playerIdentity()
     local guild = GetGuildInfo and GetGuildInfo('player')
     if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == ''
         or not OldKraken.DB or type(OldKraken.DB.groupFinder) ~= 'table' then
         deactivate()
-        return
+        return false
     end
     -- Sender identity representation must be verified on the target realm.
     local key = profileKey(name, guild)
     if not key then
         deactivate()
-        return
+        return false
     end
-    if active and currentKey == key then return end
+    if active and currentKey == key then return true end
     deactivate()
     storage = OldKraken.DB.groupFinder[key]
     if type(storage) ~= 'table' then storage = {}; OldKraken.DB.groupFinder[key] = storage end
@@ -711,4 +707,24 @@ frame:SetScript('OnEvent', function(_, event)
             if finder:Prune() then saveOwned() end
         end)
     end
+    return true
+end
+
+function finder:Connect()
+    return connect()
+end
+
+frame:SetScript('OnEvent', function(_, event)
+    if event == 'GROUP_ROSTER_UPDATE' or event == 'PLAYER_ROLES_ASSIGNED' or event == 'ROLE_CHANGED_INFORM' then
+        partyDirty = true
+        -- Capture a confirmed join or role update; defer removals until the
+        -- next tick so transient, incomplete roster updates cannot disband it.
+        if active then reconcileParty(event == 'GROUP_ROSTER_UPDATE') end
+        return
+    end
+    connect()
 end)
+
+if type(OldKraken.On) == 'function' then
+    OldKraken:On('INITIALIZED', function() connect() end)
+end
