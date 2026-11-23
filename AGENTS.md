@@ -21,7 +21,7 @@
 
 ### Розмір коду
 
-19 Lua-файлів, 17 665 рядків. Найбільші: `GroupFinderUI.lua` (2865), `WorkshopRecipes.lua` (1914), `GuildEvents.lua` (1677), `GuildRoster.lua` (1527), `WorkshopOrders.lua` (1400), `Core.lua` (1307).
+19 Lua-файлів, 17 723 рядки. Найбільші: `GroupFinderUI.lua` (2865), `WorkshopRecipes.lua` (1918), `GuildEvents.lua` (1677), `GuildRoster.lua` (1590), `WorkshopOrders.lua` (1401), `Core.lua` (1307).
 
 ---
 

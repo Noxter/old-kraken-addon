@@ -82,7 +82,7 @@
 ## 9. Version Awareness — ненав'язливе інформування про оновлення Old Kraken — ✅ Реалізовано
 
 - **Пріоритет:** P2 — UX / інформування користувачів.
-- **Статус:** реалізовано в гілці `alpha` (23.11.2026) у [Communication.lua](Communication.lua), [UIHub.lua](UIHub.lua), [Database.lua](Database.lua), [Locale.lua](Locale.lua) та `tests/test_version_awareness.py` (URL CurseForge: `https://www.curseforge.com/wow/addons/old-kraken`, чат-сповіщення при кожному новому вході / зміні персонажа без повтору після `/reload`).
+- **Статус:** реалізовано в гілці `alpha` (23.11.2026) у [Communication.lua](Communication.lua), [UIHub.lua](UIHub.lua), [Database.lua](Database.lua), [Locale.lua](Locale.lua) та `tests/test_version_awareness.py` (URL CurseForge: `https://www.curseforge.com/wow/addons/old-kraken`, чат-сповіщення при кожному новому вході / зміні персонажа без повтору після `/reload`; у фінальному UX-поліруванні `1c5aede` окремі тумблери та кнопка `CurseForge` у «05 Налаштування» свідомо прибрані на користь чистого рядка версії й пігулки в шапці, хоча прапорці `versionIndicator` / `versionChatNotifications` у `DB.settings` збережені).
 - **Контекст:** у `Communication.lua` вже є обмін версіями аддона через roster presence (`OKP^QUERY` / `OKP^HERE`), збереження версій согільдійців та `Communication:CompareVersions()`. Не створювати паралельний протокол або дубльований comparator.
 - **Мета:** ненав'язливо повідомляти користувача, якщо серед відомих версій согільдійців є новіший стабільний реліз, і дати простий спосіб знайти сторінку завантаження.
 - **Version Detection & Notifications:**
