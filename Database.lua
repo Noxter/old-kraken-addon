@@ -782,6 +782,28 @@ function Database.IsValidRealm(selfOrRealm, maybeRealm)
     return IsValidText(realm, 1, 128)
 end
 
+function Database.GetRealmScope()
+    local realm = type(GetRealmName) == "function" and GetRealmName() or nil
+    if Database.IsValidRealm(realm) then
+        return realm
+    end
+    if type(issecretvalue) == "function" and issecretvalue(realm) then
+        return nil
+    end
+    if realm == "" then
+        local norm = type(GetNormalizedRealmName) == "function" and GetNormalizedRealmName() or nil
+        if Database.IsValidRealm(norm) then
+            return norm
+        end
+        local cvar = type(GetCVar) == "function" and GetCVar("realmName") or nil
+        if Database.IsValidRealm(cvar) then
+            return cvar
+        end
+        return "Forever"
+    end
+    return nil
+end
+
 function Database.IsValidWorkshopTally(tally, quantity)
     return IsValidTally(tally, quantity)
 end
@@ -880,7 +902,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
 end
 
 function Database.ConfirmWorkshopMigration()
-    local realm = type(GetRealmName) == "function" and GetRealmName() or nil
+    local realm = Database.GetRealmScope()
     local guild = type(GetGuildInfo) == "function" and GetGuildInfo("player") or nil
     if not IsValidText(realm, 1, 128) or not IsValidText(guild, 1, 128) then
         return false, "invalid"
@@ -897,7 +919,7 @@ function Database.ConfirmWorkshopMigration()
 end
 
 local function CurrentWorkshopScope()
-    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    local realm = Database.GetRealmScope()
     local guild = type(GetGuildInfo) == 'function' and GetGuildInfo('player') or nil
     if not IsValidText(realm,1,128) or not IsValidText(guild,1,128) then return nil end
     local db = OldKraken.DB

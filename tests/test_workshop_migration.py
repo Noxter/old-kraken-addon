@@ -104,8 +104,8 @@ def trigger_connect(lua):
     ''')
 
 
-# 1. Invalid realms (empty, nil, number, secret, control char, >128 chars) must never create "\001Guild"
-for bad_realm, is_secret in [('', False), (None, False), (123, False), ('Bad\001Realm', False), ('R' * 129, False), ('SecretRealm', True)]:
+# 1. Invalid realms (nil, number, secret, control char, >128 chars) must never create "\001Guild"
+for bad_realm, is_secret in [(None, False), (123, False), ('Bad\001Realm', False), ('R' * 129, False), ('SecretRealm', True)]:
     lua = make_client(realm=bad_realm, secret_realm=is_secret)
     trigger_connect(lua)
     lua.execute('''
@@ -528,6 +528,42 @@ assert(not scope.migrationPendingTallies[id][k] and scope.orderDeliveryTallies[i
 scope.orderObserved[k]=nil
 for _,fn in ipairs(timers) do local ok,err=pcall(fn); assert(ok,tostring(err)) end
 assert(scope.orderDeliveryTallies[id][k]==nil, 'ordinary cleanup resumes after the order was found')
+''')
+
+# 10. Empty GetRealmName() ("") on WoW Forever resolves to explicit 'Forever' scope:
+#     all 4 Workshop modules connect to 'Forever\001Kraken', legacy '\001Kraken' is preserved
+#     until explicit confirmation, and explicit confirmation migrates into 'Forever\001Kraken'.
+lua_forever = make_client(realm='', guild='Kraken', player='Alice')
+lua_forever.execute('''
+    OldKraken.DB.workshop.guilds = {
+        ['\\001Kraken'] = {
+            records = { ['Alice Tester'] = { professions = { [171] = { rank = 300, max = 300 } }, updated = 100 } },
+            recipes = { ['Alice Tester'] = { [171] = { [2329] = 1 } } },
+        },
+        ['Evermoon\\001Kraken'] = {
+            records = { ['Bob Tester'] = { professions = { [164] = { rank = 250, max = 300 } }, updated = 90 } },
+        },
+    }
+''')
+trigger_connect(lua_forever)
+lua_forever.execute('''
+    local guilds = OldKraken.DB.workshop.guilds
+    assert(OldKraken.Database:IsValidRealm('') == false, 'IsValidRealm("") must stay false')
+    assert(OldKraken.Database:GetRealmScope() == 'Forever', 'GetRealmScope() must return Forever')
+    local fScope = guilds['Forever\\001Kraken']
+    assert(type(fScope) == 'table', 'Forever workshop scope must exist')
+    assert(type(fScope.records) == 'table' and type(fScope.recipes) == 'table' and type(fScope.orderOwners) == 'table',
+        'All Workshop modules must connect under Forever\\001Kraken')
+    assert(fScope.records['Alice Tester'] == nil, 'legacy data must not auto-migrate before confirmation')
+    assert(fScope.records['Bob Tester'] == nil, 'Evermoon data must stay isolated from Forever')
+    assert(guilds['\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy scope must remain intact')
+    assert(guilds['Evermoon\\001Kraken'].records['Bob Tester'] ~= nil, 'Evermoon scope must remain intact')
+
+    local ok, reason = OldKraken.Database:ConfirmWorkshopMigration()
+    assert(ok and reason == 'completed', 'explicit migration into Forever\\001Kraken must succeed')
+    assert(fScope.records['Alice Tester'] ~= nil and fScope.recipes['Alice Tester'][171][2329] == 1,
+        'confirmed migration must copy legacy data into Forever\\001Kraken')
+    assert(guilds['\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy source must be preserved')
 ''')
 
 print('Workshop migration checks passed')

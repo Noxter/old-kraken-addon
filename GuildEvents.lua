@@ -72,6 +72,16 @@ local function validRealm(realm)
     end
     return validText(realm, 1, 128)
 end
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope) == 'function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue) == 'function' and issecretvalue(realm) then return nil end
+    if realm == '' then return 'Forever' end
+    return nil
+end
 local function eventKey(owner, id) return owner .. '\001' .. id end
 local function validID(s) return validText(s, 1, 64) and s:match('^[%w%-]+$') ~= nil end
 local function count(t) local n=0; for _ in pairs(t) do n=n+1 end; return n end
@@ -454,7 +464,7 @@ end
 
 local function connect()
     local name, guild = character(), type(GetGuildInfo)=='function' and GetGuildInfo('player')
-    local realm = type(GetRealmName)=='function' and GetRealmName() or nil
+    local realm = resolveRealm()
     if not name or not validText(guild,1,128) or not validRealm(realm) or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
         active,identity,profile,storage=false,nil,nil,nil; events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}; selected=nil
         if window and not OldKraken.UIHub then window:Hide() end
@@ -538,7 +548,7 @@ if C_Timer and C_Timer.NewTicker then
     C_Timer.NewTicker(3,function()
         if not active then connect(); return end
         local name,guild=character(),type(GetGuildInfo)=='function' and GetGuildInfo('player')
-        local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+        local realm=resolveRealm()
         if name~=identity or not validText(guild,1,128) or not validRealm(realm) or (realm..'\001'..guild..'\001'..name)~=profile then active=false; connect(); return end
         local removed = false
         for key,e in pairs(events) do

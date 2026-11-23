@@ -24,9 +24,20 @@ local function validRealm(realm)
     return type(realm) == 'string' and #realm >= 1 and #realm <= 128 and not realm:find('[%z\1-\31\127]')
 end
 
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope) == 'function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue) == 'function' and issecretvalue(realm) then return nil end
+    if realm == '' then return 'Forever' end
+    return nil
+end
+
 local function profileKey(name, guild)
     if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == '' then return nil end
-    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    local realm = resolveRealm()
     if not validRealm(realm) then return nil end
     return realm .. '\001' .. guild .. '\001' .. name
 end

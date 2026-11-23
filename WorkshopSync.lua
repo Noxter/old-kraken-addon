@@ -19,8 +19,18 @@ local function validRealm(realm)
     if type(issecretvalue)=='function' and issecretvalue(realm) then return false end
     return text(realm,128)
 end
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
+    if realm=='' then return 'Forever' end
+    return nil
+end
 local function connect()
-    local name=player(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
+    local name=player(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=resolveRealm()
     if not name or not text(guild,128) or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,store=false,nil,nil,nil; indices,indexCount,jobs,incoming,lastRequest={},0,{},{},{}; return
     end

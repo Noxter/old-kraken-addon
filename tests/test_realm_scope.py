@@ -107,7 +107,6 @@ GE_FILES = ('Database.lua', 'Locale.lua', 'ActivityCatalog.lua', 'GroupFinder.lu
 GE_FALLBACK_FILES = ('Locale.lua', 'ActivityCatalog.lua', 'GroupFinder.lua', 'GuildEvents.lua')
 
 BAD_REALMS = [
-    ('', False),
     (None, False),
     (123, False),
     ('Bad\001Realm', False),
@@ -203,5 +202,50 @@ for bad_realm, is_secret in BAD_REALMS:
             assert(k == 'Evermoon\\001Guild\\001Alice Tester', 'unexpected guildCalendarV1 key after reconnect: ' .. tostring(k))
         end
     ''')
+
+# --- Forever explicit scope ('Forever' when GetRealmName() == '') ---
+
+# IsValidRealm('') remains strictly false, while GetRealmScope() returns 'Forever' for ''
+lua_forever_gf = make_lua(GF_FILES, realm='', guild='Kraken', player='Alice')
+trigger_login(lua_forever_gf)
+lua_forever_gf.execute('''
+    assert(OldKraken.Database:IsValidRealm('') == false, 'IsValidRealm("") must remain false')
+    assert(OldKraken.Database:IsValidRealm(nil) == false, 'IsValidRealm(nil) must remain false')
+    assert(OldKraken.Database:GetRealmScope() == 'Forever', 'GetRealmScope() must return Forever for empty GetRealmName()')
+    assert(OldKraken.GroupFinder.active, 'GroupFinder must activate under Forever scope')
+    local fKey = 'Forever\\001Kraken\\001Alice'
+    assert(type(OldKraken.DB.groupFinder[fKey]) == 'table', 'Forever groupFinder scope must exist')
+    assert(OldKraken.DB.groupFinder['\\001Kraken\\001Alice'] == nil, 'legacy empty-realm key must not be created')
+    local ok, gid = OldKraken.GroupFinder:Create('Forever Group', 'dungeon', '', 5, 1, 60, 'dps')
+    assert(ok and gid, 'GroupFinder:Create must succeed under Forever scope')
+''')
+# Switching to another realm ('Evermoon') with same guild & player isolates SavedVariables completely
+lua_forever_gf.globals()._realm = 'Evermoon'
+trigger_login(lua_forever_gf)
+lua_forever_gf.execute('''
+    local eKey = 'Evermoon\\001Kraken\\001Alice'
+    assert(type(OldKraken.DB.groupFinder[eKey]) == 'table', 'Evermoon groupFinder scope must exist')
+    assert(#(OldKraken.DB.groupFinder[eKey].records or {}) == 0, 'Forever records must not leak into Evermoon scope')
+    assert(#(OldKraken.DB.groupFinder['Forever\\001Kraken\\001Alice'].records or {}) == 1, 'Forever records must stay intact')
+''')
+
+# GuildEvents under Forever scope + isolation from Evermoon with same guild & player
+lua_forever_ge = make_lua(GE_FILES, realm='', guild='Kraken', player='Alice')
+trigger_login(lua_forever_ge)
+lua_forever_ge.execute('''
+    local fKey = 'Forever\\001Kraken\\001Alice Tester'
+    assert(type(OldKraken.DB.events.guildCalendarV1[fKey]) == 'table', 'Forever events scope must exist')
+    assert(OldKraken.DB.events.guildCalendarV1['\\001Kraken\\001Alice Tester'] == nil, 'legacy empty-realm events key must not be created')
+    assert(OldKraken.GuildEvents:Create('Forever Event', 'desc', now + 3600, 'raid', 10, ''), 'GuildEvents:Create must succeed under Forever scope')
+''')
+lua_forever_ge.globals()._realm = 'Evermoon'
+trigger_login(lua_forever_ge)
+lua_forever_ge.execute('''
+    local fKey = 'Forever\\001Kraken\\001Alice Tester'
+    local eKey = 'Evermoon\\001Kraken\\001Alice Tester'
+    assert(type(OldKraken.DB.events.guildCalendarV1[eKey]) == 'table', 'Evermoon events scope must exist')
+    assert(OldKraken.DB.events.guildCalendarV1[eKey].owned == nil, 'Forever event must not leak into Evermoon scope')
+    assert(next(OldKraken.DB.events.guildCalendarV1[fKey].owned) ~= nil, 'Forever event must stay intact')
+''')
 
 print('test_realm_scope.py: ALL PASSED')

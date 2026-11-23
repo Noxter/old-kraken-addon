@@ -163,10 +163,21 @@ local function validRealm(realm)
     return usable(realm,'string') and #realm>=1 and #realm<=128 and not realm:find('[%z\1-\31\127]')
 end
 
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
+    if realm=='' then return 'Forever' end
+    return nil
+end
+
 local function connect()
     local name=fullName()
     local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
-    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    local realm=resolveRealm()
     if not name or not usable(guild,'string') or guild=='' or #guild>128 or guild:find('[%z\1-\31\127]') or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,store,records,nativeProfessions=false,nil,nil,nil,{},{}
         if frame and not OldKraken.UIHub then frame:Hide() end

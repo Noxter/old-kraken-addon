@@ -87,9 +87,19 @@ local function validRealm(realm)
     end
     return safeText(realm,1,128)
 end
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
+    if realm=='' then return 'Forever' end
+    return nil
+end
 local function connect()
     local name=myName(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
-    local realm=type(GetRealmName)=='function' and GetRealmName()
+    local realm=resolveRealm()
     if not name or not safeText(guild,1,128) or not validRealm(realm) or not OldKraken.DB then
         if Recipes.CancelPicker then Recipes:CancelPicker() end
         active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts,learnWarned={},{},{}

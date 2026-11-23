@@ -224,8 +224,19 @@ local function validRealm(realm)
     return textOK(realm,1,128)
 end
 
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
+    if realm=='' then return 'Forever' end
+    return nil
+end
+
 local function connect()
-    local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
+    local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=resolveRealm()
     if not name or not textOK(guild,1,128) or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,scope,own,observed,intents,dirty,relayDirty=false,nil,nil,nil,{}, {}, {}, {}, {}
         requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
