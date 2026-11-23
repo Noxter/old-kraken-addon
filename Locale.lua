@@ -853,6 +853,7 @@ local english = {
     ["Підказка: відкривайте Old Kraken командою /okr або кнопкою у вікні гільдії."] = "Tip: open Old Kraken with /okr or via the button in the guild window.",
     ["Доступна нова версія %s (у вас %s). Оновіть аддон на CurseForge (/okr)."] = "A new version %s is available (you have %s). Update the addon on CurseForge (/okr).",
     ["Оновлення "] = "Update ",
+    ["Доступна "] = "Available ",
     ["Доступне оновлення Old Kraken"] = "Old Kraken Update Available",
     ["Ваша версія: %s"] = "Your version: %s",
     ["Найновіша у гільдії: %s"] = "Newest in guild: %s",

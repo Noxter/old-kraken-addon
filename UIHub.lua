@@ -210,8 +210,14 @@ local function createWindow()
 
     local versionBtn = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
     OldKraken.UIStyle.Button(versionBtn, nil, {rounded = true})
-    versionBtn:SetSize(112, 22)
+    versionBtn:SetSize(116, 22)
     versionBtn:SetPoint('RIGHT', scaleBtn, 'LEFT', -6, 0)
+    if type(versionBtn.SetBackdropColor) == 'function' then
+        versionBtn:SetBackdropColor(0.04, 0.18, 0.10, 0.95)
+    end
+    if type(versionBtn.SetBackdropBorderColor) == 'function' then
+        versionBtn:SetBackdropBorderColor(0.14, 0.55, 0.30, 0.85)
+    end
     local versionLbl = type(versionBtn.GetFontString) == 'function' and versionBtn:GetFontString()
     if type(versionLbl) == 'table' and OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(versionLbl, 11) end
     versionBtn:Hide()
@@ -243,7 +249,7 @@ local function createWindow()
         local comm = OldKraken.Communication
         local newest = enabled and comm and type(comm.GetNewestKnownVersion) == 'function' and comm:GetNewestKnownVersion()
         if newest then
-            Hub.versionButton:SetText('|cff2ec4b6' .. T('Оновлення ') .. newest .. '|r')
+            Hub.versionButton:SetText('|cff22c55e' .. T('Доступна ') .. newest .. '|r')
             Hub.versionButton:Show()
         else
             Hub.versionButton:Hide()
