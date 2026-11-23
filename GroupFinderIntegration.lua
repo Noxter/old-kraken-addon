@@ -16,9 +16,18 @@ local soloSince = nil
 local diagnostics = { received = 0, accepted = 0, rejected = 0 }
 local REANNOUNCE_DELAY = 300
 
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm) == 'function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    if type(issecretvalue) == 'function' and issecretvalue(realm) then return false end
+    return type(realm) == 'string' and #realm >= 1 and #realm <= 128 and not realm:find('[%z\1-\31\127]')
+end
+
 local function profileKey(name, guild)
-    local realm = GetRealmName and GetRealmName() or ''
-    if type(realm) ~= 'string' then realm = '' end
+    if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == '' then return nil end
+    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    if not validRealm(realm) then return nil end
     return realm .. '\001' .. guild .. '\001' .. name
 end
 
@@ -408,6 +417,10 @@ frame:SetScript('OnEvent', function(_, event)
     end
     -- Sender identity representation must be verified on the target realm.
     local key = profileKey(name, guild)
+    if not key then
+        deactivate()
+        return
+    end
     if active and currentKey == key then return end
     deactivate()
     storage = OldKraken.DB.groupFinder[key]
@@ -646,7 +659,8 @@ frame:SetScript('OnEvent', function(_, event)
             if not active then return end
             local currentGuild = GetGuildInfo and GetGuildInfo('player')
             local currentName = UnitName and UnitName('player')
-            if not currentGuild or not currentName or profileKey(currentName, currentGuild) ~= currentKey then
+            local nextKey = profileKey(currentName, currentGuild)
+            if not nextKey or nextKey ~= currentKey then
                 deactivate()
                 return
             end

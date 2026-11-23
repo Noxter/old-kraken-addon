@@ -63,7 +63,14 @@ local function validActivity(kind, id)
 end
 
 local function validText(s, low, high)
+    if type(issecretvalue) == 'function' and issecretvalue(s) then return false end
     return type(s) == 'string' and #s >= low and #s <= high and not s:find('[%z\1-\31\127]')
+end
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm) == 'function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    return validText(realm, 1, 128)
 end
 local function eventKey(owner, id) return owner .. '\001' .. id end
 local function validID(s) return validText(s, 1, 64) and s:match('^[%w%-]+$') ~= nil end
@@ -447,9 +454,9 @@ end
 
 local function connect()
     local name, guild = character(), type(GetGuildInfo)=='function' and GetGuildInfo('player')
-    local realm = type(GetRealmName)=='function' and GetRealmName() or ''
-    if not name or not validText(guild,1,128) or type(realm)~='string' or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
-        active=false; events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}; selected=nil
+    local realm = type(GetRealmName)=='function' and GetRealmName() or nil
+    if not name or not validText(guild,1,128) or not validRealm(realm) or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
+        active,identity,profile,storage=false,nil,nil,nil; events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}; selected=nil
         if window then window:Hide() end
         return
     end
@@ -531,7 +538,8 @@ if C_Timer and C_Timer.NewTicker then
     C_Timer.NewTicker(3,function()
         if not active then connect(); return end
         local name,guild=character(),type(GetGuildInfo)=='function' and GetGuildInfo('player')
-        if name~=identity or not guild or (type(GetRealmName)=='function' and (GetRealmName()..'\001'..guild..'\001'..name)~=profile) then active=false; connect(); return end
+        local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+        if name~=identity or not validText(guild,1,128) or not validRealm(realm) or (realm..'\001'..guild..'\001'..name)~=profile then active=false; connect(); return end
         local removed = false
         for key,e in pairs(events) do
             if e.when < GetServerTime()-172800 then events[key],directEvents[key],relayEvents[key],dirty[key],intents[key],newDirty[key],relayDirty[key],storage.relays[key]=nil,nil,nil,nil,nil,nil,nil,nil; removed=true end
