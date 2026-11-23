@@ -229,7 +229,7 @@ local function connect()
     if not name or not textOK(guild,1,128) or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,scope,own,observed,intents,dirty,relayDirty=false,nil,nil,nil,{}, {}, {}, {}, {}
         requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
-        if window then window:Hide() end; return
+        if window and not OldKraken.UIHub then window:Hide() end; return
     end
     if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
         OldKraken.Database:MigrateWorkshopScope(realm,guild,false)

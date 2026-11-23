@@ -169,7 +169,7 @@ local function connect()
     local realm=type(GetRealmName)=='function' and GetRealmName() or nil
     if not name or not usable(guild,'string') or guild=='' or #guild>128 or guild:find('[%z\1-\31\127]') or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,store,records,nativeProfessions=false,nil,nil,nil,{},{}
-        if frame then frame:Hide() end
+        if frame and not OldKraken.UIHub then frame:Hide() end
         return
     end
     if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
@@ -324,12 +324,12 @@ local function updateOwn()
     changed(); return true
 end
 local listener=CreateFrame('Frame')
-for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','SKILL_LINES_CHANGED','LEARNED_SPELL_IN_SKILL_LINE','CHAT_MSG_SKILL','TRADE_SKILL_SHOW'}) do
+for _,event in ipairs({'PLAYER_LOGIN','PLAYER_ENTERING_WORLD','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','SKILL_LINES_CHANGED','LEARNED_SPELL_IN_SKILL_LINE','CHAT_MSG_SKILL','TRADE_SKILL_SHOW'}) do
     pcall(listener.RegisterEvent,listener,event)
 end
 listener:SetScript('OnEvent',function(_,event)
     ownProfessionCache=nil
-    if event=='PLAYER_LOGIN' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect(); changed()
+    if event=='PLAYER_LOGIN' or event=='PLAYER_ENTERING_WORLD' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect(); changed()
     elseif active then nextScan=0; changed() end
 end)
 if C_Timer and type(C_Timer.NewTicker)=='function' then
@@ -678,6 +678,7 @@ function Workshop:Show(view)
 end
 if OldKraken.UIHub then
     OldKraken.UIHub:RegisterPage('workshop','Майстерня','04',function(parent)
+        if not active then connect() end
         if not frame then frame=createWindow(parent) end
         return frame
     end)

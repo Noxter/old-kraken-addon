@@ -457,7 +457,7 @@ local function connect()
     local realm = type(GetRealmName)=='function' and GetRealmName() or nil
     if not name or not validText(guild,1,128) or not validRealm(realm) or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
         active,identity,profile,storage=false,nil,nil,nil; events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}; selected=nil
-        if window then window:Hide() end
+        if window and not OldKraken.UIHub then window:Hide() end
         return
     end
     local key=realm..'\001'..guild..'\001'..name
@@ -529,7 +529,7 @@ local function connect()
     comm:SendProtocol('CEVQUERY',''); fire()
 end
 local frame=CreateFrame('Frame')
-frame:RegisterEvent('PLAYER_LOGIN'); frame:RegisterEvent('GUILD_ROSTER_UPDATE'); frame:RegisterEvent('GROUP_ROSTER_UPDATE')
+frame:RegisterEvent('PLAYER_LOGIN'); pcall(frame.RegisterEvent,frame,'PLAYER_ENTERING_WORLD'); pcall(frame.RegisterEvent,frame,'PLAYER_GUILD_UPDATE'); frame:RegisterEvent('GUILD_ROSTER_UPDATE'); frame:RegisterEvent('GROUP_ROSTER_UPDATE')
 frame:SetScript('OnEvent',function(_,event)
     connect()
     if (event=='GUILD_ROSTER_UPDATE' or event=='GROUP_ROSTER_UPDATE') and window and window:IsShown() and refresh then refresh() end
@@ -1625,6 +1625,7 @@ function Events:ShowEvent(key)
 end
 if OldKraken.UIHub then
     OldKraken.UIHub:RegisterPage('events', 'Івенти', '03', function(parent)
+        if not active then connect() end
         if not window then window=createWindow(parent) end
         return window
     end)
