@@ -2300,9 +2300,9 @@ local alertCaptions = {
     event='ПОДІЯ ГІЛЬДІЇ', event_signup='ЗАПИС НА ПОДІЮ', workshop='МАЙСТЕРНЯ',
 }
 local alertActions = {
-    group='Клік — відкрити групу', request='Клік — мої оголошення',
-    decision='Клік — переглянути заявку', event='Клік — відкрити подію',
-    event_signup='Клік — відкрити подію', workshop='Клік — відкрити замовлення',
+    group='ЛКМ — відкрити групу', request='ЛКМ — мої оголошення',
+    decision='ЛКМ — переглянути заявку', event='ЛКМ — відкрити подію',
+    event_signup='ЛКМ — відкрити подію', workshop='ЛКМ — відкрити замовлення',
 }
 
 local function paintAlertRoster(group)
@@ -2649,7 +2649,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     end
     for _,control in ipairs(groupAlert.roleSlots or {}) do control:Hide() end
     local graphical=kind=='group' and rosterGroup~=nil
-    groupAlert:SetSize(graphical and 620 or 480, graphical and 204 or 112)
+    groupAlert:SetSize(graphical and 620 or 480, graphical and 204 or 122)
     groupAlert.alertAccent:SetShown(true)
     groupAlert.alertArt:SetSize(graphical and 90 or 52, graphical and 118 or 52)
     groupAlert.alertArt:ClearAllPoints()
