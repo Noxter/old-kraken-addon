@@ -36,10 +36,12 @@ local function UpdateReannounceButton(control)
 end
 local dungeonOptions = catalog.dungeon
 local dungeonLabels, dungeonLevels = {}, {}
-for _, options in ipairs({catalog.dungeon, catalog.raid}) do
-    for _, entry in ipairs(options) do
-        dungeonLabels[entry.value] = entry.label
-        if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+for _, options in ipairs({catalog.dungeon, catalog.raid, catalog.legacy and catalog.legacy.dungeon, catalog.legacy and catalog.legacy.raid}) do
+    if options then
+        for _, entry in ipairs(options) do
+            dungeonLabels[entry.value] = entry.label
+            if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+        end
     end
 end
 local function displayGroupTitle(group)
@@ -49,6 +51,11 @@ local function displayGroupTitle(group)
         return dungeonLabels[group.dungeon] or title
     end
     return title
+end
+if Finder then
+    function Finder:DisplayTitle(group)
+        return displayGroupTitle(group)
+    end
 end
 local function displayEventTitle(event)
     if OldKraken.GuildEvents and type(OldKraken.GuildEvents.DisplayTitle) == 'function' then

@@ -665,7 +665,7 @@ frame:SetScript('OnEvent', function(_, event)
                             local title = group.title or group.id
                             local catalog = OldKraken.ActivityCatalog
                             if catalog and catalog.IsCanonicalTitle and catalog.IsCanonicalTitle(group.dungeon, title) then
-                                for _, list in ipairs({catalog.dungeon or {}, catalog.raid or {}}) do
+                                for _, list in ipairs({catalog.dungeon or {}, catalog.raid or {}, (catalog.legacy and catalog.legacy.dungeon) or {}}) do
                                     for _, entry in ipairs(list) do
                                         if entry.value == group.dungeon then title = entry.label; break end
                                     end

@@ -32,8 +32,10 @@ StaticPopupDialogs.OLDKRAKEN_EVENT_DELETE={
     timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
 }
-for _,options in ipairs({catalog.dungeon,catalog.raid}) do
-    for _,entry in ipairs(options) do if entry.value~='' then activityLabels[entry.value]=entry.label end end
+for _,options in ipairs({catalog.dungeon,catalog.raid,catalog.legacy and catalog.legacy.dungeon,catalog.legacy and catalog.legacy.raid}) do
+    if options then
+        for _,entry in ipairs(options) do if entry.value~='' then activityLabels[entry.value]=entry.label end end
+    end
 end
 local function displayEventTitle(e)
     if type(e) ~= 'table' then return '' end
@@ -49,6 +51,7 @@ end
 local function validActivity(kind, id)
     if id=='' then return true end
     if type(id)~='string' then return false end
+    if catalog and catalog.IsValidActivity then return catalog.IsValidActivity(kind, id) end
     for _,entry in ipairs(catalog[kind] or {}) do if entry.value==id then return true end end
     return false
 end
