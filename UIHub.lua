@@ -357,8 +357,16 @@ local function createSettings(parent)
     local groupFinderButton = button('', 18, -354, 256)
     local guildEventsButton = button('', 286, -354, 256)
     local workshopButton = button('', 18, -396, 256)
+    local minimapButton = button('', 286, -396, 256)
     local previewButton = button('', 18, -450, 256)
     local resetPositionsButton = button(T('Скинути позиції банерів'), 286, -450, 256)
+    local minimapHint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    minimapHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -516)
+    minimapHint:SetWidth(524)
+    minimapHint:SetJustifyH('LEFT')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(minimapHint, 13) end
+    if colors and colors.mutedText then minimapHint:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+    minimapHint:SetText(T('Підказка: відкривайте Old Kraken командою /okr або кнопкою у вікні гільдії.'))
     local previewKinds = {'group', 'request', 'event', 'workshop'}
     local previewLabels = {'група', 'заявка', 'подія', 'майстерня'}
     local previewIndex = 1
@@ -383,6 +391,7 @@ local function createSettings(parent)
         groupFinderButton:SetText(T('Пошук груп') .. ': ' .. state(isGroupAlertsOn()))
         guildEventsButton:SetText(T('Події гільдії') .. ': ' .. state(isEventAlertsOn()))
         workshopButton:SetText(T('Замовлення Майстерні') .. ': ' .. state(type(settings) ~= 'table' or settings.workshopOrderAlerts ~= false))
+        minimapButton:SetText(T('Кнопка на мінімапі') .. ': ' .. state(type(settings) ~= 'table' or settings.showMinimapButton ~= false))
         previewButton:SetText(T('Тест банера: ') .. T(previewLabels[previewIndex]))
     end
     groupFinderButton:SetScript('OnClick', function()
@@ -416,6 +425,13 @@ local function createSettings(parent)
         if type(OldKraken.Fire) == 'function' then OldKraken:Fire('WORKSHOP_ALERT_SETTING') end
         refreshAlertButtons()
     end)
+    minimapButton:SetScript('OnClick', function()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        if type(settings) ~= 'table' then return end
+        settings.showMinimapButton = settings.showMinimapButton == false
+        if type(OldKraken.Fire) == 'function' then OldKraken:Fire('MINIMAP_BUTTON_SETTING') end
+        refreshAlertButtons()
+    end)
     previewButton:SetScript('OnClick', function()
         local kind = previewKinds[previewIndex]
         previewIndex = previewIndex % #previewKinds + 1
@@ -432,6 +448,7 @@ local function createSettings(parent)
         OldKraken:On('GROUP_FINDER_ALERT_SETTING', refreshAlertButtons)
         OldKraken:On('GUILD_EVENTS_ALERT_SETTING', refreshAlertButtons)
         OldKraken:On('WORKSHOP_ALERT_SETTING', refreshAlertButtons)
+        OldKraken:On('MINIMAP_BUTTON_SETTING', refreshAlertButtons)
     end
 
     local active = OldKraken.GetLanguage()

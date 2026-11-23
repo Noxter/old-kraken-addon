@@ -821,6 +821,8 @@ local english = {
     ["[Групи]"] = "[Groups]",
     ["[Івенти]"] = "[Events]",
     ["[Майстерня]"] = "[Workshop]",
+    ["Кнопка на мінімапі"] = "Minimap button",
+    ["Підказка: відкривайте Old Kraken командою /okr або кнопкою у вікні гільдії."] = "Tip: open Old Kraken with /okr or via the button in the guild window.",
 }
 
 local language = 'ukUA'

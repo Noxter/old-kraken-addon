@@ -32,6 +32,7 @@ local DEFAULTS = {
         uiScale = 1,
         language = 'ukUA',
         smartNotifications = true,
+        showMinimapButton = true,
         roster = {
             status = "all",
             sort = "level",
