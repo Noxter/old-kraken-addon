@@ -537,11 +537,11 @@ assert(scope.orderDeliveryTallies[id][k]==nil, 'ordinary cleanup resumes after t
 lua_forever = make_client(realm='', guild='Kraken', player='Alice')
 lua_forever.execute('''
     OldKraken.DB.workshop.guilds = {
-        ['\\\\001Kraken'] = {
+        ['\\001Kraken'] = {
             records = { ['Alice Tester'] = { professions = { [171] = { rank = 300, max = 300 } }, updated = 100 } },
             recipes = { ['Alice Tester'] = { [171] = { [2329] = 1 } } },
         },
-        ['Evermoon\\\\001Kraken'] = {
+        ['Evermoon\\001Kraken'] = {
             records = { ['Bob Tester'] = { professions = { [164] = { rank = 250, max = 300 } }, updated = 90 } },
         },
     }
@@ -551,20 +551,20 @@ lua_forever.execute('''
     local guilds = OldKraken.DB.workshop.guilds
     assert(OldKraken.Database:IsValidRealm('') == false, 'IsValidRealm("") must stay false')
     assert(OldKraken.Database:GetRealmScope() == 'Forever', 'GetRealmScope() must return Forever')
-    local fScope = guilds['Forever\\\\001Kraken']
+    local fScope = guilds['Forever\\001Kraken']
     assert(type(fScope) == 'table', 'Forever workshop scope must exist')
     assert(type(fScope.records) == 'table' and type(fScope.recipes) == 'table' and type(fScope.orderOwners) == 'table',
-        'All Workshop modules must connect under Forever\\\\001Kraken')
+        'All Workshop modules must connect under Forever\\001Kraken')
     assert(fScope.records['Alice Tester'] == nil, 'legacy data must not auto-migrate before confirmation')
     assert(fScope.records['Bob Tester'] == nil, 'Evermoon data must stay isolated from Forever')
-    assert(guilds['\\\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy scope must remain intact')
-    assert(guilds['Evermoon\\\\001Kraken'].records['Bob Tester'] ~= nil, 'Evermoon scope must remain intact')
+    assert(guilds['\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy scope must remain intact')
+    assert(guilds['Evermoon\\001Kraken'].records['Bob Tester'] ~= nil, 'Evermoon scope must remain intact')
 
     local ok, reason = OldKraken.Database:ConfirmWorkshopMigration()
-    assert(ok and reason == 'completed', 'explicit migration into Forever\\\\001Kraken must succeed')
+    assert(ok and reason == 'completed', 'explicit migration into Forever\\001Kraken must succeed')
     assert(fScope.records['Alice Tester'] ~= nil and fScope.recipes['Alice Tester'][171][2329] == 1,
-        'confirmed migration must copy legacy data into Forever\\\\001Kraken')
-    assert(guilds['\\\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy source must be preserved')
+        'confirmed migration must copy legacy data into Forever\\001Kraken')
+    assert(guilds['\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy source must be preserved')
 ''')
 
 # Consent recorded by older versions for the ambiguous Forever key is not trusted.
