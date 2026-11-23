@@ -325,4 +325,47 @@ lua_inactive.execute('''
     assert(not p.profEmpty:IsShown() and p.profRows[1]:IsShown() and p.profRows[1].text:GetText():find('275/300', 1, true))
 ''')
 
+# Real Communication.lua: UnitName('player') -> ("Alice", "Tester") must match roster row "Alice Tester"
+lua_real_comm = setup_env('ukUA', workshop_loaded=True, in_guild=True)
+lua_real_comm.execute('''
+    function UnitName(unit)
+        if unit == 'player' then return 'Alice', 'Tester' end
+        return 'Alice'
+    end
+    function GetGuildInfo() return 'Kraken' end
+    function GetTime() return 100 end
+    function GetAddOnMetadata() return '0.5.5-alpha.1' end
+    OldKraken.version = '0.5.5-alpha.1'
+    OldKraken.DB = { settings = { roster = {}, language = 'ukUA' }, roster = {} }
+    C_ChatInfo = {
+        RegisterAddonMessagePrefix = function() return true end,
+        SendAddonMessage = function() return true end,
+    }
+    C_Timer = { NewTicker = function() return {} end, After = function(_, fn) fn() end }
+''')
+lua_real_comm.execute((ROOT / 'Communication.lua').read_text(encoding='utf-8'))
+lua_real_comm.execute(ROSTER)
+lua_real_comm.execute('''
+    local comm = OldKraken.Communication
+    assert(comm:HasRosterAddon('Alice Tester') == true, 'full roster name must match self')
+    assert(comm:HasRosterAddon('Alice') == true, 'short player name must match self')
+    assert(comm:GetRosterVersion('Alice Tester') == '0.5.5-alpha.1', 'self version must resolve for full roster name')
+    assert(comm:GetRosterVersion('Alice') == '0.5.5-alpha.1', 'self version must resolve for short name')
+    assert(not comm:HasRosterAddon('Alice-OtherRealm'), 'other-realm Alice must not match self')
+    assert(comm:GetRosterVersion('Alice-OtherRealm') == nil, 'other-realm Alice must have no version')
+
+    local Roster = OldKraken.GuildRoster
+    Roster:Show()
+    local rf, aliceRow
+    for _, f in ipairs(frames) do
+        if f.profilePanel then rf = f end
+        if f.professions and f.member and f.member.name == 'Alice Tester' then aliceRow = f end
+    end
+    assert(aliceRow, 'Alice Tester row must exist')
+    aliceRow.scripts.OnClick(aliceRow, 'LeftButton')
+    local p = rf.profilePanel
+    assert(p:IsShown(), 'profile panel must open')
+    assert(p.addonText.text:find('0.5.5-alpha.1', 1, true), 'self profile must show local addon version, got: ' .. tostring(p.addonText.text))
+''')
+
 print('Inline player profile checks passed')

@@ -21,7 +21,7 @@
 
 ### Розмір коду
 
-17 Lua-файлів, 11 962 рядки. Найбільші: `GroupFinderUI.lua` (2361), `GuildEvents.lua` (1453), `WorkshopRecipes.lua` (1317), `WorkshopOrders.lua` (1276), `Core.lua` (1186), `GuildRoster.lua` (1021).
+19 Lua-файлів, 17 197 рядків. Найбільші: `GroupFinderUI.lua` (2863), `WorkshopRecipes.lua` (1905), `GuildEvents.lua` (1666), `GuildRoster.lua` (1527), `WorkshopOrders.lua` (1390), `Core.lua` (1307).
 
 ---
 
@@ -155,7 +155,7 @@ WorkshopDeliveries.lua  Minimap.lua
 - **Правило порядку: «знімок ніколи не має обганяти рішення, яке на нього посилається»** — `GROUP_SNAPSHOTS = {ANNOUNCE, UPDATE, SYNC, CANCEL, BUMP}` переставляються перед рішенням через `job.recordKey` (перші два запакованих поля). Не ламай це.
 - Черга обмежена: пріоритет 0 → до `MAX_QUEUE`, інакше до `BACKGROUND_LIMIT`. Переповнення → `stats.backpressure++`, `false, 'queue full'`.
 - **Дедуп:** `pendingTransmissions[guild\001kind\001payload]` — повторна постановка того самого payload повертає наявний id.
-- **Backoff:** при невдачі `backoff = min(60, backoff==0 and 2 or backoff*2)` + джиттер. **Ліміту спроб немає** — повтори нескінченні. (`README.md` у розділі про чергу каже «обмеження 50 … не більше п'яти спроб» — застаріло.)
+- **Backoff:** при невдачі `backoff = min(60, backoff==0 and 2 or backoff*2)` + джиттер; для жорстких помилок відправки (`entryError`) передача припиняється після `MAX_ERROR_ATTEMPTS = 5` спроб, тоді як шляхи `deferEntry` (API недоступний / тротлінг) ліміту спроб не мають. (`README.md` у розділі про чергу каже «обмеження 50 … не більше п'яти спроб» — застаріло лише обмеження черги 50.)
 - **Replay multipart:** якщо передача триває ≥ **90 с** — усі частини знімаються, `startedAt` скидається, повний набір ставиться в чергу знову (`stats.restarted++`).
 - **Тротлінг на боці виклику:** модулі ставлять у чергу лише коли `#comm.queue <= 8` (перевіряй це у своєму коді, якщо додаєш новий масовий відправник).
 
@@ -238,7 +238,7 @@ WorkshopDeliveries.lua  Minimap.lua
 
 ## 8. Guild Events (гільдійний календар)
 
-`GuildEvents.lua` (1020 рядків).
+`GuildEvents.lua` (1666 рядків).
 
 - **Relay authority — головне правило.** Подію може змінювати **лише власник**. Релейні копії — **display-only**: вони не анонсують, не скасовують, не приймають заявки.
   - `canJoin = not e.relayed and …` — на релейну подію **не можна записатися**.
@@ -306,15 +306,15 @@ WorkshopDeliveries.lua  Minimap.lua
 - Пулінг рядків: 500 членів → ≤ 21 рядок; події ростера коалесцуються; скан професій — чанки по 25.
 - Це ж файл-хост команд `/okr` (див. §11).
 
-### Minimap (`Minimap.lua`, 66 рядків)
+### Minimap (`Minimap.lua`, 217 рядків)
 
 Кнопка аддона на мінікарті; кут зберігається в `DB.settings.minimapAngle`.
 
-### ActivityCatalog (`ActivityCatalog.lua`, 66 рядків)
+### ActivityCatalog (`ActivityCatalog.lua`, 120 рядків)
 
 Єдине джерело істини для назв і арту підземель/рейдів.
 
-- 28 підземель + порожній варіант «Усі / не вибрано»; 3 рейди (`barrowdeeps`, `hyjalsummit`, `onyxia`), усі `min=max=60`.
+- 37 підземель + порожній варіант «Усі / не вибрано»; 3 рейди (`barrowdeeps`, `hyjalsummit`, `onyxia`), усі `min=max=60`.
 - `SetArtwork(texture, activity)`: рейди — з `Media/Raids/<Name>.tga`; решта — за fileID з fallback `7963779`. Для fileID ≥ 7000000 інший `SetTexCoord`.
 - `validActivity` у `GuildEvents` **виводиться з каталогу** — додаючи активність, онови лише каталог + (за потреби) мапінг арту.
 
@@ -343,15 +343,17 @@ SLASH_OLDKRAKEN1 = "/okr"        SLASH_OLDKRAKEN2 = "/oldkraken"
 
 ## 12. Внутрішня шина подій
 
-`OldKraken:On` / `OldKraken:Fire`. 16 імен + `INITIALIZED`:
+`OldKraken:On` / `OldKraken:Fire`. 22 імена + `INITIALIZED`:
 
 ```
 GROUP_FINDER_CHANGED            GROUP_FINDER_NEW              GROUP_FINDER_NEW_REQUEST
-GROUP_FINDER_APPLICATION_STATUS GROUP_FINDER_ALERT_SETTING    GUILD_EVENTS_CHANGED
-GUILD_EVENTS_NEW                GUILD_EVENTS_NEW_SIGNUP       GUILD_EVENTS_CANCELLED
-GUILD_EVENTS_ALERT_SETTING      ROSTER_ADDON_CHANGED          WORKSHOP_INDEX_CHANGED
-WORKSHOP_ITEM_DATA_CHANGED      WORKSHOP_ORDER_NOTICE         WORKSHOP_PROFESSIONS_CHANGED
-WORKSHOP_RECIPES_CHANGED        INITIALIZED
+GROUP_FINDER_APPLICATION_STATUS GROUP_FINDER_ALERT_SETTING    GROUP_FINDER_OFFLINE_CHANGED
+GUILD_EVENTS_CHANGED            GUILD_EVENTS_NEW              GUILD_EVENTS_NEW_SIGNUP
+GUILD_EVENTS_CANCELLED          GUILD_EVENTS_ALERT_SETTING    ROSTER_ADDON_CHANGED
+WORKSHOP_INDEX_CHANGED        WORKSHOP_ITEM_DATA_CHANGED    WORKSHOP_ORDER_NOTICE
+WORKSHOP_PROFESSIONS_CHANGED    WORKSHOP_RECIPES_CHANGED      WORKSHOP_ALERT_SETTING
+WORKSHOP_SCOPE_MIGRATED         WORKSHOP_SCOPE_DRAFT_RESTORED MINIMAP_BUTTON_SETTING
+COMMUNICATION_SEND_FAILED       INITIALIZED
 ```
 
 Додаючи нову подію — використовуй наявний префікс модуля (`WORKSHOP_*`, `GUILD_EVENTS_*`, `GROUP_FINDER_*`) і, якщо подія змінює персистентний стан, стріляй її **після** запису в БД.
@@ -367,7 +369,7 @@ cd ~/Projects/old-kraken-alpha
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-- **42 файли** `tests/test_*.py`.
+- **58 файлів** `tests/test_*.py`.
 - Рантайм: `lupa==2.8`, `from lupa.lua51 import LuaRuntime` — **Lua 5.1**.
 - **`.venv` не потрібен**: системний Python 3.14.5 має `lupa 2.8`; `lua`/`lua5.1`/`luac` у системі **немає**.
 - **Немає pytest/unittest/conftest/Makefile/requirements** — це прості скрипти з Lua-`assert` усередині `lua.execute('''…''')`, успіх = `print('PASS: …')`.
@@ -405,7 +407,7 @@ for test in tests/test_*.py; do python "$test" || exit 1; done
 | `README.md`, ZIP-listing | без `RoleSlot.tga`/`StatusOnline.tga`/`StatusOffline.tga` | `package-*.yml` їх копіюють |
 | `README.md`, розділ про ростер | кнопка «Оновити» в ростері | такої кнопки немає |
 | `README.md`, розділ про ростер | регістрозалежне сортування за локацією | регістронезалежне |
-| `README.md`, розділ про транспорт | «обмеження 50 … не більше п'яти спроб» | `MAX_QUEUE = 4096`, ліміту спроб **немає** |
+| `README.md`, розділ про транспорт | «обмеження 50 … не більше п'яти спроб» | `MAX_QUEUE = 4096`, `MAX_ERROR_ATTEMPTS = 5` |
 | `Communication.lua`, коментар у `Encode` | «GF1 payloads…» | тег кадру `GF2` |
 | `README.md` / `TESTING.md`, згадка останнього CI | останній CI-ран | `f11f895` — застаріло |
 
@@ -431,7 +433,7 @@ for test in tests/test_*.py; do python "$test" || exit 1; done
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-Усі 29 мусять пройти. Потім — ручні сценарії з `TESTING.md` (у грі), бо автоматика не покриває реальний клієнт.
+Усі 58 мусять пройти. Потім — ручні сценарії з `TESTING.md` (у грі), бо автоматика не покриває реальний клієнт.
 
 ### Чого не робити
 

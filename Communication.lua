@@ -456,14 +456,21 @@ local function PresenceKey(name)
     if not name:find('-', 1, true) then name = name .. '-' .. realm end
     return (name:gsub('%s+', ''))
 end
+local function IsSelfPresenceKey(key)
+    if key == '' then return false end
+    local fullKey, shortKey = PresenceKey(FullPlayerName()), PresenceKey(PlayerName())
+    return (fullKey ~= '' and key == fullKey) or (shortKey ~= '' and key == shortKey)
+end
 function Communication:HasRosterAddon(name)
     EnsurePresenceGuild(self)
-    return PresenceKey(name) == PresenceKey(PlayerName()) or self.rosterPresence[PresenceKey(name)] == true
+    local key = PresenceKey(name)
+    return IsSelfPresenceKey(key) or self.rosterPresence[key] == true
 end
 function Communication:GetRosterVersion(name)
     self:HasRosterAddon(name)
-    if PresenceKey(name) == PresenceKey(PlayerName()) then return self:GetLocalVersion() end
-    return self.rosterVersions[PresenceKey(name)]
+    local key = PresenceKey(name)
+    if IsSelfPresenceKey(key) then return self:GetLocalVersion() end
+    return self.rosterVersions[key]
 end
 function Communication:RequestRosterPresence()
     EnsurePresenceGuild(self)
@@ -712,8 +719,7 @@ function Communication:GetRosterSpec(name)
     EnsurePresenceGuild(self)
     local key = PresenceKey(name)
     if key == '' then return nil end
-    local fullKey, shortKey = PresenceKey(FullPlayerName()), PresenceKey(PlayerName())
-    if (fullKey ~= '' and key == fullKey) or (shortKey ~= '' and key == shortKey) then
+    if IsSelfPresenceKey(key) then
         local state, spec = self:GetLocalTreeSpec()
         if state ~= 'active' then return nil end
         spec.receivedAt = GetTime()

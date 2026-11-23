@@ -2068,11 +2068,12 @@ local function createWindow(parent)
     f.createButton = button(f, T('Створити'), 550, -455, 150, function()
         local titleText = (f.titleBox:GetText() or ''):match('^%s*(.-)%s*$')
         local maxPlayers = category == 'dungeon' and '5' or f.maxBox:GetText()
-        local ok, err = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
+        local ok, result = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then
+            local createdId = type(result) == 'string' and result ~= '' and result or nil
             if type(Finder.SyncPartyNow) == 'function' then Finder:SyncPartyNow() end
             if f.announceGuildEnabled then
-                local createdGroup = Finder.identity and err and Finder.groups and Finder.groups[Finder.identity .. '\001' .. err]
+                local createdGroup = type(Finder.identity) == 'string' and Finder.identity ~= '' and createdId and type(Finder.groups) == 'table' and Finder.groups[Finder.identity .. '\001' .. createdId]
                 local currentCount = (type(createdGroup) == 'table' and type(createdGroup.members) == 'table' and #createdGroup.members) or 1
                 if type(IsInGroup) == 'function' and IsInGroup() and type(GetNumGroupMembers) == 'function' then
                     local okCount, partyCount = pcall(GetNumGroupMembers)
@@ -2084,7 +2085,7 @@ local function createWindow(parent)
                 announceGroupInGuildChat(activityName, currentCount, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText(), createdGroup)
             end
             Finder:Changed(); tab='mine'; refresh()
-        else chatError(createErrorMessage(err, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
+        else chatError(createErrorMessage(result, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
     end, nil, 'primary')
     f.advancedCreation=false
     local colors = OldKraken.UIStyle.Colors or {}
