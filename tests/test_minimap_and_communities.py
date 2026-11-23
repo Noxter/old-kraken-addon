@@ -29,6 +29,7 @@ def run_minimap_env(preloaded_communities=False, use_c_addons=True, show_minimap
             function f:SetSize(w, h) self.w = w; self.h = h end
             function f:SetFrameStrata() end
             function f:SetFrameLevel() end
+            function f:GetFrameStrata() return 'MEDIUM' end
             function f:GetFrameLevel() return 1 end
             function f:RegisterForClicks() end
             function f:RegisterForDrag() end
@@ -52,6 +53,8 @@ def run_minimap_env(preloaded_communities=False, use_c_addons=True, show_minimap
                     SetTexture = function() end,
                     SetPoint = function() end,
                     SetSize = function() end,
+                    SetWidth = function() end,
+                    SetHeight = function() end,
                     SetVertexColor = function() end,
                     SetAllPoints = function() end,
                     SetColorTexture = function() end,

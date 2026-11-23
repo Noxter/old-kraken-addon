@@ -125,6 +125,12 @@ local function attachCommunitiesButton()
     if communitiesButton or not CommunitiesFrame then return end
     communitiesButton = CreateFrame('Button', 'OldKrakenCommunitiesButton', CommunitiesFrame)
     communitiesButton:SetSize(32, 32)
+    if type(CommunitiesFrame.GetFrameStrata) == 'function' then
+        communitiesButton:SetFrameStrata(CommunitiesFrame:GetFrameStrata() or 'MEDIUM')
+    end
+    local level = (type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetFrameLevel) == 'function' and CommunitiesFrame.GuildInfoTab:GetFrameLevel())
+        or (type(CommunitiesFrame.GetFrameLevel) == 'function' and CommunitiesFrame:GetFrameLevel()) or 1
+    communitiesButton:SetFrameLevel(level + 5)
     if type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetPoint) == 'function' then
         communitiesButton:SetPoint('TOP', CommunitiesFrame.GuildInfoTab, 'BOTTOM', 0, -16)
     else
@@ -134,7 +140,21 @@ local function attachCommunitiesButton()
     communitiesButton:EnableMouse(true)
     local bg = communitiesButton:CreateTexture(nil, 'BACKGROUND')
     bg:SetAllPoints()
-    bg:SetColorTexture(unpack(OldKraken.UIStyle.Colors.window))
+    local panelColor = OldKraken.UIStyle.Colors.panel or OldKraken.UIStyle.Colors.window
+    bg:SetColorTexture(panelColor[1], panelColor[2], panelColor[3], 0.96)
+    local edgeColor = OldKraken.UIStyle.Colors.panelEdge or OldKraken.UIStyle.Colors.brandGold
+    for _, side in ipairs({
+        {'TOPLEFT', 'TOPRIGHT', 1, true},
+        {'BOTTOMLEFT', 'BOTTOMRIGHT', 1, true},
+        {'TOPLEFT', 'BOTTOMLEFT', 1, false},
+        {'TOPRIGHT', 'BOTTOMRIGHT', 1, false},
+    }) do
+        local line = communitiesButton:CreateTexture(nil, 'BORDER')
+        line:SetPoint(side[1], communitiesButton, side[1], 0, 0)
+        line:SetPoint(side[2], communitiesButton, side[2], 0, 0)
+        if side[4] then line:SetHeight(side[3]) else line:SetWidth(side[3]) end
+        line:SetColorTexture(edgeColor[1], edgeColor[2], edgeColor[3], edgeColor[4] or 1)
+    end
     local icon = communitiesButton:CreateTexture(nil, 'ARTWORK')
     icon:SetPoint('CENTER')
     icon:SetSize(26, 26)
