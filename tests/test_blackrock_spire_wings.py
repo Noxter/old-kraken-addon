@@ -74,8 +74,18 @@ lua_full.execute('''
     function date() return '23.11 20:00' end
     StaticPopupDialogs = {}
     UIParent = {}
+    createdFrames = {}
     function CreateFrame()
-        return { RegisterEvent = function() end, SetScript = function() end, HookScript = function() end, Hide = function() end, Show = function() end }
+        local frame = {
+            scripts = {},
+            RegisterEvent = function() end,
+            SetScript = function(self, name, fn) self.scripts[name] = fn end,
+            HookScript = function() end,
+            Hide = function() end,
+            Show = function() end,
+        }
+        createdFrames[#createdFrames + 1] = frame
+        return frame
     end
 ''')
 lua_full.execute(LOCALE)
@@ -84,6 +94,10 @@ lua_full.execute(CATALOG)
 lua_full.execute((ROOT / 'GroupFinder.lua').read_text(encoding='utf-8'))
 lua_full.execute((ROOT / 'GuildEvents.lua').read_text(encoding='utf-8'))
 lua_full.execute('''
+    for _, frame in ipairs(createdFrames) do
+        if frame.scripts.OnEvent then frame.scripts.OnEvent(frame, 'PLAYER_LOGIN') end
+    end
+
     local gf = OldKraken.GroupFinder
     gf.active, gf.identity, gf.groups, gf.sequence = true, 'Leader Tester', {}, 0
     gf.requestVersions, gf.reopenFloors, gf.lastActivity = {}, {}, {}
@@ -101,7 +115,16 @@ lua_full.execute('''
     local ev = OldKraken.GuildEvents
     local evL = ev:Create('Нижній пік Чорної гори (LBRS)', 'desc', now + 3600, 'dungeon', 5, 'lbrs')
     local evU = ev:Create('Верхній пік Чорної гори (UBRS)', 'desc', now + 7200, 'dungeon', 5, 'ubrs')
-    assert(evL ~= nil and evU ~= nil, 'GuildEvents must accept both lbrs and ubrs')
+    assert(evL == true and evU == true, 'GuildEvents must accept both lbrs and ubrs')
+
+    local stored = OldKraken.DB.events.guildCalendarV1['Realm\\001Guild\\001Leader Tester']
+    assert(stored and stored.owned, 'GuildEvents storage must be initialized')
+    local seen = {}
+    for _, item in pairs(stored.owned) do
+        seen[item.activity] = item
+    end
+    assert(seen.lbrs and seen.lbrs.activity == 'lbrs', 'Saved event must have activity lbrs')
+    assert(seen.ubrs and seen.ubrs.activity == 'ubrs', 'Saved event must have activity ubrs')
 ''')
 
 print('Blackrock Spire wings checks passed')
