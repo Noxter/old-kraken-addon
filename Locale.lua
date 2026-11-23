@@ -815,6 +815,8 @@ local english = {
     ["подія"] = "event",
     ["майстерня"] = "workshop",
     ["Скинути позиції банерів"] = "Reset banner positions",
+    ["Міграцію Майстерні завершено: "] = "Workshop migration completed: ",
+    ["Немає очікуваної міграції Майстерні для поточного світу."] = "No pending Workshop migration for the current realm.",
 }
 
 local language = 'ukUA'

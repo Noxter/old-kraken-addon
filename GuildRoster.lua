@@ -1100,6 +1100,16 @@ SlashCmdList["OLDKRAKEN"] = function(message)
     elseif command == 'orders' then
         if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
         return
+    elseif command == 'workshop migrate' then
+        if OldKraken.Database and type(OldKraken.Database.ConfirmWorkshopMigration) == 'function' then
+            local ok, status = OldKraken.Database:ConfirmWorkshopMigration()
+            if ok then
+                print('|cff2ec4b6Old Kraken|r: ' .. T('Міграцію Майстерні завершено: ') .. tostring(status))
+            else
+                print('|cff2ec4b6Old Kraken|r: ' .. T('Немає очікуваної міграції Майстерні для поточного світу.'))
+            end
+        end
+        return
     elseif command == 'workshop' or command == 'craft' then
         if OldKraken.Workshop then OldKraken.Workshop:Show() end
         return

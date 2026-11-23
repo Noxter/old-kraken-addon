@@ -197,12 +197,23 @@ local function canCraft(o)
     return OldKraken.Workshop and OldKraken.Workshop:HasProfession(o.profession),true
 end
 
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm)=='function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return false end
+    return textOK(realm,1,128)
+end
+
 local function connect()
     local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
-    if not name or not textOK(guild,1,128) or type(realm)~='string' or not OldKraken.DB then
+    if not name or not textOK(guild,1,128) or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,scope,own,observed,intents,dirty,relayDirty=false,nil,nil,nil,{}, {}, {}, {}, {}
         requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
         if window then window:Hide() end; return
+    end
+    if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
+        OldKraken.Database:MigrateWorkshopScope(realm,guild,false)
     end
     local guildKey=realm..'\001'..guild
     if active and identity==name and profile==guildKey then return end

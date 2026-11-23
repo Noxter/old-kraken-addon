@@ -63,15 +63,24 @@ local function validRecord(r)
         and integer(r.profession,1,1000000) and professionNames[r.profession] and integer(r.seen,1,GetServerTime()+600)
         and safeText(r.name,1,120) and safeText(r.product,0,120)
 end
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm)=='function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    return safeText(realm,1,128)
+end
 local function connect()
     local name=myName(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
     local realm=type(GetRealmName)=='function' and GetRealmName()
-    if not name or not safeText(guild,1,128) or not usable(realm,'string') or not OldKraken.DB then
+    if not name or not safeText(guild,1,128) or not validRealm(realm) or not OldKraken.DB then
         if Recipes.CancelPicker then Recipes:CancelPicker() end
         active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts,learnWarned={},{},{}
         tabStates={}
         indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
         if frame then frame:Hide() end; return
+    end
+    if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
+        OldKraken.Database:MigrateWorkshopScope(realm,guild,false)
     end
     local k=realm..'\001'..guild
     if active and identity==name and profile==k then return end

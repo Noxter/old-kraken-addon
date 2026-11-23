@@ -120,3 +120,706 @@ function Database.Initialize()
     OldKraken.DB = db
     return db
 end
+
+local MAX_MIGRATION_CONFLICTS = 200
+
+local function ServerTime()
+    return type(GetServerTime) == "function" and GetServerTime() or 0
+end
+
+local function IsIntRange(value, low, high)
+    return type(value) == "number" and value == value and value % 1 == 0 and value >= low and value <= high
+end
+
+local function IsValidText(value, low, high)
+    if type(issecretvalue) == "function" and issecretvalue(value) then
+        return false
+    end
+    return type(value) == "string" and #value >= low and #value <= high and not value:find("[%z\1-\31\127]")
+end
+
+local function SortedKeys(tbl)
+    local keys = {}
+    if type(tbl) ~= "table" then
+        return keys
+    end
+    for k in pairs(tbl) do
+        keys[#keys + 1] = k
+    end
+    table.sort(keys, function(a, b)
+        return tostring(a) < tostring(b)
+    end)
+    return keys
+end
+
+local function CountTable(tbl)
+    local n = 0
+    if type(tbl) ~= "table" then
+        return 0
+    end
+    for _ in pairs(tbl) do
+        n = n + 1
+    end
+    return n
+end
+
+local function DeepCopy(value)
+    if type(value) ~= "table" then
+        return value
+    end
+    local copy = {}
+    for k, v in pairs(value) do
+        copy[DeepCopy(k)] = DeepCopy(v)
+    end
+    return copy
+end
+
+local function DeepEqual(a, b)
+    if a == b then
+        return true
+    end
+    if type(a) ~= "table" or type(b) ~= "table" then
+        return false
+    end
+    for k, v in pairs(a) do
+        if not DeepEqual(v, b[k]) then
+            return false
+        end
+    end
+    for k in pairs(b) do
+        if a[k] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+local function ExtractPackInt(payload, index)
+    if type(payload) ~= "string" then
+        return nil
+    end
+    local pos = 1
+    for i = 1, index do
+        local lenStr, colonPos = payload:match("^(%d+):()", pos)
+        local len = tonumber(lenStr)
+        if not len or #lenStr > 4 or pos + #lenStr + 1 + len - 1 > #payload then
+            return nil
+        end
+        local field = payload:sub(colonPos, colonPos + len - 1)
+        if i == index then
+            return tonumber(field)
+        end
+        pos = colonPos + len
+    end
+    return nil
+end
+
+local function IsEmptyDraft(draft)
+    if type(draft) ~= "table" then
+        return true
+    end
+    return (draft.item or "") == ""
+        and (draft.note or "") == ""
+        and draft.recipe == nil
+        and (draft.quantity == nil or draft.quantity == "" or draft.quantity == "1")
+        and (draft.reward == nil or draft.reward == "" or draft.reward == "0")
+        and (draft.rewardSilver == nil or draft.rewardSilver == "" or draft.rewardSilver == "0")
+        and (draft.profession == nil or draft.profession == 0)
+        and (draft.materials == nil or draft.materials == "customer")
+        and (draft.deadline == nil or draft.deadline == 86400)
+end
+
+local function FindOrderQuantity(target, source, identity, orderKey)
+    local candidates = {
+        target.orderOwners and target.orderOwners[identity] and target.orderOwners[identity][orderKey],
+        source.orderOwners and source.orderOwners[identity] and source.orderOwners[identity][orderKey],
+        target.orderObserved and target.orderObserved[orderKey],
+        source.orderObserved and source.orderObserved[orderKey],
+    }
+    for _, ord in ipairs(candidates) do
+        if type(ord) == "table" and IsIntRange(ord.quantity, 1, 200) then
+            return ord.quantity
+        end
+    end
+    return 200
+end
+
+local function IsValidTally(tally, maxItems)
+    if type(tally) ~= "table" then
+        return false
+    end
+    if tally.worker ~= nil and not IsValidText(tally.worker, 1, 128) then
+        return false
+    end
+    if not IsIntRange(tally.assignment, 0, 2147483647) then
+        return false
+    end
+    if not IsIntRange(tally.items, 0, maxItems or 200) then
+        return false
+    end
+    if not IsIntRange(tally.money, 0, 1000000000) then
+        return false
+    end
+    if type(tally.materials) ~= "table" then
+        return false
+    end
+    for itemId, cnt in pairs(tally.materials) do
+        if not IsIntRange(itemId, 1, 100000000) or not IsIntRange(cnt, 0, 10000000) then
+            return false
+        end
+    end
+    return true
+end
+
+local function RecordConflict(target, section, recordKey, canonicalVal, legacyVal)
+    local conflicts = EnsureTable(target, "migrationConflicts")
+    local conflictKey = section .. "\001" .. tostring(recordKey)
+    local existing = conflicts[conflictKey]
+    if type(existing) == "table" then
+        if not (DeepEqual(existing.canonical, canonicalVal) and DeepEqual(existing.legacy, legacyVal)) then
+            existing.canonical = DeepCopy(canonicalVal)
+            existing.legacy = DeepCopy(legacyVal)
+            existing.detectedAt = ServerTime()
+        end
+        return false
+    end
+    if CountTable(conflicts) >= MAX_MIGRATION_CONFLICTS then
+        target.migrationConflictsOverflow = true
+        return true
+    end
+    conflicts[conflictKey] = {
+        section = section,
+        key = tostring(recordKey),
+        canonical = DeepCopy(canonicalVal),
+        legacy = DeepCopy(legacyVal),
+        detectedAt = ServerTime(),
+        resolved = false,
+    }
+    return false
+end
+
+local function MergeRecords(target, source)
+    if type(source.records) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, "records")
+    local overflow = false
+    for _, owner in ipairs(SortedKeys(source.records)) do
+        local src = source.records[owner]
+        local tgt = dst[owner]
+        if tgt == nil then
+            dst[owner] = DeepCopy(src)
+        elseif type(tgt) == "table" and type(src) == "table" then
+            local sTs, tTs = tonumber(src.timestamp) or 0, tonumber(tgt.timestamp) or 0
+            local sDir = tonumber(src.directTimestamp) or (not src.relayed and sTs or 0)
+            local tDir = tonumber(tgt.directTimestamp) or (not tgt.relayed and tTs or 0)
+            local maxDir = math.max(sDir, tDir)
+            if sTs > tTs then
+                local copy = DeepCopy(src)
+                copy.directTimestamp = maxDir
+                dst[owner] = copy
+            elseif tTs > sTs then
+                tgt.directTimestamp = maxDir
+            elseif (src.relayed == true) ~= (tgt.relayed == true) then
+                if not src.relayed then
+                    local copy = DeepCopy(src)
+                    copy.directTimestamp = maxDir
+                    dst[owner] = copy
+                else
+                    tgt.directTimestamp = maxDir
+                end
+            else
+                tgt.directTimestamp = maxDir
+                if not DeepEqual(tgt.list, src.list) then
+                    if RecordConflict(target, "records", owner, tgt, src) then
+                        overflow = true
+                    end
+                end
+            end
+        elseif not DeepEqual(tgt, src) then
+            if RecordConflict(target, "records", owner, tgt, src) then
+                overflow = true
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergePackedPayloads(target, source, section, fieldIndex)
+    if type(source[section]) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, section)
+    local overflow = false
+    for _, key in ipairs(SortedKeys(source[section])) do
+        local src = source[section][key]
+        local tgt = dst[key]
+        if tgt == nil then
+            dst[key] = src
+        elseif tgt ~= src then
+            local tVer = ExtractPackInt(tgt, fieldIndex)
+            local sVer = ExtractPackInt(src, fieldIndex)
+            if sVer and tVer and sVer > tVer then
+                dst[key] = src
+            elseif not (sVer and tVer and tVer > sVer) then
+                if RecordConflict(target, section, key, tgt, src) then
+                    overflow = true
+                end
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeUnionByIdentity(target, source, section, skipTable)
+    if type(source[section]) ~= "table" then
+        return
+    end
+    local dst = EnsureTable(target, section)
+    for _, identity in ipairs(SortedKeys(source[section])) do
+        local srcSet = source[section][identity]
+        if type(srcSet) == "table" then
+            local dstSet = EnsureTable(dst, identity)
+            local skip = type(skipTable) == "table" and skipTable[identity] or nil
+            for _, itemKey in ipairs(SortedKeys(srcSet)) do
+                if srcSet[itemKey] and not (type(skip) == "table" and skip[itemKey] ~= nil) then
+                    dstSet[itemKey] = true
+                end
+            end
+        end
+    end
+end
+
+local function MergeRecipes(target, source)
+    local overflow = false
+    local ownersSeen, owners = {}, {}
+    for _, tbl in ipairs({ source.recipes, source.recipeTombstones, source.recipeSources }) do
+        if type(tbl) == "table" then
+            for owner in pairs(tbl) do
+                if not ownersSeen[owner] then
+                    ownersSeen[owner] = true
+                    owners[#owners + 1] = owner
+                end
+            end
+        end
+    end
+    table.sort(owners, function(a, b) return tostring(a) < tostring(b) end)
+    local tRecipes = EnsureTable(target, "recipes")
+    local tTombs = EnsureTable(target, "recipeTombstones")
+    local tSources = EnsureTable(target, "recipeSources")
+    for _, owner in ipairs(owners) do
+        local sLiveTbl = type(source.recipes) == "table" and source.recipes[owner] or nil
+        local sTombTbl = type(source.recipeTombstones) == "table" and source.recipeTombstones[owner] or nil
+        local sSrcTbl = type(source.recipeSources) == "table" and source.recipeSources[owner] or nil
+        local ridsSeen, rids = {}, {}
+        for _, tbl in ipairs({ sLiveTbl, sTombTbl }) do
+            if type(tbl) == "table" then
+                for rid in pairs(tbl) do
+                    if not ridsSeen[rid] then
+                        ridsSeen[rid] = true
+                        rids[#rids + 1] = rid
+                    end
+                end
+            end
+        end
+        table.sort(rids, function(a, b) return tostring(a) < tostring(b) end)
+        local dLive = EnsureTable(tRecipes, owner)
+        local dTomb = EnsureTable(tTombs, owner)
+        local dSrc = EnsureTable(tSources, owner)
+        for _, rid in ipairs(rids) do
+            local sLive = type(sLiveTbl) == "table" and sLiveTbl[rid] or nil
+            local sTomb = type(sTombTbl) == "table" and sTombTbl[rid] or nil
+            local sIsTomb = sTomb ~= nil
+            local sEntry = sIsTomb and sTomb or sLive
+            local sRelayed = type(sSrcTbl) == "table" and sSrcTbl[rid] == true or false
+
+            local tLive = dLive[rid]
+            local tTomb = dTomb[rid]
+            local tIsTomb = tTomb ~= nil
+            local tEntry = tIsTomb and tTomb or tLive
+            local tRelayed = dSrc[rid] == true
+
+            if tEntry == nil and sEntry ~= nil then
+                if sIsTomb then
+                    dTomb[rid] = DeepCopy(sEntry)
+                    dLive[rid] = nil
+                else
+                    dLive[rid] = DeepCopy(sEntry)
+                    dTomb[rid] = nil
+                end
+                dSrc[rid] = sRelayed
+            elseif sEntry ~= nil and type(tEntry) == "table" and type(sEntry) == "table" then
+                local tSeen, sSeen = tonumber(tEntry.seen) or 0, tonumber(sEntry.seen) or 0
+                local takeSource = sSeen > tSeen
+                    or (sSeen == tSeen and not sRelayed and tRelayed)
+                    or (sSeen == tSeen and sRelayed == tRelayed and sIsTomb and not tIsTomb)
+                if takeSource then
+                    if sIsTomb then
+                        dTomb[rid] = DeepCopy(sEntry)
+                        dLive[rid] = nil
+                    else
+                        dLive[rid] = DeepCopy(sEntry)
+                        dTomb[rid] = nil
+                    end
+                    dSrc[rid] = sRelayed
+                elseif sSeen == tSeen and sRelayed == tRelayed and sIsTomb == tIsTomb and not DeepEqual(tEntry, sEntry) then
+                    if RecordConflict(target, "recipes", tostring(owner) .. "\001" .. tostring(rid), tEntry, sEntry) then
+                        overflow = true
+                    end
+                end
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeMaxNumbers(target, source, section)
+    if type(source[section]) ~= "table" then
+        return
+    end
+    local dst = EnsureTable(target, section)
+    for _, key in ipairs(SortedKeys(source[section])) do
+        local srcVal = tonumber(source[section][key])
+        if srcVal then
+            local tgtVal = tonumber(dst[key]) or 0
+            if srcVal > tgtVal then
+                dst[key] = srcVal
+            end
+        end
+    end
+end
+
+local function MergeSnapshots(target, source)
+    local overflow = false
+    if type(source.recipeDirectSnapshots) == "table" then
+        local dst = EnsureTable(target, "recipeDirectSnapshots")
+        for _, owner in ipairs(SortedKeys(source.recipeDirectSnapshots)) do
+            local src, tgt = source.recipeDirectSnapshots[owner], dst[owner]
+            if tgt == nil then
+                dst[owner] = DeepCopy(src)
+            elseif type(tgt) == "table" and type(src) == "table" then
+                local tRev, sRev = tonumber(tgt.rev) or 0, tonumber(src.rev) or 0
+                if sRev > tRev then
+                    dst[owner] = DeepCopy(src)
+                elseif sRev == tRev and not DeepEqual(tgt.records, src.records) then
+                    if RecordConflict(target, "recipeDirectSnapshots", owner, tgt, src) then
+                        overflow = true
+                    end
+                end
+            end
+        end
+    end
+    if type(source.recipeSnapshotViews) == "table" then
+        local dst = EnsureTable(target, "recipeSnapshotViews")
+        local directDst = EnsureTable(target, "recipeDirectSnapshots")
+        for _, owner in ipairs(SortedKeys(source.recipeSnapshotViews)) do
+            local src, tgt = source.recipeSnapshotViews[owner], dst[owner]
+            if tgt == nil then
+                dst[owner] = DeepCopy(src)
+            elseif type(tgt) == "table" and type(src) == "table" then
+                local tRev, sRev = tonumber(tgt.rev) or 0, tonumber(src.rev) or 0
+                if sRev > tRev then
+                    local maxDir = math.max(tonumber(tgt.directRev) or 0, tonumber(src.directRev) or 0)
+                    local copy = DeepCopy(src)
+                    copy.directRev = (copy.relayed == false) and sRev or math.min(sRev, maxDir)
+                    dst[owner] = copy
+                elseif sRev == tRev then
+                    local isDirect = (tgt.relayed == false) or (src.relayed == false)
+                    local maxDir = math.max(tonumber(tgt.directRev) or 0, tonumber(src.directRev) or 0)
+                    dst[owner] = {
+                        rev = tRev,
+                        directRev = isDirect and tRev or math.min(tRev, maxDir),
+                        relayed = not isDirect,
+                    }
+                end
+            end
+            local view = dst[owner]
+            local direct = directDst[owner]
+            if type(view) == "table" and view.relayed == true and type(direct) == "table" and (tonumber(direct.rev) or 0) < (tonumber(view.rev) or 0) then
+                directDst[owner] = nil
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeOrderOwners(target, source)
+    if type(source.orderOwners) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, "orderOwners")
+    local overflow = false
+    for _, identity in ipairs(SortedKeys(source.orderOwners)) do
+        local srcOrders = source.orderOwners[identity]
+        if type(srcOrders) == "table" then
+            local dstOrders = EnsureTable(dst, identity)
+            for _, orderKey in ipairs(SortedKeys(srcOrders)) do
+                local src, tgt = srcOrders[orderKey], dstOrders[orderKey]
+                if tgt == nil then
+                    dstOrders[orderKey] = DeepCopy(src)
+                elseif type(tgt) == "table" and type(src) == "table" then
+                    local tRev, sRev = tonumber(tgt.rev) or 0, tonumber(src.rev) or 0
+                    if sRev > tRev then
+                        dstOrders[orderKey] = DeepCopy(src)
+                    elseif sRev == tRev and not DeepEqual(tgt, src) then
+                        if RecordConflict(target, "orderOwners", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
+                            overflow = true
+                        end
+                    end
+                elseif not DeepEqual(tgt, src) then
+                    if RecordConflict(target, "orderOwners", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
+                        overflow = true
+                    end
+                end
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeOrderObserved(target, source)
+    if type(source.orderObserved) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, "orderObserved")
+    local overflow = false
+    for _, orderKey in ipairs(SortedKeys(source.orderObserved)) do
+        local src, tgt = source.orderObserved[orderKey], dst[orderKey]
+        if tgt == nil then
+            dst[orderKey] = DeepCopy(src)
+        elseif type(tgt) == "table" and type(src) == "table" then
+            local tOwnerRev = tonumber(tgt.ownerRev) or (not tgt.relayed and tonumber(tgt.rev) or 0)
+            local sOwnerRev = tonumber(src.ownerRev) or (not src.relayed and tonumber(src.rev) or 0)
+            local tRev, sRev = tonumber(tgt.rev) or 0, tonumber(src.rev) or 0
+            local takeSource = sOwnerRev > tOwnerRev
+                or (sOwnerRev == tOwnerRev and sRev > tRev)
+                or (sOwnerRev == tOwnerRev and sRev == tRev and not src.relayed and tgt.relayed == true)
+            if takeSource then
+                dst[orderKey] = DeepCopy(src)
+            elseif sOwnerRev == tOwnerRev and sRev == tRev and (src.relayed == true) == (tgt.relayed == true) and not DeepEqual(tgt, src) then
+                if RecordConflict(target, "orderObserved", orderKey, tgt, src) then
+                    overflow = true
+                end
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeVersionedByIdentity(target, source, section)
+    if type(source[section]) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, section)
+    local overflow = false
+    for _, identity in ipairs(SortedKeys(source[section])) do
+        local srcMap = source[section][identity]
+        if type(srcMap) == "table" then
+            local dstMap = EnsureTable(dst, identity)
+            for _, key in ipairs(SortedKeys(srcMap)) do
+                local src, tgt = srcMap[key], dstMap[key]
+                if tgt == nil then
+                    dstMap[key] = DeepCopy(src)
+                elseif type(tgt) == "table" and type(src) == "table" then
+                    local tVer, sVer = tonumber(tgt.version) or 0, tonumber(src.version) or 0
+                    if sVer > tVer then
+                        dstMap[key] = DeepCopy(src)
+                    elseif sVer == tVer and not DeepEqual(tgt, src) then
+                        if RecordConflict(target, section, tostring(identity) .. "\001" .. tostring(key), tgt, src) then
+                            overflow = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeOrderResults(target, source, section)
+    if type(source[section]) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, section)
+    local overflow = false
+    for _, key in ipairs(SortedKeys(source[section])) do
+        local src, tgt = source[section][key], dst[key]
+        if tgt == nil then
+            dst[key] = DeepCopy(src)
+        elseif type(tgt) == "table" and type(src) == "table" then
+            local tVer, sVer = tonumber(tgt.version) or 0, tonumber(src.version) or 0
+            if sVer > tVer then
+                dst[key] = DeepCopy(src)
+            elseif sVer == tVer and not DeepEqual(tgt, src) then
+                if RecordConflict(target, section, key, tgt, src) then
+                    overflow = true
+                end
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeDeliveryTallies(target, source)
+    if type(source.orderDeliveryTallies) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, "orderDeliveryTallies")
+    local overflow = false
+    for _, identity in ipairs(SortedKeys(source.orderDeliveryTallies)) do
+        local srcMap = source.orderDeliveryTallies[identity]
+        if type(srcMap) == "table" then
+            local dstMap = EnsureTable(dst, identity)
+            for _, orderKey in ipairs(SortedKeys(srcMap)) do
+                local maxItems = FindOrderQuantity(target, source, identity, orderKey)
+                local src, tgt = srcMap[orderKey], dstMap[orderKey]
+                local srcValid = IsValidTally(src, maxItems)
+                local tgtValid = IsValidTally(tgt, maxItems)
+                if not srcValid then
+                    if src ~= nil then
+                        if RecordConflict(target, "orderDeliveryTallies", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
+                            overflow = true
+                        end
+                    end
+                elseif not tgtValid then
+                    dstMap[orderKey] = DeepCopy(src)
+                elseif not DeepEqual(tgt, src) then
+                    if RecordConflict(target, "orderDeliveryTallies", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
+                        overflow = true
+                    end
+                    if src.assignment > tgt.assignment then
+                        dstMap[orderKey] = DeepCopy(src)
+                    elseif src.assignment == tgt.assignment and src.worker == tgt.worker then
+                        local mergedMats = {}
+                        for itemId, cnt in pairs(tgt.materials) do
+                            mergedMats[itemId] = cnt
+                        end
+                        for itemId, cnt in pairs(src.materials) do
+                            mergedMats[itemId] = math.max(mergedMats[itemId] or 0, cnt)
+                        end
+                        dstMap[orderKey] = {
+                            worker = tgt.worker,
+                            assignment = tgt.assignment,
+                            materials = mergedMats,
+                            items = math.max(tgt.items, src.items),
+                            money = math.max(tgt.money, src.money),
+                        }
+                    end
+                end
+            end
+        end
+    end
+    return overflow
+end
+
+local function MergeOrderDrafts(target, source)
+    if type(source.orderDrafts) ~= "table" then
+        return false
+    end
+    local dst = EnsureTable(target, "orderDrafts")
+    local overflow = false
+    for _, identity in ipairs(SortedKeys(source.orderDrafts)) do
+        local src, tgt = source.orderDrafts[identity], dst[identity]
+        local srcEmpty, tgtEmpty = IsEmptyDraft(src), IsEmptyDraft(tgt)
+        if tgtEmpty and not srcEmpty then
+            dst[identity] = DeepCopy(src)
+        elseif not tgtEmpty and not srcEmpty and not DeepEqual(tgt, src) then
+            if RecordConflict(target, "orderDrafts", identity, tgt, src) then
+                overflow = true
+            end
+        end
+    end
+    return overflow
+end
+
+function Database.IsValidRealm(selfOrRealm, maybeRealm)
+    local realm = selfOrRealm == Database and maybeRealm or selfOrRealm
+    return IsValidText(realm, 1, 128)
+end
+
+function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirmed, maybeConfirmed)
+    local realm, guild, confirmed
+    if selfOrRealm == Database then
+        realm, guild, confirmed = realmOrGuild, guildOrConfirmed, maybeConfirmed
+    else
+        realm, guild, confirmed = selfOrRealm, realmOrGuild, guildOrConfirmed
+    end
+    if not IsValidText(realm, 1, 128) or not IsValidText(guild, 1, 128) then
+        return false, "invalid"
+    end
+    local db = OldKraken.DB
+    if type(db) ~= "table" or type(db.workshop) ~= "table" or type(db.workshop.guilds) ~= "table" then
+        return false, "none"
+    end
+    local legacyKey = "\001" .. guild
+    local source = db.workshop.guilds[legacyKey]
+    if type(source) ~= "table" then
+        return false, "none"
+    end
+
+    local canonicalKey = realm .. "\001" .. guild
+    local migrations = EnsureTable(db.workshop, "legacyMigrations")
+    local meta = EnsureTable(migrations, legacyKey)
+    local statusMap = EnsureTable(meta, "status")
+    local pendingMap = EnsureTable(meta, "pendingConfirmation")
+    local inProgressMap = EnsureTable(meta, "inProgress")
+
+    local status = statusMap[canonicalKey]
+    if status == "completed" or status == "completedWithOverflow" then
+        pendingMap[canonicalKey] = nil
+        return true, status
+    end
+
+    if confirmed ~= true then
+        pendingMap[canonicalKey] = true
+        return false, "pending"
+    end
+
+    pendingMap[canonicalKey] = nil
+    inProgressMap[canonicalKey] = true
+
+    local target = EnsureTable(db.workshop.guilds, canonicalKey)
+    local overflow = false
+    if MergeRecords(target, source) then overflow = true end
+    if MergePackedPayloads(target, source, "professionRelays", 1) then overflow = true end
+    MergeUnionByIdentity(target, source, "pendingProfessionRemovals")
+    if MergeRecipes(target, source) then overflow = true end
+    MergeMaxNumbers(target, source, "recipeVersions")
+    MergeMaxNumbers(target, source, "recipeVersionSeen")
+    MergeUnionByIdentity(target, source, "pendingRecipes", target.recipes)
+    if MergeSnapshots(target, source) then overflow = true end
+    if MergeOrderOwners(target, source) then overflow = true end
+    if MergeOrderObserved(target, source) then overflow = true end
+    if MergeVersionedByIdentity(target, source, "orderIntents") then overflow = true end
+    MergeMaxNumbers(target, source, "orderSequences")
+    if MergePackedPayloads(target, source, "orderRelays", 3) then overflow = true end
+    if MergeOrderResults(target, source, "orderResults") then overflow = true end
+    if MergeOrderResults(target, source, "orderResultRelays") then overflow = true end
+    if MergeDeliveryTallies(target, source) then overflow = true end
+    if MergeOrderDrafts(target, source) then overflow = true end
+
+    inProgressMap[canonicalKey] = nil
+    if overflow or target.migrationConflictsOverflow then
+        statusMap[canonicalKey] = "completedWithOverflow"
+    else
+        statusMap[canonicalKey] = "completed"
+    end
+    return true, statusMap[canonicalKey]
+end
+
+function Database.ConfirmWorkshopMigration()
+    local realm = type(GetRealmName) == "function" and GetRealmName() or nil
+    local guild = type(GetGuildInfo) == "function" and GetGuildInfo("player") or nil
+    if not IsValidText(realm, 1, 128) or not IsValidText(guild, 1, 128) then
+        return false, "invalid"
+    end
+    local db = OldKraken.DB
+    local legacyKey = "\001" .. guild
+    local canonicalKey = realm .. "\001" .. guild
+    local migrations = type(db) == "table" and type(db.workshop) == "table" and db.workshop.legacyMigrations
+    local meta = type(migrations) == "table" and migrations[legacyKey]
+    if type(meta) ~= "table" or type(meta.pendingConfirmation) ~= "table" or not meta.pendingConfirmation[canonicalKey] then
+        return false, "none"
+    end
+    return Database.MigrateWorkshopScope(realm, guild, true)
+end

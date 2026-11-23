@@ -12,10 +12,20 @@ local function player()
     if type(b)=='string' and b~='' then a=a..' '..b end
     return text(a,128) and a or nil
 end
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm)=='function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return false end
+    return text(realm,128)
+end
 local function connect()
     local name=player(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
-    if not name or not text(guild,128) or type(realm)~='string' or not OldKraken.DB then
+    if not name or not text(guild,128) or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,store=false,nil,nil,nil; indices,jobs,incoming,lastRequest={}, {}, {}, {}; return
+    end
+    if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
+        OldKraken.Database:MigrateWorkshopScope(realm,guild,false)
     end
     local key=realm..'\001'..guild
     if active and identity==name and profile==key then return end

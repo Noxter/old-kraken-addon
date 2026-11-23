@@ -147,14 +147,24 @@ comm:RegisterHandler('WKQUERY',function(sender,_,payload)
     for owner in pairs(store.professionRelays) do professionRelayDirty[owner]=true end
 end)
 
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm)=='function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    return usable(realm,'string') and #realm>=1 and #realm<=128 and not realm:find('[%z\1-\31\127]')
+end
+
 local function connect()
     local name=fullName()
     local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
     local realm=type(GetRealmName)=='function' and GetRealmName() or nil
-    if not name or not usable(guild,'string') or guild=='' or #guild>128 or not usable(realm,'string') or not OldKraken.DB then
+    if not name or not usable(guild,'string') or guild=='' or #guild>128 or guild:find('[%z\1-\31\127]') or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,store,records,nativeProfessions=false,nil,nil,nil,{},{}
         if frame then frame:Hide() end
         return
+    end
+    if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
+        OldKraken.Database:MigrateWorkshopScope(realm,guild,false)
     end
     local key=realm..'\001'..guild
     if active and profile==key and identity==name then return end
