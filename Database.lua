@@ -124,6 +124,7 @@ end
 
 local MAX_MIGRATION_CONFLICTS = 200
 local migrationNotices = {}
+local migrationPopups, migrationPopupAttempts = {}, {}
 
 local function ServerTime()
     return type(GetServerTime) == "function" and GetServerTime() or 0
@@ -808,6 +809,59 @@ function Database.IsValidWorkshopTally(tally, quantity)
     return IsValidTally(tally, quantity)
 end
 
+local function MigrationMessage(text)
+    if type(OldKraken.Translate)=='function' then text=OldKraken.Translate(text) end
+    if type(OldKraken.Print)=='function' then pcall(OldKraken.Print,OldKraken,text) end
+end
+
+local function ReportWorkshopMigration(status)
+    MigrationMessage('Старі дані Майстерні перенесено; початкову копію збережено.')
+    if type(Database.WorkshopMigrationConflicts)=='function' then
+        local count=Database.WorkshopMigrationConflicts()
+        if count>0 and type(OldKraken.Print)=='function' then
+            local T=type(OldKraken.Translate)=='function' and OldKraken.Translate or function(text) return text end
+            pcall(OldKraken.Print,OldKraken,T('Збережено розбіжностей: ')..count..T('. Переглянути: /okr workshop conflicts'))
+        end
+    end
+    if status=='completedWithOverflow' then
+        MigrationMessage('Не всі розбіжності вмістилися у сховище; старі дані збережено.')
+    end
+end
+
+local function OfferWorkshopMigration(realm,guild,profile)
+    if migrationPopups[profile] then return true end
+    if type(StaticPopupDialogs)~='table' or type(StaticPopup_Show)~='function' then return false end
+    local now=type(GetTime)=='function' and GetTime() or 0
+    if migrationPopupAttempts[profile] and now-migrationPopupAttempts[profile]<5 then return false end
+    migrationPopupAttempts[profile]=now
+    local T=type(OldKraken.Translate)=='function' and OldKraken.Translate or function(text) return text end
+    StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION={
+        text=T('Знайдено старі дані Майстерні без назви світу. Чи належать вони гільдії «%s» у світі або області «%s»? Старі дані буде збережено.'),
+        button1=T('Перенести'), button2=T('Пізніше'), timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+        OnAccept=function(_,data)
+            if type(data)~='table' then return end
+            migrationPopups[data.profile]=nil
+            local currentRealm=Database.GetRealmScope()
+            local currentGuild=type(GetGuildInfo)=='function' and GetGuildInfo('player') or nil
+            if not IsValidText(currentGuild,1,128) or currentRealm~=data.realm or currentGuild~=data.guild then
+                MigrationMessage('Світ або гільдія змінилися. Старі дані не перенесено.')
+                return
+            end
+            local ok,status=Database.ConfirmWorkshopMigration()
+            if ok then
+                ReportWorkshopMigration(status)
+            elseif status=='unavailable' then
+                MigrationMessage('Майстерня ще завантажується; перенесення продовжиться автоматично.')
+            else
+                MigrationMessage('Не вдалося перенести старі дані Майстерні; їх збережено без змін.')
+            end
+        end,
+    }
+    local ok,popup=pcall(StaticPopup_Show,'OLDKRAKEN_WORKSHOP_MIGRATION',guild,realm,{realm=realm,guild=guild,profile=profile})
+    if ok and popup then migrationPopups[profile]=true; return true end
+    return false
+end
+
 function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirmed, maybeConfirmed)
     local realm, guild, confirmed
     if selfOrRealm == Database then
@@ -845,10 +899,19 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
     -- agreed to this exact realm and guild. Otherwise confirmation is valid only for a
     -- canonical key that was previously offered through pendingConfirmation.
     local resume = inProgressMap[canonicalKey] == true
+    local autoApproved = false
     if not resume then
+        -- Only a realm explicitly approved for this legacy scope may be resumed
+        -- without another question; the legacy key itself contains no realm.
+        if confirmed ~= true and meta.confirmedDestination == canonicalKey then
+            confirmed = true
+            autoApproved = true
+            pendingMap[canonicalKey] = true
+        end
         if confirmed ~= true then
             pendingMap[canonicalKey] = true
-            if not migrationNotices[canonicalKey] and type(OldKraken.Print) == 'function' then
+            local offered=OfferWorkshopMigration(realm,guild,canonicalKey)
+            if not offered and not migrationNotices[canonicalKey] and type(OldKraken.Print) == 'function' then
                 local text = 'Знайдено старі дані Майстерні без назви світу. Перевірте світ і гільдію та введіть /okr workshop migrate для перенесення.'
                 if type(OldKraken.Translate) == 'function' then text = OldKraken.Translate(text) end
                 pcall(OldKraken.Print, OldKraken, text)
@@ -859,6 +922,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
         if pendingMap[canonicalKey] ~= true then
             return false, "unconfirmed"
         end
+        meta.confirmedDestination = canonicalKey
     end
 
     if (type(source.orderOwners) == 'table' and next(source.orderOwners))
@@ -898,6 +962,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
         statusMap[canonicalKey] = "completed"
     end
     if type(OldKraken.Fire) == 'function' then OldKraken:Fire('WORKSHOP_SCOPE_MIGRATED', canonicalKey) end
+    if autoApproved then ReportWorkshopMigration(statusMap[canonicalKey]) end
     return true, statusMap[canonicalKey]
 end
 

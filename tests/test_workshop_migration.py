@@ -497,7 +497,8 @@ local ok,status=OldKraken.Database:ConfirmWorkshopMigration()
 assert(not ok and status=='unavailable')
 assert(not OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'])
 OldKraken.WorkshopOrders.NormalizeMigrationOrder=normalize
-assert(OldKraken.Database:ConfirmWorkshopMigration())
+local resumed,resumeStatus=OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false)
+assert(resumed and resumeStatus=='completed', 'approved migration must resume automatically when validation becomes available')
 ''')
 
 # 15. A tally may precede its order; periodic cleanup must not discard it.
@@ -564,6 +565,90 @@ lua_forever.execute('''
     assert(fScope.records['Alice Tester'] ~= nil and fScope.recipes['Alice Tester'][171][2329] == 1,
         'confirmed migration must copy legacy data into Forever\\001Kraken')
     assert(guilds['\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy source must be preserved')
+''')
+
+# A realm-less scope prompts once; acceptance transfers without a slash command.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+messages={}; function OldKraken:Print(msg) messages[#messages+1]=msg end
+popupCount=0
+function StaticPopup_Show(name,guild,realm,data)
+    assert(name=='OLDKRAKEN_WORKSHOP_MIGRATION')
+    popupCount=popupCount+1; popupGuild=guild; popupRealm=realm; popupData=data
+    return {}
+end
+OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
+''')
+trigger_connect(lua)
+lua.execute('''
+assert(popupCount==1 and popupGuild=='Kraken' and popupRealm=='Evermoon')
+assert(not OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'])
+''')
+trigger_connect(lua)
+lua.execute('''
+assert(popupCount==1, 'one prompt per scope until the user decides')
+StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+local g=OldKraken.DB.workshop.guilds
+assert(g['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
+assert(g['\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
+assert(OldKraken.DB.workshop.legacyMigrations['\\001Kraken'].confirmedDestination=='Evermoon\\001Kraken')
+''')
+lua.globals()._realm = 'Frostmourne'
+trigger_connect(lua)
+lua.execute('''
+assert(popupCount==2 and popupRealm=='Frostmourne')
+assert(not OldKraken.DB.workshop.guilds['Frostmourne\\001Kraken'].orderDrafts['Alice Tester'])
+''')
+
+# A stale dialog cannot transfer into another realm after a scope change.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+function StaticPopup_Show(_,_,_,data) popupData=data; return {} end
+messages={}; function OldKraken:Print(msg) messages[#messages+1]=msg end
+OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
+''')
+trigger_connect(lua)
+lua.globals()._realm = 'Frostmourne'
+lua.execute('''
+StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+assert(not OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'])
+assert(not OldKraken.DB.workshop.guilds['Frostmourne\\001Kraken'])
+assert(messages[#messages]:find('не перенесено',1,true))
+''')
+
+# A destination explicitly approved earlier resumes automatically.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+popupCount=0; function StaticPopup_Show() popupCount=popupCount+1; return {} end
+OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
+OldKraken.DB.workshop.legacyMigrations={['\\001Kraken']={confirmedDestination='Evermoon\\001Kraken'}}
+''')
+trigger_connect(lua)
+lua.execute('''
+assert(popupCount==0)
+assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
+assert(OldKraken.DB.workshop.guilds['\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
+assert(OldKraken.DB.workshop.legacyMigrations['\\001Kraken'].status['Evermoon\\001Kraken']=='completed')
+''')
+
+# A temporarily unavailable popup is retried without repeatedly printing notices.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+messages={}; function OldKraken:Print(msg) messages[#messages+1]=msg end
+popupCount=0; ready=false
+function StaticPopup_Show(_,_,_,data)
+    popupCount=popupCount+1; popupData=data
+    if ready then return {} end
+end
+OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
+''')
+trigger_connect(lua)
+lua.execute('assert(popupCount==1 and #messages==1); clock=clock+6; ready=true')
+trigger_connect(lua)
+lua.execute('''
+assert(popupCount==2 and #messages==1)
+StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
 ''')
 
 print('Workshop migration checks passed')
