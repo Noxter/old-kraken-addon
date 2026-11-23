@@ -830,6 +830,20 @@ local english = {
     ["[Майстерня]"] = "[Workshop]",
     ["Кнопка на мінімапі"] = "Minimap button",
     ["Підказка: відкривайте Old Kraken командою /okr або кнопкою у вікні гільдії."] = "Tip: open Old Kraken with /okr or via the button in the guild window.",
+    ["Відкрити профіль"] = "Open profile",
+    ["‹ Назад до ростера"] = "‹ Back to roster",
+    ["В мережі"] = "Online",
+    ["Спеціалізація"] = "Specialization",
+    ["Розподіл очок: "] = "Talent split: ",
+    ["Дані спеціалізації відсутні."] = "Specialization data unavailable.",
+    ["Дані про професії недоступні."] = "Profession data unavailable.",
+    ["Професії ще не зафіксовані."] = "No professions recorded yet.",
+    ["Із ігрового ростера"] = "From guild roster",
+    ["Переглянути рецепти"] = "View recipes",
+    ["Створити замовлення"] = "Create order",
+    ["Рівень %d"] = "Level %d",
+    ["Аддон: "] = "Addon: ",
+    ["Не виявлено"] = "Not detected",
 }
 
 local language = 'ukUA'

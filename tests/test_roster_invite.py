@@ -30,21 +30,21 @@ OldKraken.GuildRoster:Load()
 local rows={}
 for _, frame in ipairs(createdFrames) do
     assert(frame.text~='Інвайт')
-    if type(frame.member)=='table' then rows[frame.member.name]=frame end
+    if type(frame.member)=='table' and frame.professions then rows[frame.member.name]=frame end
 end
 local row=assert(rows['Online Member'])
 assert(row.onlineDot.texture:find('StatusOnline.tga',1,true))
 assert(rows['Offline Member'].onlineDot.texture:find('StatusOffline.tga',1,true))
 for _,frame in ipairs(createdFrames) do assert(frame.text~='СТАТУС') end
-row.scripts.OnClick(row,'LeftButton')
-assert(#menuItems==4 and not menuItems[2].disabled)
-menuItems[2].func(); assert(inviteCalls[1]=='Online Member')
-menuItems[3].func(); assert(whispered=='Online Member')
-menuItems[4].func(); assert(OldKrakenCopyNameFrame.edit.text=='Online Member')
-row.scripts.OnClick(row,'RightButton'); assert(#menuItems==4)
+row.scripts.OnClick(row,'RightButton')
+assert(#menuItems==5 and menuItems[2].text=='Відкрити профіль' and not menuItems[3].disabled)
+menuItems[3].func(); assert(inviteCalls[1]=='Online Member')
+menuItems[4].func(); assert(whispered=='Online Member')
+menuItems[5].func(); assert(OldKrakenCopyNameFrame.edit.text=='Online Member')
+row.scripts.OnClick(row,'RightButton'); assert(#menuItems==5)
 row.cellHovers[2].scripts.OnEnter(row.cellHovers[2]); assert(tooltipText=='Member')
 local offline=assert(rows['Offline Member'])
-offline.cellHovers[1].scripts.OnClick(); assert(menuItems[2].disabled and menuItems[3].disabled and not menuItems[4].disabled)
+offline.cellHovers[1].scripts.OnClick(); assert(menuItems[3].disabled and menuItems[4].disabled and not menuItems[5].disabled)
 for _,frame in ipairs(createdFrames) do assert(frame.text~='Учасники' and frame.text~='Аддон') end
 assert(row.cells[7].shown and row.cellHovers[7].shown)
 assert(row.addonDot.texture:find('StatusOnline.tga',1,true) and offline.addonDot.texture:find('StatusOffline.tga',1,true))
