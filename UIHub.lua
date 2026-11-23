@@ -338,8 +338,12 @@ function Hub:ShowUpdateLink(newest)
         closeBtn:SetPoint('TOPRIGHT', box, 'TOPRIGHT', -8, -8)
         closeBtn:SetScript('OnClick', function() box:Hide() end)
 
-        local input = OldKraken.UIStyle.Input(box, 406, 26)
+        local input = CreateFrame('EditBox', nil, box, 'InputBoxTemplate')
+        OldKraken.UIStyle.Input(input)
+        input:SetSize(406, 26)
         input:SetPoint('TOPLEFT', box, 'TOPLEFT', 12, -36)
+        input:SetAutoFocus(false)
+        if type(input.SetTextInsets) == 'function' then input:SetTextInsets(8, 8, 0, 0) end
         input:SetScript('OnEscapePressed', function() box:Hide() end)
         box.input = input
 

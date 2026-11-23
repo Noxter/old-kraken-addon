@@ -30,10 +30,8 @@ def make_runtime(local_version='0.5.4'):
                 Window = function() end,
                 Panel = function() end,
                 Button = function(b, text) if text and b.SetText then b:SetText(text) end end,
-                Input = function(parent, w, h)
-                    local box = CreateFrame('EditBox', nil, parent)
-                    box:SetSize(w, h)
-                    return box
+                Input = function(editBox, options)
+                    assert(type(editBox) == 'table' and (options == nil or type(options) == 'table'), 'UIStyle.Input expects (editBox, options)')
                 end,
                 EmblemPath = function() return 'Interface\\\\AddOns\\\\OldKraken\\\\Media\\\\OldKrakenEmblem.tga' end,
                 ApplySelection = function() end,
