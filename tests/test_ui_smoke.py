@@ -332,7 +332,7 @@ ui.titleBox:SetText('Рейд на Оніксію')
 ui.descriptionBox:SetText(string.rep('Привіт ', 35))
 ui.createButton.scripts.OnClick()
 assert(type(sentGuildChat) == 'string' and #sentGuildChat <= 255, 'guild chat announce exceeded 255 bytes: ' .. tostring(sentGuildChat and #sentGuildChat))
-assert(sentGuildChat:find('^{rt8} LFG ') and sentGuildChat:find('потрібні: ', 1, true) and sentGuildChat:find(' »»» Old Kraken · Групи {rt8}$', 1, false), 'unexpected guild chat format: ' .. tostring(sentGuildChat))
+assert(sentGuildChat:find('^LFG ') and sentGuildChat:find('потрібні: ', 1, true) and sentGuildChat:find(' — Old Kraken$', 1, false), 'unexpected guild chat format: ' .. tostring(sentGuildChat))
 sentGuildChat = nil
 function IsInGroup() return true end
 function GetNumGroupMembers() return 2 end
@@ -341,7 +341,7 @@ selectActivityCard('sfk')
 ui.titleBox:SetText('SFK party')
 ui.descriptionBox:SetText('')
 ui.createButton.scripts.OnClick()
-assert(type(sentGuildChat) == 'string' and sentGuildChat:find('^{rt8} LFG SFK party · lvl 22–30 · потрібні: Танк, Лікар, DPS »»» Old Kraken · Групи {rt8}$'), 'unexpected guild chat announce: ' .. tostring(sentGuildChat))
+assert(type(sentGuildChat) == 'string' and sentGuildChat:find('^LFG SFK party · lvl 22–30 · потрібні: Танк, Лікар, DPS — Old Kraken$'), 'unexpected guild chat announce: ' .. tostring(sentGuildChat))
 IsInGroup = nil
 GetNumGroupMembers = nil
 

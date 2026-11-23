@@ -2018,8 +2018,8 @@ local function createWindow(parent)
             end
         end
         local cleanActivity = tostring(activityName or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
-        local prefix = '{rt8} LFG ' .. cleanActivity .. (#metaParts > 0 and (' · ' .. table.concat(metaParts, ' · ')) or '')
-        local suffix = T(' »»» Old Kraken · Групи') .. ' {rt8}'
+        local prefix = 'LFG ' .. cleanActivity .. (#metaParts > 0 and (' · ' .. table.concat(metaParts, ' · ')) or '')
+        local suffix = ' — Old Kraken'
         local note = ((descText or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')):match('^%s*(.-)%s*$')
         local maxBytes = 255
         if #prefix + #suffix > maxBytes then

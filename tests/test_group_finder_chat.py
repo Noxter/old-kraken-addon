@@ -10,6 +10,12 @@ def client(registration):
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute('''
     registered=0
+    shown=0
+    OldKraken={GroupFinder={Show=function() shown=shown+1 end}}
+    function SetItemRef() end
+    function hooksecurefunc(name, fn)
+        assert(name=='SetItemRef'); linkHook=fn
+    end
     function addFilter(event, callback)
         assert(event=='CHAT_MSG_GUILD'); registered=registered+1; filter=callback
     end
@@ -31,6 +37,7 @@ for registration in (
     lua.execute('''
     assert(registered==1); login(); assert(registered==1)
     local examples={
+        'LFG Фортеця Темного Ікла (SFK) · lvl 22–30 · потрібні: Танк, Лікар — Old Kraken',
         '{rt8} LFG Печери · lvl 20–30 »»» Old Kraken · Групи {rt8}',
         '|TInterface/TargetingFrame/UI-RaidTargetingIcon_8:0|t LFG Raid »»» Old Kraken · Groups',
         '[Old Kraken] Збір групи: Назва (1/5) — запис у вкладці «Групи» (/okr).',
@@ -38,9 +45,13 @@ for registration in (
     }
     for _,msg in ipairs(examples) do
         local hide,changed,sender,language,channel,flag=filter(nil,'CHAT_MSG_GUILD',msg,'Alice','Ukrainian',nil,7)
-        assert(hide==false and changed=='|cffffd34d'..msg..'|r')
+        assert(hide==false and type(changed)=='string' and changed:find('|Holdkraken:groups|h',1,true) and changed:find('|cffe0b052',1,true))
         assert(sender=='Alice' and language=='Ukrainian' and channel==nil and flag==7)
     end
+    local _, sfkFormatted = filter(nil,'CHAT_MSG_GUILD',examples[1],'Alice','Ukrainian',nil,7)
+    assert(sfkFormatted == '|cffe0b052LFG Фортеця Темного Ікла (SFK)|r|cff9aa4b2 · |r|cff9aa4b2lvl 22–30|r|cff9aa4b2 · |r|cfff3ebd3потрібні: Танк, Лікар|r |cff2ec4b6|Holdkraken:groups|h[Відкрити групи]|h|r')
+    linkHook('oldkraken:groups'); assert(shown==1)
+    linkHook('item:12345'); assert(shown==1)
     local unrelated={
         'Привіт, гільдіє!',
         'LFG Печери',

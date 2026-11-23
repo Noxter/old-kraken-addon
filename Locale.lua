@@ -316,6 +316,7 @@ local english = {
     ["потрібні: "] = "Need: ",
     ["вільно: %d"] = "open: %d",
     [" »»» Old Kraken · Групи"] = " »»» Old Kraken · Groups",
+    ["[Відкрити групи]"] = "[Open Groups]",
     ["|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: "] = "|cffff5555Old Kraken|r: Could not announce in guild chat: ",
     ["Група"] = "Group",
     ["Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS."] = "Old Kraken: Check the fields, role availability, and connection. A dungeon requires a tank, healer, or DPS role.",
