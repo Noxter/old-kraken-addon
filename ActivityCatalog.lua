@@ -32,7 +32,8 @@ local dungeons = {
     {value='dm-west', label='Забуте Місто: Захід (DM West)', min=57, max=60},
     {value='dm-north', label='Забуте Місто: Північ (DM North)', min=57, max=60},
     {value='blackmaw', label='Фортеця Чорнощелепих (BMH)', min=55, max=60},
-    {value='lbrs', label='Пік Чорної гори (BRS)', min=57, max=60},
+    {value='lbrs', label='Нижній пік Чорної гори (LBRS)', min=55, max=60},
+    {value='ubrs', label='Верхній пік Чорної гори (UBRS)', min=58, max=60},
     {value='scholo', label='Шоломанса (Scholo)', min=58, max=60},
     {value='strat-live', label='Стратхольм: Жива частина (Strat Live)', min=58, max=60},
     {value='strat-undead', label='Стратхольм: Нежить (Strat UD)', min=58, max=60},
@@ -66,7 +67,7 @@ local activityArt = {
     kroldok=7963780, uldaman=131876, zf=131885, maraudon=131850, ['mara-purple']=131850,
     ['mara-orange']=131850, ['mara-princess']=131850, alcaz=7963734,
     st=131872, brd=131824, dm=131835, ['dm-east']=131835, ['dm-west']=131835, ['dm-north']=131835,
-    blackmaw=7963784, lbrs=131825,
+    blackmaw=7963784, lbrs=131825, ubrs=131825,
     scholo=131868, strat=131871, ['strat-live']=131871, ['strat-undead']=131871, shapers=7963783,
 }
 local raidArt = {barrowdeeps='BarrowDeeps', hyjalsummit='HyjalSummit', onyxia='Onyxia'}
@@ -94,6 +95,10 @@ for _, list in ipairs({dungeons, raids, legacyDungeons}) do
     end
 end
 OldKraken.ActivityCatalog.canonicalTitles = canonicalTitles
+if type(canonicalTitles.lbrs) == 'table' then
+    canonicalTitles.lbrs['Пік Чорної гори (BRS)'] = true
+    canonicalTitles.lbrs['Blackrock Spire (BRS)'] = true
+end
 function OldKraken.ActivityCatalog.IsCanonicalTitle(activity, title)
     local set = type(activity) == 'string' and canonicalTitles[activity]
     return type(set) == 'table' and type(title) == 'string' and set[title] == true
