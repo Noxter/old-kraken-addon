@@ -450,6 +450,37 @@ function Communication:CompareVersions(left, right)
     end
     return 0
 end
+Communication.UPDATE_URL = 'https://www.curseforge.com/wow/addons/old-kraken'
+function Communication:IsStableVersion(version)
+    local parts = VersionParts(version)
+    return parts ~= nil and parts[4] == 3
+end
+function Communication:GetNewestKnownVersion()
+    EnsurePresenceGuild(self)
+    local localVersion = self:GetLocalVersion()
+    if not VersionParts(localVersion) then return nil, localVersion end
+    local best = nil
+    for _, version in pairs(self.rosterVersions or {}) do
+        if self:IsStableVersion(version) and self:CompareVersions(version, localVersion) == 1 then
+            if not best or self:CompareVersions(version, best) == 1 then
+                best = version
+            end
+        end
+    end
+    if best then best = best:match('^([^+]+)') or best end
+    return best, localVersion
+end
+function Communication:CheckVersionNotification()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    if type(settings) ~= 'table' or settings.versionChatNotifications == false then return false end
+    if type(InCombatLockdown) == 'function' and InCombatLockdown() then return false end
+    local newest, localVersion = self:GetNewestKnownVersion()
+    if not newest then return false end
+    if settings.versionSessionNotified == newest then return false end
+    settings.versionSessionNotified = newest
+    Print(string.format(T('Доступна нова версія %s (у вас %s). Оновіть аддон на CurseForge (/okr).'), newest, tostring(localVersion)))
+    return true
+end
 local function PresenceKey(name)
     if Secret(name) or type(name) ~= 'string' or name == '' then return '' end
     local realm = GetRealmName and GetRealmName() or ''
@@ -486,6 +517,10 @@ function Communication:RecordRosterPresence(sender, version)
         self.rosterPresence[key] = true
         if version then self.rosterVersions[key] = version end
         if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+        if version then
+            if OldKraken.Fire then OldKraken:Fire('VERSION_STATUS_CHANGED') end
+            self:CheckVersionNotification()
+        end
     end
 end
 
@@ -920,6 +955,8 @@ frame:RegisterEvent("CHAT_MSG_ADDON")
 frame:RegisterEvent("ADDON_LOADED")
 pcall(frame.RegisterEvent, frame, 'ACTIVE_TALENT_GROUP_CHANGED')
 pcall(frame.RegisterEvent, frame, 'PLAYER_SPECIALIZATION_CHANGED')
+pcall(frame.RegisterEvent, frame, 'PLAYER_ENTERING_WORLD')
+pcall(frame.RegisterEvent, frame, 'PLAYER_REGEN_ENABLED')
 
 local hookedTalentFrames = {}
 local function InstallTalentHooks()
@@ -968,6 +1005,14 @@ frame:SetScript("OnEvent", function(_, event, ...)
     elseif event == 'PLAYER_SPECIALIZATION_CHANGED' then
         local unit = ...
         if unit == 'player' then Communication:SendLocalSpec(false) end
+    elseif event == 'PLAYER_ENTERING_WORLD' then
+        local isInitialLogin, isReloadingUi = ...
+        if isInitialLogin == true and not isReloadingUi and OldKraken.DB and type(OldKraken.DB.settings) == 'table' then
+            OldKraken.DB.settings.versionSessionNotified = nil
+        end
+        Communication:CheckVersionNotification()
+    elseif event == 'PLAYER_REGEN_ENABLED' then
+        Communication:CheckVersionNotification()
     elseif event == "CHAT_MSG_ADDON" then
         Communication:OnAddonMessage(...)
     end

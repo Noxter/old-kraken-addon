@@ -79,10 +79,10 @@
   - Коли підтримка версій `<= 0.5.4` стане неактуальною — видалити тимчасову логіку `MigrateWorkshopScope`, `ConfirmWorkshopMigration` та `/okr workshop migrate` з [Database.lua](Database.lua) і [GuildRoster.lua](GuildRoster.lua).
 
 
-## 9. Version Awareness — ненав'язливе інформування про оновлення Old Kraken
+## 9. Version Awareness — ненав'язливе інформування про оновлення Old Kraken — ✅ Реалізовано
 
 - **Пріоритет:** P2 — UX / інформування користувачів.
-- **Статус:** заплановано; реалізацію не розпочато.
+- **Статус:** реалізовано в гілці `alpha` (23.11.2026) у [Communication.lua](Communication.lua), [UIHub.lua](UIHub.lua), [Database.lua](Database.lua), [Locale.lua](Locale.lua) та `tests/test_version_awareness.py` (URL CurseForge: `https://www.curseforge.com/wow/addons/old-kraken`, чат-сповіщення при кожному новому вході / зміні персонажа без повтору після `/reload`).
 - **Контекст:** у `Communication.lua` вже є обмін версіями аддона через roster presence (`OKP^QUERY` / `OKP^HERE`), збереження версій согільдійців та `Communication:CompareVersions()`. Не створювати паралельний протокол або дубльований comparator.
 - **Мета:** ненав'язливо повідомляти користувача, якщо серед відомих версій согільдійців є новіший стабільний реліз, і дати простий спосіб знайти сторінку завантаження.
 - **Version Detection & Notifications:**
