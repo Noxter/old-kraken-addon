@@ -40,8 +40,8 @@ for lang, expected_lbrs, expected_ubrs in (
         assert(found.ubrs and found.ubrs.label == _exp_ubrs and found.ubrs.min == 58 and found.ubrs.max == 60)
         assert(cat.IsCanonicalTitle('lbrs', _exp_lbrs))
         assert(cat.IsCanonicalTitle('ubrs', _exp_ubrs))
-        assert(cat.IsCanonicalTitle('lbrs', 'Пік Чорної гори (BRS)'))
-        assert(cat.IsCanonicalTitle('lbrs', 'Blackrock Spire (BRS)'))
+        assert(not cat.IsCanonicalTitle('lbrs', 'Пік Чорної гори (BRS)'))
+        assert(not cat.IsCanonicalTitle('lbrs', 'Blackrock Spire (BRS)'))
 
         local texL, texU = {}, {}
         function texL:SetTexture(v) self.tex = v end
@@ -53,31 +53,55 @@ for lang, expected_lbrs, expected_ubrs in (
         assert(texL.tex == 131825 and texU.tex == 131825)
     ''')
 
-# Verify GroupFinder and GuildEvents accept ubrs and lbrs
+# Verify GroupFinder and GuildEvents accept both ubrs and lbrs (while preserving legacy BRS title)
 lua_full = LuaRuntime(unpack_returned_tuples=True)
 lua_full.execute('''
     now = 1700000000
-    OldKraken = { name = 'OldKraken', DB = { settings = { language = 'ukUA' } } }
+    OldKraken = {
+        name = 'OldKraken',
+        DB = { settings = { language = 'ukUA' }, events = { guildCalendarV1 = {} } },
+        Communication = { RegisterHandler = function() end, SendProtocol = function() return true end, queue = {} },
+        UIStyle = { Colors = { brandGold = {0.88, 0.69, 0.32, 1}, mutedText = {0.6, 0.6, 0.6} }, Font = function() end },
+    }
     function OldKraken:On() end
     function OldKraken:Fire() end
     function GetServerTime() return now end
     function GetTime() return 100 end
+    function UnitName() return 'Leader', 'Tester' end
+    function GetGuildInfo() return 'Guild' end
+    function GetRealmName() return 'Realm' end
     function UnitClass() return 'Warrior', 'WARRIOR' end
-    function CreateFrame() return { RegisterEvent = function() end, SetScript = function() end } end
+    function date() return '23.11 20:00' end
+    StaticPopupDialogs = {}
+    UIParent = {}
+    function CreateFrame()
+        return { RegisterEvent = function() end, SetScript = function() end, HookScript = function() end, Hide = function() end, Show = function() end }
+    end
 ''')
 lua_full.execute(LOCALE)
 lua_full.execute('OldKraken.InitializeLocale(OldKraken.DB)')
 lua_full.execute(CATALOG)
 lua_full.execute((ROOT / 'GroupFinder.lua').read_text(encoding='utf-8'))
+lua_full.execute((ROOT / 'GuildEvents.lua').read_text(encoding='utf-8'))
 lua_full.execute('''
     local gf = OldKraken.GroupFinder
-    gf.active, gf.identity, gf.groups, gf.sequence = true, 'Leader', {}, 0
+    gf.active, gf.identity, gf.groups, gf.sequence = true, 'Leader Tester', {}, 0
     gf.requestVersions, gf.reopenFloors, gf.lastActivity = {}, {}, {}
     gf.send = function() return true end
-    local ok, id = gf:Create('Верхній пік Чорної гори (UBRS)', 'dungeon', '', 5, 58, 60, 'tank', 'ubrs')
-    assert(ok == true and type(id) == 'string', tostring(id))
-    local g = gf.groups['Leader\\001' .. id]
-    assert(type(g) == 'table' and g.dungeon == 'ubrs')
+
+    local okU, idU = gf:Create('Верхній пік Чорної гори (UBRS)', 'dungeon', '', 5, 58, 60, 'tank', 'ubrs')
+    assert(okU == true and gf.groups['Leader Tester\\001' .. idU].dungeon == 'ubrs')
+
+    local okL, idL = gf:Create('Нижній пік Чорної гори (LBRS)', 'dungeon', '', 5, 55, 60, 'tank', 'lbrs')
+    assert(okL == true and gf.groups['Leader Tester\\001' .. idL].dungeon == 'lbrs')
+
+    local okLegacy, idLegacy = gf:Create('Пік Чорної гори (BRS)', 'dungeon', '', 5, 57, 60, 'tank', 'lbrs')
+    assert(okLegacy == true and gf.groups['Leader Tester\\001' .. idLegacy].title == 'Пік Чорної гори (BRS)')
+
+    local ev = OldKraken.GuildEvents
+    local evL = ev:Create('Нижній пік Чорної гори (LBRS)', 'desc', now + 3600, 'dungeon', 5, 'lbrs')
+    local evU = ev:Create('Верхній пік Чорної гори (UBRS)', 'desc', now + 7200, 'dungeon', 5, 'ubrs')
+    assert(evL ~= nil and evU ~= nil, 'GuildEvents must accept both lbrs and ubrs')
 ''')
 
 print('Blackrock Spire wings checks passed')

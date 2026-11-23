@@ -95,10 +95,6 @@ for _, list in ipairs({dungeons, raids, legacyDungeons}) do
     end
 end
 OldKraken.ActivityCatalog.canonicalTitles = canonicalTitles
-if type(canonicalTitles.lbrs) == 'table' then
-    canonicalTitles.lbrs['Пік Чорної гори (BRS)'] = true
-    canonicalTitles.lbrs['Blackrock Spire (BRS)'] = true
-end
 function OldKraken.ActivityCatalog.IsCanonicalTitle(activity, title)
     local set = type(activity) == 'string' and canonicalTitles[activity]
     return type(set) == 'table' and type(title) == 'string' and set[title] == true
