@@ -131,10 +131,15 @@ local function attachCommunitiesButton()
     local level = (type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetFrameLevel) == 'function' and CommunitiesFrame.GuildInfoTab:GetFrameLevel())
         or (type(CommunitiesFrame.GetFrameLevel) == 'function' and CommunitiesFrame:GetFrameLevel()) or 1
     communitiesButton:SetFrameLevel(level + 5)
-    if type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetPoint) == 'function' then
-        communitiesButton:SetPoint('TOP', CommunitiesFrame.GuildInfoTab, 'BOTTOM', 0, -16)
+    local lastTab = (type(CommunitiesFrame.GuildBenefitsTab) == 'table' and type(CommunitiesFrame.GuildBenefitsTab.IsShown) == 'function'
+        and CommunitiesFrame.GuildBenefitsTab:IsShown() and CommunitiesFrame.GuildBenefitsTab)
+        or (type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetPoint) == 'function' and CommunitiesFrame.GuildInfoTab)
+    if lastTab == CommunitiesFrame.GuildBenefitsTab and lastTab then
+        communitiesButton:SetPoint('TOP', lastTab, 'BOTTOM', 0, -16)
+    elseif lastTab then
+        communitiesButton:SetPoint('TOP', lastTab, 'BOTTOM', 0, -64)
     else
-        communitiesButton:SetPoint('TOPLEFT', CommunitiesFrame, 'TOPRIGHT', 2, -210)
+        communitiesButton:SetPoint('TOPLEFT', CommunitiesFrame, 'TOPRIGHT', 2, -258)
     end
     communitiesButton:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
     communitiesButton:EnableMouse(true)
