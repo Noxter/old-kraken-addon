@@ -15,6 +15,7 @@ GuildRoster.lua
 ActivityCatalog.lua
 GroupFinder.lua
 GroupFinderIntegration.lua
+GroupFinderChat.lua
 GroupFinderUI.lua
 GroupFinderAPI.lua
 GuildEvents.lua
