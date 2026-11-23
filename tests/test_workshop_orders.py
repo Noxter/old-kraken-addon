@@ -28,8 +28,9 @@ def client(name, embedded=False):
                 self.currentPage=key; page.frame:Show(); return page.frame
             end
         end
-        function OldKraken:On() end
-        function OldKraken:Fire(...) notices[#notices+1]={...} end
+        OldKraken.listeners={}
+        function OldKraken:On(name,fn) self.listeners[name]=self.listeners[name] or {}; table.insert(self.listeners[name],fn) end
+        function OldKraken:Fire(name,...) notices[#notices+1]={name,...}; for _,fn in ipairs(self.listeners[name] or {}) do fn(...) end end
         function print(...) end
         function UnitName() return player,'Mon' end
         function GetGuildInfo() return 'Guild' end
@@ -375,6 +376,105 @@ def test_order_relay_and_owner_authority():
     dave.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o; for _,v in pairs(s.orderObserved) do o=v end; assert(o and o.status=='deleted')")
 
 
+def test_open_draft_refreshes_after_migration():
+    lua = client('Alice')
+    lua.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        local guilds=OldKraken.DB.workshop.guilds
+        guilds['\\001Guild']={orderDrafts={['Alice Mon']={item='Manual potion',quantity='5',note='legacy note',
+            profession=171,materials='customer',deadline=86400,recipe={item=0,recipe=9001,owner='Crafter Mon'}}}}
+        OldKraken.WorkshopOrders:Show()
+        local form=OldKrakenWorkshopOrdersFrame.orderForm
+        assert(form.note:GetText()~='legacy note')
+        assert(select(2,OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false))=='pending')
+        local ok,status=OldKraken.Database:ConfirmWorkshopMigration()
+        assert(ok and status=='completed')
+        assert(form.note:GetText()=='legacy note' and form.quantity:GetText()=='5', 'open form must reload the migrated draft')
+        form.note:SetText('edited after migration')
+        local draft=guilds['Realm\\001Guild'].orderDrafts['Alice Mon']
+        assert(draft.item=='Manual potion' and draft.note=='edited after migration')
+        assert(guilds['\\001Guild'].orderDrafts['Alice Mon'].note=='legacy note')
+    ''')
+
+
+def test_conflicting_drafts_can_be_selected_without_losing_either_copy():
+    lua = client('Alice')
+    lua.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        local guilds=OldKraken.DB.workshop.guilds
+        local current=guilds['Realm\\001Guild']
+        current.orderDrafts['Alice Mon']={item='Manual potion',quantity='1',note='canonical note',profession=171,
+            materials='customer',deadline=86400,recipe={item=0,recipe=9001,owner='Crafter Mon'}}
+        guilds['\\001Guild']={orderDrafts={['Alice Mon']={item='Manual potion',quantity='5',note='legacy note',
+            profession=171,materials='customer',deadline=86400,recipe={item=0,recipe=9001,owner='Crafter Mon'}}}}
+        OldKraken.WorkshopOrders:Show()
+        local form=OldKrakenWorkshopOrdersFrame.orderForm
+        assert(form.note:GetText()=='canonical note')
+        OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false)
+        assert(OldKraken.Database:ConfirmWorkshopMigration())
+        local count,sections=OldKraken.Database.WorkshopMigrationConflicts()
+        assert(count==1 and sections.orderDrafts==1 and form.note:GetText()=='canonical note')
+        assert(OldKraken.Database.ChooseWorkshopDraft('legacy'))
+        assert(form.note:GetText()=='legacy note' and current.orderDrafts['Alice Mon'].quantity=='5')
+        assert(OldKraken.Database.WorkshopMigrationConflicts()==0)
+        assert(OldKraken.Database.ChooseWorkshopDraft('canonical'))
+        assert(form.note:GetText()=='canonical note' and current.orderDrafts['Alice Mon'].quantity=='1')
+        local conflict=current.migrationConflicts['orderDrafts\\001Alice Mon']
+        assert(conflict.canonical.note=='canonical note' and conflict.legacy.note=='legacy note')
+        assert(conflict.beforeDraftChoice.note=='legacy note' and conflict.selected=='canonical')
+        assert(guilds['\\001Guild'].orderDrafts['Alice Mon'].note=='legacy note')
+    ''')
+
+
+def test_migration_chat_commands_report_and_restore_draft_conflict():
+    lua = client('Alice')
+    lua.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        SlashCmdList={}; messages={}
+        function OldKraken:Print(msg) messages[#messages+1]=msg end
+        function OldKraken:PrintError(msg) messages[#messages+1]=msg end
+        function OldKraken.Communication:HandleCommand() return false end
+    ''')
+    lua.execute((ROOT / 'GuildRoster.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        local g=OldKraken.DB.workshop.guilds
+        g['Realm\\001Guild'].orderDrafts['Alice Mon']={item='Current',quantity='1'}
+        g['\\001Guild']={orderDrafts={['Alice Mon']={item='Old',quantity='2'}}}
+        OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false)
+        SlashCmdList.OLDKRAKEN('workshop migrate')
+        assert(messages[#messages]:find('/okr workshop conflicts',1,true))
+        SlashCmdList.OLDKRAKEN('workshop conflicts')
+        assert(messages[#messages]:find('/okr workshop draft legacy',1,true))
+        SlashCmdList.OLDKRAKEN('workshop draft legacy')
+        assert(g['Realm\\001Guild'].orderDrafts['Alice Mon'].item=='Old')
+        SlashCmdList.OLDKRAKEN('workshop draft canonical')
+        assert(g['Realm\\001Guild'].orderDrafts['Alice Mon'].item=='Current')
+    ''')
+
+
+def test_migrated_order_is_broadcast_without_reloading():
+    alice, bob = client('Alice'), client('Bob')
+    alice.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    alice.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        local id='Alice Mon'; local k=id..'\\001migrated'
+        OldKraken.DB.workshop.guilds['\\001Guild']={orderOwners={[id]={[k]={
+            owner=id,id='migrated',rev=1,created=now,deadline=now+3600,profession=171,
+            item='Migrated item',quantity=1,reward=0,materials='customer',note='',status='open',candidates={},acks={}}}}}
+        OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false)
+        assert(OldKraken.Database:ConfirmWorkshopMigration())
+    ''')
+    tick(alice)
+    flush(alice, bob)
+    bob.execute('''
+        local order=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved['Alice Mon\\001migrated']
+        assert(order and order.item=='Migrated item', 'migrated order must broadcast while the session remains open')
+    ''')
+
+
 def test_embedded_orders():
     lua = client('Cara', embedded=True)
     tick(lua)
@@ -462,6 +562,10 @@ def test_bop_filter_reloads_after_item_data():
 
 
 if __name__ == '__main__':
+    test_open_draft_refreshes_after_migration()
+    test_conflicting_drafts_can_be_selected_without_losing_either_copy()
+    test_migration_chat_commands_report_and_restore_draft_conflict()
+    test_migrated_order_is_broadcast_without_reloading()
     test_orders()
     test_relayed_actions_cannot_impersonate_worker()
     test_embedded_orders()

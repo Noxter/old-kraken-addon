@@ -123,6 +123,7 @@ function Database.Initialize()
 end
 
 local MAX_MIGRATION_CONFLICTS = 200
+local migrationNotices = {}
 
 local function ServerTime()
     return type(GetServerTime) == "function" and GetServerTime() or 0
@@ -402,7 +403,7 @@ end
 local function MergeRecipes(target, source)
     local overflow = false
     local ownersSeen, owners = {}, {}
-    for _, tbl in ipairs({ source.recipes, source.recipeTombstones, source.recipeSources }) do
+    for _, tbl in ipairs({ source.recipes or false, source.recipeTombstones or false, source.recipeSources or false }) do
         if type(tbl) == "table" then
             for owner in pairs(tbl) do
                 if not ownersSeen[owner] then
@@ -421,7 +422,7 @@ local function MergeRecipes(target, source)
         local sTombTbl = type(source.recipeTombstones) == "table" and source.recipeTombstones[owner] or nil
         local sSrcTbl = type(source.recipeSources) == "table" and source.recipeSources[owner] or nil
         local ridsSeen, rids = {}, {}
-        for _, tbl in ipairs({ sLiveTbl, sTombTbl }) do
+        for _, tbl in ipairs({ sLiveTbl or false, sTombTbl or false }) do
             if type(tbl) == "table" then
                 for rid in pairs(tbl) do
                     if not ridsSeen[rid] then
@@ -459,9 +460,9 @@ local function MergeRecipes(target, source)
                 dSrc[rid] = sRelayed
             elseif sEntry ~= nil and type(tEntry) == "table" and type(sEntry) == "table" then
                 local tSeen, sSeen = tonumber(tEntry.seen) or 0, tonumber(sEntry.seen) or 0
-                local takeSource = sSeen > tSeen
-                    or (sSeen == tSeen and not sRelayed and tRelayed)
-                    or (sSeen == tSeen and sRelayed == tRelayed and sIsTomb and not tIsTomb)
+                local takeSource = (not sRelayed and tRelayed)
+                    or (sRelayed == tRelayed and (sSeen > tSeen
+                    or (sSeen == tSeen and sIsTomb and not tIsTomb)))
                 if takeSource then
                     if sIsTomb then
                         dTomb[rid] = DeepCopy(sEntry)
@@ -564,12 +565,15 @@ local function MergeOrderOwners(target, source)
             local dstOrders = EnsureTable(dst, identity)
             for _, orderKey in ipairs(SortedKeys(srcOrders)) do
                 local src, tgt = srcOrders[orderKey], dstOrders[orderKey]
-                if tgt == nil then
-                    dstOrders[orderKey] = DeepCopy(src)
+                local normalized = OldKraken.WorkshopOrders:NormalizeMigrationOrder(orderKey, src, identity)
+                if not normalized then
+                    if RecordConflict(target, "orderOwners", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then overflow = true end
+                elseif tgt == nil then
+                    dstOrders[orderKey] = normalized
                 elseif type(tgt) == "table" and type(src) == "table" then
                     local tRev, sRev = tonumber(tgt.rev) or 0, tonumber(src.rev) or 0
                     if sRev > tRev then
-                        dstOrders[orderKey] = DeepCopy(src)
+                        dstOrders[orderKey] = normalized
                     elseif sRev == tRev and not DeepEqual(tgt, src) then
                         if RecordConflict(target, "orderOwners", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
                             overflow = true
@@ -594,8 +598,11 @@ local function MergeOrderObserved(target, source)
     local overflow = false
     for _, orderKey in ipairs(SortedKeys(source.orderObserved)) do
         local src, tgt = source.orderObserved[orderKey], dst[orderKey]
-        if tgt == nil then
-            dst[orderKey] = DeepCopy(src)
+        local normalized = OldKraken.WorkshopOrders:NormalizeMigrationOrder(orderKey, src)
+        if not normalized then
+            if RecordConflict(target, "orderObserved", orderKey, tgt, src) then overflow = true end
+        elseif tgt == nil then
+            dst[orderKey] = normalized
         elseif type(tgt) == "table" and type(src) == "table" then
             local tOwnerRev = tonumber(tgt.ownerRev) or (not tgt.relayed and tonumber(tgt.rev) or 0)
             local sOwnerRev = tonumber(src.ownerRev) or (not src.relayed and tonumber(src.rev) or 0)
@@ -604,7 +611,7 @@ local function MergeOrderObserved(target, source)
                 or (sOwnerRev == tOwnerRev and sRev > tRev)
                 or (sOwnerRev == tOwnerRev and sRev == tRev and not src.relayed and tgt.relayed == true)
             if takeSource then
-                dst[orderKey] = DeepCopy(src)
+                dst[orderKey] = normalized
             elseif sOwnerRev == tOwnerRev and sRev == tRev and (src.relayed == true) == (tgt.relayed == true) and not DeepEqual(tgt, src) then
                 if RecordConflict(target, "orderObserved", orderKey, tgt, src) then
                     overflow = true
@@ -707,12 +714,16 @@ local function MergeDeliveryTallies(target, source)
             local dstMap = EnsureTable(dst, identity)
             for _, orderKey in ipairs(SortedKeys(srcMap)) do
                 local maxItems = FindOrderQuantity(target, source, identity, orderKey)
-                local src, tgt = srcMap[orderKey], dstMap[orderKey]
+                local pendingRoot=target.migrationPendingTallies
+                local pending=type(pendingRoot)=='table' and pendingRoot[identity]
+                local wasPending=type(pending)=='table' and pending[orderKey] or nil
+                local src, tgt = srcMap[orderKey], dstMap[orderKey] or wasPending
+                local result = tgt
                 local srcValid = IsValidTally(src, maxItems)
                 local tgtValid = IsValidTally(tgt, maxItems)
                 local conflictKey = tostring(identity) .. "\001" .. tostring(orderKey)
                 if srcValid and tgt == nil then
-                    dstMap[orderKey] = DeepCopy(src)
+                    result = DeepCopy(src)
                 elseif srcValid and tgtValid and DeepEqual(tgt, src) then
                     -- identical duplicate
                 else
@@ -720,16 +731,25 @@ local function MergeDeliveryTallies(target, source)
                     if not preserved then
                         overflow = true
                     elseif srcValid and not tgtValid then
-                        dstMap[orderKey] = DeepCopy(src)
+                        result = DeepCopy(src)
                     elseif not srcValid and not tgtValid then
-                        dstMap[orderKey] = nil
+                        result = nil
                     elseif srcValid and tgtValid then
                         if src.assignment > tgt.assignment then
-                            dstMap[orderKey] = DeepCopy(src)
+                            result = DeepCopy(src)
                         elseif src.assignment == tgt.assignment and src.worker == tgt.worker then
-                            dstMap[orderKey] = MaxTally(tgt, src)
+                            result = MaxTally(tgt, src)
                         end
                     end
+                end
+                -- An unmatched tally stays separate until the live module can
+                -- validate it against the actual order and assignment.
+                if result and (wasPending or not OrderQuantityIn(target, identity, orderKey)) then
+                    pending=EnsureTable(EnsureTable(target, 'migrationPendingTallies'), identity)
+                    pending[orderKey]=DeepCopy(result)
+                    dstMap[orderKey]=nil
+                else
+                    dstMap[orderKey]=result
                 end
             end
         end
@@ -760,6 +780,10 @@ end
 function Database.IsValidRealm(selfOrRealm, maybeRealm)
     local realm = selfOrRealm == Database and maybeRealm or selfOrRealm
     return IsValidText(realm, 1, 128)
+end
+
+function Database.IsValidWorkshopTally(tally, quantity)
+    return IsValidTally(tally, quantity)
 end
 
 function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirmed, maybeConfirmed)
@@ -802,10 +826,23 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
     if not resume then
         if confirmed ~= true then
             pendingMap[canonicalKey] = true
+            if not migrationNotices[canonicalKey] and type(OldKraken.Print) == 'function' then
+                local text = 'Знайдено старі дані Майстерні без назви світу. Перевірте світ і гільдію та введіть /okr workshop migrate для перенесення.'
+                if type(OldKraken.Translate) == 'function' then text = OldKraken.Translate(text) end
+                pcall(OldKraken.Print, OldKraken, text)
+                migrationNotices[canonicalKey] = true
+            end
             return false, "pending"
         end
         if pendingMap[canonicalKey] ~= true then
             return false, "unconfirmed"
+        end
+    end
+
+    if (type(source.orderOwners) == 'table' and next(source.orderOwners))
+        or (type(source.orderObserved) == 'table' and next(source.orderObserved)) then
+        if not OldKraken.WorkshopOrders or type(OldKraken.WorkshopOrders.NormalizeMigrationOrder) ~= 'function' then
+            return false, 'unavailable'
         end
     end
 
@@ -838,6 +875,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
     else
         statusMap[canonicalKey] = "completed"
     end
+    if type(OldKraken.Fire) == 'function' then OldKraken:Fire('WORKSHOP_SCOPE_MIGRATED', canonicalKey) end
     return true, statusMap[canonicalKey]
 end
 
@@ -856,4 +894,61 @@ function Database.ConfirmWorkshopMigration()
         return false, "none"
     end
     return Database.MigrateWorkshopScope(realm, guild, true)
+end
+
+local function CurrentWorkshopScope()
+    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    local guild = type(GetGuildInfo) == 'function' and GetGuildInfo('player') or nil
+    if not IsValidText(realm,1,128) or not IsValidText(guild,1,128) then return nil end
+    local db = OldKraken.DB
+    local guilds = type(db)=='table' and type(db.workshop)=='table' and db.workshop.guilds
+    local profile = realm .. '\001' .. guild
+    return type(guilds)=='table' and guilds[profile] or nil, profile
+end
+
+function Database.WorkshopMigrationConflicts()
+    local scope = CurrentWorkshopScope()
+    local conflicts = type(scope)=='table' and scope.migrationConflicts
+    local count,sections = 0,{}
+    if type(conflicts)=='table' then
+        for _, entry in pairs(conflicts) do
+            if type(entry)=='table' and entry.resolved~=true then
+                count=count+1
+                local section=type(entry.section)=='string' and entry.section or 'unknown'
+                sections[section]=(sections[section] or 0)+1
+            end
+        end
+    end
+    local pending=type(scope)=='table' and scope.migrationPendingTallies
+    if type(pending)=='table' then
+        for _, tallies in pairs(pending) do
+            if type(tallies)=='table' then
+                for _ in pairs(tallies) do
+                    count=count+1
+                    sections.pendingDeliveryTallies=(sections.pendingDeliveryTallies or 0)+1
+                end
+            end
+        end
+    end
+    return count,sections,type(scope)=='table' and scope.migrationConflictsOverflow==true
+end
+
+function Database.ChooseWorkshopDraft(choice)
+    if choice~='legacy' and choice~='canonical' then return false,'invalid' end
+    local scope,profile = CurrentWorkshopScope()
+    if type(scope)~='table' or type(scope.migrationConflicts)~='table' or type(UnitName)~='function' then return false,'none' end
+    local first,last=UnitName('player')
+    if not IsValidText(first,1,128) then return false,'invalid' end
+    local identity=first
+    if IsValidText(last,1,128) then identity=first..' '..last end
+    if not IsValidText(identity,1,128) then return false,'invalid' end
+    local conflict=scope.migrationConflicts['orderDrafts\001'..identity]
+    local selected=type(conflict)=='table' and conflict[choice]
+    if type(selected)~='table' then return false,'none' end
+    local drafts=EnsureTable(scope,'orderDrafts')
+    conflict.beforeDraftChoice=DeepCopy(drafts[identity])
+    drafts[identity]=DeepCopy(selected)
+    conflict.resolved=true; conflict.selected=choice
+    if type(OldKraken.Fire)=='function' then OldKraken:Fire('WORKSHOP_SCOPE_DRAFT_RESTORED',profile) end
+    return true
 end

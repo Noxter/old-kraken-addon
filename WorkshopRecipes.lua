@@ -64,6 +64,18 @@ local function changed()
     if C_Timer and C_Timer.After then changedPending=true; C_Timer.After(0.15,flush) else flush() end
 end
 
+OldKraken:On('WORKSHOP_SCOPE_MIGRATED',function(migratedProfile)
+    if not active or profile~=migratedProfile then return end
+    indexRevision=indexRevision+1; indexedRevision=-1
+    summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
+    ownItemsRevision=-1; recipeChanged=true
+    local saved=scope.recipeVersions[identity]
+    if integer(saved,0,8999999999999999) then
+        scope.recipeVersions[identity]=math.max(saved+1,GetServerTime()*1000)
+    end
+    changed()
+end)
+
 local function validRecord(r)
     return type(r)=='table' and integer(r.recipe,1,100000000) and integer(r.item,0,100000000)
         and integer(r.profession,1,1000000) and professionNames[r.profession] and integer(r.seen,1,GetServerTime()+600)

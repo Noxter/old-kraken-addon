@@ -138,7 +138,7 @@ lua.execute('''
             },
             orderOwners = {
                 ['Alice Tester'] = {
-                    ['Alice Tester\\001ord1'] = { owner = 'Alice Tester', id = 'ord1', rev = 2, created = 100, deadline = 200, profession = 171, item = 'Flask', itemID = 0, recipeID = 0, quantity = 5, reward = 10, rewardSilver = 0, materials = 'customer', note = 'legacy', status = 'open', candidates = {}, acks = {} },
+                    ['Alice Tester\\001ord1'] = { owner = 'Alice Tester', id = 'ord1', rev = 2, created = now, deadline = now+100, profession = 171, item = 'Flask', itemID = 0, recipeID = 0, quantity = 5, reward = 10, rewardSilver = 0, materials = 'customer', note = 'legacy', status = 'open', candidates = {}, acks = {} },
                 },
             },
         },
@@ -242,7 +242,7 @@ lua.execute('''
     local t = canon.orderDeliveryTallies[id][okKey]
     assert(t.items == 4 and t.money == 500 and t.materials[1001] == 4 and t.materials[1002] == 3)
     assert(canon.orderDeliveryTallies[id][id .. '\\001bad'] == nil, 'invalid tally must not enter active scope')
-    assert(canon.orderDeliveryTallies[id][id .. '\\001diffw'].worker == 'Dan Tester' and canon.orderDeliveryTallies[id][id .. '\\001diffw'].items == 3)
+    assert(canon.migrationPendingTallies[id][id .. '\\001diffw'].worker == 'Dan Tester' and canon.migrationPendingTallies[id][id .. '\\001diffw'].items == 3)
     -- recipeSnapshotViews invariant: direct view wins when rev is equal
     local v = canon.recipeSnapshotViews['Bob Tester']
     assert(v.rev == 10 and v.directRev == 10 and v.relayed == false)
@@ -304,7 +304,7 @@ lua.execute('''
     local k = 'Carol Tester\\001ord7'
     OldKraken.DB.workshop.guilds = {
         ['\\001Kraken'] = {
-            orderObserved = { [k] = { owner = 'Carol Tester', id = 'ord7', rev = 1, ownerRev = 1, quantity = 3, status = 'assigned', worker = id, candidates = {}, acks = {} } },
+            orderObserved = { [k] = { owner = 'Carol Tester', id = 'ord7', rev = 1, ownerRev = 1, created = now, deadline = now+100, profession = 171, item = 'Flask', materials = 'customer', note = '', reward = 0, quantity = 3, status = 'assigned', worker = id, candidates = {}, acks = {} } },
             orderDeliveryTallies = { [id] = { [k] = { worker = id, assignment = 1, materials = {}, items = 5, money = 0 } } },
         },
     }
@@ -338,12 +338,13 @@ lua.execute('''
     assert(OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', true))
     local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
     local active = canon.orderDeliveryTallies[id]
+    local pending = canon.migrationPendingTallies[id]
     local conflicts = canon.migrationConflicts
     assert(active[both] == nil, 'invalid/invalid must leave no active tally')
     assert(conflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. both].canonical.assignment == 'x', 'invalid canonical preserved for diagnostics')
     assert(conflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. both].legacy.materials[5] == -1, 'invalid legacy preserved for diagnostics')
-    assert(active[keepCanon].money == 50 and active[keepCanon].materials[9] == 2, 'valid canonical must stay active')
-    assert(active[takeLegacy].money == 10 and active[takeLegacy].materials[7] == 3, 'valid legacy must replace invalid canonical')
+    assert(active[keepCanon] == nil and pending[keepCanon].money == 50 and pending[keepCanon].materials[9] == 2, 'valid canonical must be preserved while its order is missing')
+    assert(active[takeLegacy] == nil and pending[takeLegacy].money == 10 and pending[takeLegacy].materials[7] == 3, 'valid legacy must be preserved while its order is missing')
     assert(conflicts['orderDeliveryTallies\\001' .. id .. '\\001' .. takeLegacy].canonical.money == 2000000000, 'replaced invalid canonical must be preserved')
 ''')
 
@@ -371,13 +372,13 @@ lua.execute('''
     assert(meta.pendingConfirmation['Evermoon\\001Kraken'] == true, 'pending marker survives an interrupted run')
     local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
     -- tallies were merged before the interruption (partial state)
-    assert(canon.orderDeliveryTallies[id][k].items == 4 and canon.orderDeliveryTallies[id][k].money == 300)
+    assert(canon.migrationPendingTallies[id][k].items == 4 and canon.migrationPendingTallies[id][k].money == 300)
 
     -- the bad section is repaired; an ordinary connect-style call resumes the confirmed run
     OldKraken.DB.workshop.guilds['\\001Kraken'].orderDrafts = { [id] = { item = 'Elixir', quantity = '2' } }
     local ok, status = OldKraken.Database:MigrateWorkshopScope('Evermoon', 'Kraken', false)
     assert(ok == true and status == 'completed', 'interrupted run must resume, got ' .. tostring(status))
-    local t = canon.orderDeliveryTallies[id][k]
+    local t = canon.migrationPendingTallies[id][k]
     assert(t.items == 4 and t.money == 300 and t.materials[1] == 6, 'resume must not accumulate counters twice')
     assert(canon.orderSequences[id] == 900)
     assert(canon.orderDrafts[id].item == 'Elixir')
@@ -424,10 +425,109 @@ lua.execute('''
     assert(ok == true and status == 'completedWithOverflow', 'expected completedWithOverflow, got ' .. tostring(status))
     local canon = OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
     assert(canon.migrationConflictsOverflow == true)
-    assert(canon.orderDeliveryTallies[id][tk].assignment == 1 and canon.orderDeliveryTallies[id][tk].money == 100,
+    assert(canon.migrationPendingTallies[id][tk].assignment == 1 and canon.migrationPendingTallies[id][tk].money == 100,
         'canonical tally must remain unchanged when conflict cannot be recorded due to overflow')
     assert(OldKraken.DB.workshop.guilds['\\001Kraken'].orderDeliveryTallies[id][tk].money == 999,
         'legacy tally must remain intact on overflow')
+''')
+
+# 12. Direct evidence wins over relayed timestamps; tombstones without a live
+# owner table are still processed, even if the recipes section is absent.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+local old={
+    recipes={Alice={[101]={seen=200,name='relayed'}},Bob={[102]={seen=100,name='direct'}}},
+    recipeTombstones={Carol={[103]={seen=300,name='deleted'}}},
+    recipeSources={Alice={[101]=true},Bob={[102]=false},Carol={[103]=false}},
+}
+local current={
+    recipes={Alice={[101]={seen=100,name='direct'}},Bob={[102]={seen=200,name='relayed'}},Carol={[103]={seen=100,name='old'}}},
+    recipeTombstones={},recipeSources={Alice={[101]=false},Bob={[102]=true},Carol={[103]=false}},
+}
+OldKraken.DB.workshop.guilds={['\\001Kraken']=old,['Evermoon\\001Kraken']=current}
+assert(select(2,OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false))=='pending')
+assert(OldKraken.Database:ConfirmWorkshopMigration())
+assert(current.recipes.Alice[101].name=='direct' and current.recipeSources.Alice[101]==false)
+assert(current.recipes.Bob[102].name=='direct' and current.recipeSources.Bob[102]==false)
+assert(current.recipes.Carol[103]==nil and current.recipeTombstones.Carol[103].name=='deleted')
+assert(old.recipes.Alice[101].name=='relayed' and old.recipeTombstones.Carol[103].name=='deleted')
+''')
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+local old={recipeTombstones={Carol={[103]={seen=300,name='deleted'}}},recipeSources={Carol={[103]=false}}}
+OldKraken.DB.workshop.guilds={['\\001Kraken']=old}
+OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false)
+assert(OldKraken.Database:ConfirmWorkshopMigration())
+local current=OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+assert(current.recipeTombstones.Carol[103].name=='deleted')
+''')
+
+# 13. Invalid saved orders never enter live caches; retain them for inspection,
+# notify once about the pending transfer, and keep all Workshop timers running.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+messages={}; function OldKraken:Print(message) messages[#messages+1]=message end
+local id='Alice Tester'; local key=id..'\\001bad'
+OldKraken.DB.workshop.guilds={['\\001Kraken']={orderOwners={[id]={[key]={owner=id,id='bad'}}}}}
+''')
+trigger_connect(lua)
+lua.execute('''
+assert(#messages==1 and messages[1]:find('/okr workshop migrate',1,true))
+assert(select(2,OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false))=='pending')
+assert(#messages==1, 'pending migration notification must not spam')
+local ok,status=OldKraken.Database:ConfirmWorkshopMigration(); assert(ok and status=='completed')
+local current=OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+local key='Alice Tester\\001bad'
+assert(current.orderOwners['Alice Tester'][key]==nil)
+assert(current.migrationConflicts['orderOwners\\001Alice Tester\\001'..key].legacy.id=='bad')
+local count,sections=OldKraken.Database.WorkshopMigrationConflicts()
+assert(count==1 and sections.orderOwners==1)
+for _,fn in ipairs(timers) do local good,err=pcall(fn); assert(good,tostring(err)) end
+''')
+
+# 14. Never consume a confirmation when order validation is unavailable.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+local id='Alice Tester'; local k=id..'\\001a'
+OldKraken.DB.workshop.guilds={['\\001Kraken']={orderOwners={[id]={[k]={owner=id,id='a'}}}}}
+local normalize=OldKraken.WorkshopOrders.NormalizeMigrationOrder
+OldKraken.WorkshopOrders.NormalizeMigrationOrder=nil
+OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false)
+local ok,status=OldKraken.Database:ConfirmWorkshopMigration()
+assert(not ok and status=='unavailable')
+assert(not OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'])
+OldKraken.WorkshopOrders.NormalizeMigrationOrder=normalize
+assert(OldKraken.Database:ConfirmWorkshopMigration())
+''')
+
+# 15. A tally may precede its order; periodic cleanup must not discard it.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+local id='Alice Tester'; local k='Bob Tester\\001order1'
+OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDeliveryTallies={[id]={[k]={
+    worker=id,assignment=1,materials={[123]=3},items=1,money=0}}}}}
+''')
+trigger_connect(lua)
+lua.execute('''
+assert(OldKraken.Database:ConfirmWorkshopMigration())
+local scope=OldKraken.DB.workshop.guilds['Evermoon\\001Kraken']
+local id='Alice Tester'; local k='Bob Tester\\001order1'
+assert(scope.migrationPendingTallies[id][k].materials[123]==3 and not scope.orderDeliveryTallies[id][k])
+for _,fn in ipairs(timers) do local ok,err=pcall(fn); assert(ok,tostring(err)) end
+assert(scope.migrationPendingTallies[id][k].materials[123]==3, 'unmatched migrated tally must survive cleanup')
+scope.orderObserved[k]={owner='Bob Tester',id='order1',created=now,deadline=now+100,quantity=0,status='assigned',worker=id,assignment=1,itemID=0,reward=0}
+for _,fn in ipairs(timers) do local ok,err=pcall(fn); assert(ok,tostring(err)) end
+assert(scope.migrationPendingTallies[id][k] and not scope.orderDeliveryTallies[id][k], 'invalid tally must stay isolated')
+scope.orderObserved[k].quantity=5
+scope.orderObserved[k].worker='Different Tester'
+for _,fn in ipairs(timers) do local ok,err=pcall(fn); assert(ok,tostring(err)) end
+assert(scope.migrationPendingTallies[id][k] and not scope.orderDeliveryTallies[id][k], 'different worker must stay isolated')
+scope.orderObserved[k].worker=id
+for _,fn in ipairs(timers) do local ok,err=pcall(fn); assert(ok,tostring(err)) end
+assert(not scope.migrationPendingTallies[id][k] and scope.orderDeliveryTallies[id][k])
+scope.orderObserved[k]=nil
+for _,fn in ipairs(timers) do local ok,err=pcall(fn); assert(ok,tostring(err)) end
+assert(scope.orderDeliveryTallies[id][k]==nil, 'ordinary cleanup resumes after the order was found')
 ''')
 
 print('Workshop migration checks passed')

@@ -67,6 +67,9 @@ local function changed()
     scheduleRender()
     if type(OldKraken.Fire)=='function' then OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED') end
 end
+OldKraken:On('WORKSHOP_SCOPE_MIGRATED',function(migratedProfile)
+    if active and profile==migratedProfile then changed() end
+end)
 -- Nil or invalid indexes and temporarily unavailable APIs are not removals.
 local function scan()
     if type(GetProfessions)~='function' or type(GetProfessionInfo)~='function' then return nil end

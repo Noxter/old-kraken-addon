@@ -1455,8 +1455,39 @@ SlashCmdList["OLDKRAKEN"] = function(message)
                 chatInfo(T('Міграцію Майстерні завершено, але не всі конфлікти вмістилися у сховище конфліктів. Старі дані збережено без змін.'))
             elseif ok then
                 chatInfo(T('Міграцію Майстерні завершено.'))
+            elseif status == 'unavailable' then
+                chatError(T('Майстерня ще завантажується. Спробуйте перенесення пізніше.'))
             else
                 chatInfo(T('Немає очікуваної міграції Майстерні для поточного світу.'))
+            end
+            if ok and type(OldKraken.Database.WorkshopMigrationConflicts)=='function' then
+                local count=OldKraken.Database.WorkshopMigrationConflicts()
+                if count>0 then chatInfo(T('Збережено розбіжностей: ')..count..T('. Переглянути: /okr workshop conflicts')) end
+            end
+        end
+        return
+    elseif command == 'workshop conflicts' then
+        if OldKraken.Database and type(OldKraken.Database.WorkshopMigrationConflicts)=='function' then
+            local count,sections,overflow=OldKraken.Database.WorkshopMigrationConflicts()
+            chatInfo(T('Невирішених розбіжностей Майстерні: ')..count)
+            if sections.orderDrafts then
+                chatInfo(T('Чернетка: /okr workshop draft legacy — стара; /okr workshop draft canonical — поточна до перенесення.'))
+            end
+            if sections.pendingDeliveryTallies then
+                chatInfo(T('Облік передач очікує відповідного замовлення; невідповідні дані збережено окремо.'))
+            end
+            if count>(sections.orderDrafts or 0)+(sections.pendingDeliveryTallies or 0) or overflow then
+                chatInfo(T('Інші розбіжності збережені в даних аддона; старий розділ не видалено.'))
+            end
+        end
+        return
+    elseif command == 'workshop draft legacy' or command == 'workshop draft canonical' then
+        if OldKraken.Database and type(OldKraken.Database.ChooseWorkshopDraft)=='function' then
+            local choice=command=='workshop draft legacy' and 'legacy' or 'canonical'
+            if OldKraken.Database.ChooseWorkshopDraft(choice) then
+                chatInfo(T('Обрану чернетку відновлено.'))
+            else
+                chatInfo(T('Для цього персонажа немає збереженої розбіжності чернеток.'))
             end
         end
         return

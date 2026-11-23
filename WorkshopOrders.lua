@@ -185,6 +185,19 @@ local function decode(payload,sender,isRelay)
     if not int(itemID,0,100000000) or not int(recipeID,0,100000000) or not int(paidByWorker,0,reward*10000+rewardSilver*100) or not int(assignment,0,rev) then return nil end
     return {owner=owner,id=id,rev=rev,created=created,deadline=due,profession=prof,item=item,itemID=itemID,recipeID=recipeID,quantity=qty,reward=reward,rewardSilver=rewardSilver,materials=mats,note=note,status=status,worker=worker~='' and worker or nil,candidates=candidates,acks=acks,paidByWorker=paidByWorker,assignment=assignment}
 end
+function Orders:NormalizeMigrationOrder(orderKey, order, requiredOwner)
+    if type(order)~='table' or type(order.candidates)~='table' or type(order.acks)~='table' then return nil end
+    local encoded,payload=pcall(encode,order)
+    if not encoded or type(payload)~='string' then return nil end
+    local decoded,valid=pcall(decode,payload,order.owner)
+    if not decoded or not valid or orderKey~=key(valid.owner,valid.id)
+        or (requiredOwner and valid.owner~=requiredOwner) then return nil end
+    if not requiredOwner then
+        valid.relayed=order.relayed==true
+        valid.ownerRev=valid.relayed and (int(order.ownerRev,0,valid.rev) and order.ownerRev or 0) or valid.rev
+    end
+    return valid
+end
 local function persist()
     if not scope then return end
     scope.orderOwners[identity]=own; scope.orderObserved=observed; scope.orderIntents[identity]=intents; scope.orderSequences[identity]=sequence
@@ -625,6 +638,18 @@ local function pumpRelay(scheduled,entries,kind,validation,encodeEntry)
 end
 if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
     connect(); if not active then return end
+    local pendingTallies=type(scope.migrationPendingTallies)=='table' and scope.migrationPendingTallies[identity]
+    if type(pendingTallies)=='table' and OldKraken.Database and type(OldKraken.Database.IsValidWorkshopTally)=='function' then
+        for k,tally in pairs(pendingTallies) do
+            local o=get(k)
+            if o and not scope.orderDeliveryTallies[identity][k]
+                and OldKraken.Database.IsValidWorkshopTally(tally,o.quantity)
+                and tally.worker==o.worker and tally.assignment==(o.assignment or 0)
+                and tally.money<=rewardCopper(o) then
+                scope.orderDeliveryTallies[identity][k]=tally; pendingTallies[k]=nil
+            end
+        end
+    end
     local now=GetTime(); if now>=nextSync then
         if comm:SendProtocol('WOQUERY','') then nextSync=now+180 end
         for k in pairs(intents) do requestDirty[k]=true end
@@ -1332,6 +1357,19 @@ end
 function Orders:ShowCreatePanel(show)
     if window and window.createForm then window.createForm:SetShown(show) end
 end
+OldKraken:On('WORKSHOP_SCOPE_MIGRATED',function(migratedProfile)
+    if not active or profile~=migratedProfile then return end
+    local savedSequence=scope.orderSequences[identity]
+    if int(savedSequence,0,9000000000000000) then sequence=math.max(sequence,savedSequence) end
+    for k in pairs(own) do dirty[k]=true end
+    for k in pairs(intents) do requestDirty[k]=true end
+    nextSync=0
+    if window and restoreDraft then restoreDraft() end
+    changed()
+end)
+OldKraken:On('WORKSHOP_SCOPE_DRAFT_RESTORED',function(migratedProfile)
+    if active and profile==migratedProfile and window and restoreDraft then restoreDraft() end
+end)
 OldKraken:On('WORKSHOP_RECIPES_CHANGED',changed)
 OldKraken:On('WORKSHOP_INDEX_CHANGED',changed)
 
