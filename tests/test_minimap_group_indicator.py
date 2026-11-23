@@ -125,7 +125,9 @@ def test_offline_owner_hides_minimap_indicator():
             self._listeners[name] = self._listeners[name] or {}
             table.insert(self._listeners[name], fn)
         end
+        eventsFired = {}
         function OldKraken:Fire(name, ...)
+            eventsFired[name] = (eventsFired[name] or 0) + 1
             for _, fn in ipairs(self._listeners[name] or {}) do fn(...) end
         end
         now = 100
@@ -152,9 +154,11 @@ def test_offline_owner_hides_minimap_indicator():
         StaticPopupDialogs = {}
         UISpecialFrames = {}
         UIParent = {}
-        afterCallbacks = {}
+        scheduledTimers = {}
         C_Timer = {
-            After = function(_, fn) table.insert(afterCallbacks, fn) end,
+            After = function(delay, fn)
+                table.insert(scheduledTimers, {runAt = now + (tonumber(delay) or 0), fn = fn})
+            end,
             NewTicker = function(_, fn) indicatorTick = fn end,
         }
         Minimap = {GetFrameLevel = function() return 1 end, GetWidth = function() return 100 end, GetHeight = function() return 100 end}
@@ -198,9 +202,17 @@ def test_offline_owner_hides_minimap_indicator():
             minLevel = 20, maxLevel = 30, role = 'tank', members = {'Other Realm'}, memberRoles = {}, seenAt = now,
         }
         local function flushAfter()
-            local batch = afterCallbacks
-            afterCallbacks = {}
-            for _, fn in ipairs(batch) do fn() end
+            local pending = {}
+            local toRun = {}
+            for _, item in ipairs(scheduledTimers) do
+                if now >= item.runAt then
+                    table.insert(toRun, item.fn)
+                else
+                    table.insert(pending, item)
+                end
+            end
+            scheduledTimers = pending
+            for _, fn in ipairs(toRun) do fn() end
         end
         local function fireRosterUpdate()
             for _, fr in ipairs(frames) do
@@ -224,11 +236,13 @@ def test_offline_owner_hides_minimap_indicator():
         now = 499
         indicatorTick()
         assert(indicator.shown, 'indicator stays visible at 299s offline')
+        assert(not eventsFired['GROUP_FINDER_OFFLINE_CHANGED'], 'offline event must not fire before 300s TTL expires')
 
-        -- At 300s offline, GroupFinderUI hides the group and indicator must turn off.
+        -- At 300s offline, GroupFinderUI timer callback runs, hides the group, and indicator turns off.
         now = 500
         flushAfter()
         assert(not indicator.shown, 'indicator must hide when offline owner exceeds 300s')
+        assert(eventsFired['GROUP_FINDER_OFFLINE_CHANGED'] == 1, 'timer TTL callback must fire GROUP_FINDER_OFFLINE_CHANGED exactly once on expiration')
 
         -- Owner comes back online and roster updates -> indicator reappears.
         ownerOnline = true
@@ -236,6 +250,35 @@ def test_offline_owner_hides_minimap_indicator():
         fireRosterUpdate()
         flushAfter()
         assert(indicator.shown, 'indicator reappears when owner returns online')
+
+        -- Unknown owner status (not in guild roster): group is kept and indicator remains shown.
+        ownerOnline = false
+        now = 600
+        fireRosterUpdate()
+        flushAfter()
+        now = 1000
+        flushAfter()
+        assert(not indicator.shown, 'known offline owner group is hidden after 300s')
+        assert(f:IsGroupHiddenByOfflineOwner('Other Realm\0011', f.groups['Other Realm\0011']) == true)
+
+        f.groups['Foreign Realm\0012'] = {
+            owner = 'Foreign Realm', id = '2', category = 'dungeon', maxSize = 5,
+            minLevel = 20, maxLevel = 30, role = 'tank', members = {'Foreign Realm'}, memberRoles = {}, seenAt = now,
+        }
+        fireRosterUpdate()
+        flushAfter()
+        assert(not f:IsGroupHiddenByOfflineOwner('Foreign Realm\0012', f.groups['Foreign Realm\0012']), 'unknown owner must not be hidden')
+        assert(indicator.shown, 'group with unknown owner status keeps minimap indicator visible')
+
+        -- Missing or corrupt author data: safely treated as not hidden.
+        assert(not f:IsGroupHiddenByOfflineOwner('bad', {owner = nil, closed = false}))
+        assert(not f:IsGroupHiddenByOfflineOwner('bad', {owner = '', closed = false}))
+        assert(not f:IsGroupHiddenByOfflineOwner('bad', nil))
+
+        -- Event-driven update: GROUP_FINDER_OFFLINE_CHANGED immediately updates indicator.
+        f.groups['Foreign Realm\0012'] = nil
+        OldKraken:Fire('GROUP_FINDER_OFFLINE_CHANGED')
+        assert(not indicator.shown, 'GROUP_FINDER_OFFLINE_CHANGED updates indicator without UI reload')
     ''')
 
 
