@@ -86,8 +86,12 @@ local function isSelfMember(memberName)
 end
 
 local function isWorkshopAvailable()
-    if not OldKraken.Workshop or type(OldKraken.Workshop.GetMemberProfessions) ~= 'function' or not OldKraken.DB then
+    local ws = OldKraken.Workshop
+    if not ws or type(ws.GetMemberProfessions) ~= 'function' or not OldKraken.DB then
         return false
+    end
+    if type(ws.IsActive) == 'function' then
+        return ws:IsActive() == true
     end
     if type(IsInGuild) == 'function' and IsInGuild() == false then
         return false

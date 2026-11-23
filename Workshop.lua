@@ -236,6 +236,9 @@ function Workshop:RefreshNativeProfessions()
     if C_Timer and C_Timer.After then C_Timer.After(0,step) else step() end
     return true
 end
+function Workshop:IsActive()
+    return active == true
+end
 function Workshop:GetMemberProfessions(name)
     if not active or not usable(name,'string') then return {} end
     local record=records[name]; local result={}

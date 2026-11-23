@@ -142,8 +142,10 @@ def setup_env(lang='ukUA', workshop_loaded=True, in_guild=True):
         function OldKraken:On(ev, fn) listeners[ev] = listeners[ev] or {}; table.insert(listeners[ev], fn) end
         function OldKraken:Fire(ev, ...) for _, fn in ipairs(listeners[ev] or {}) do fn(...) end end
         if _workshop_loaded then
+            _ws_active = true
             OldKraken.Workshop = {
-                GetMemberProfessions = function(_, n) return profs[n] or {} end,
+                IsActive = function() return _ws_active end,
+                GetMemberProfessions = function(_, n) return _ws_active and (profs[n] or {}) or {} end,
                 ProfessionInfo = function(_, id) return id == 171 and 'Алхімія' or 'Травництво', 136240 end,
                 IsGatheringProfession = function(_, id) return id == 182 end,
                 RefreshNativeProfessions = function() end,
@@ -297,6 +299,30 @@ lua_no_ws.execute('''
     assert(p.whisperButton.text == 'Whisper' and p.inviteButton.text == 'Invite to group')
     assert(p.recipesButton.text == 'View recipes' and p.orderButton.text == 'Create order')
     assert(p.specName.text == 'Talent split: ' or p.specPoints.text:find('Talent split:', 1, true))
+''')
+
+# Workshop loaded, in guild, DB exists, but Workshop:IsActive() == false -> unavailable, then activates live
+lua_inactive = setup_env('ukUA', workshop_loaded=True, in_guild=True)
+lua_inactive.execute('''
+    _ws_active = false
+    local Roster = OldKraken.GuildRoster
+    Roster:Show()
+    local rf, aliceRow
+    for _, f in ipairs(frames) do
+        if f.profilePanel then rf = f end
+        if f.professions and f.member and f.member.name == 'Alice Tester' then aliceRow = f end
+    end
+    aliceRow.scripts.OnClick(aliceRow, 'LeftButton')
+    local p = rf.profilePanel
+    assert(p:IsShown() and p.profEmpty:IsShown() and p.profEmpty.text == 'Дані про професії недоступні.')
+    assert(not p.profRows[1]:IsShown())
+    -- Activate Workshop and fire WORKSHOP_PROFESSIONS_CHANGED without reopening profile
+    _ws_active = true
+    OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED')
+    for _, f in ipairs(frames) do
+        if f.scripts and f.scripts.OnUpdate then f.scripts.OnUpdate(f, 0.2) end
+    end
+    assert(not p.profEmpty:IsShown() and p.profRows[1]:IsShown() and p.profRows[1].text:GetText():find('275/300', 1, true))
 ''')
 
 print('Inline player profile checks passed')
