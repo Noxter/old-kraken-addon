@@ -21,7 +21,7 @@
 
 ### Розмір коду
 
-19 Lua-файлів, 17 197 рядків. Найбільші: `GroupFinderUI.lua` (2863), `WorkshopRecipes.lua` (1905), `GuildEvents.lua` (1666), `GuildRoster.lua` (1527), `WorkshopOrders.lua` (1390), `Core.lua` (1307).
+19 Lua-файлів, 17 665 рядків. Найбільші: `GroupFinderUI.lua` (2865), `WorkshopRecipes.lua` (1914), `GuildEvents.lua` (1677), `GuildRoster.lua` (1527), `WorkshopOrders.lua` (1400), `Core.lua` (1307).
 
 ---
 
@@ -46,10 +46,10 @@
 ```
 Database.lua          Locale.lua          Core.lua            UIHub.lua
 Communication.lua     GuildRoster.lua     ActivityCatalog.lua
-GroupFinder.lua       GroupFinderIntegration.lua   GroupFinderUI.lua
-GroupFinderAPI.lua    GuildEvents.lua     Workshop.lua
-WorkshopRecipes.lua   WorkshopSync.lua    WorkshopOrders.lua
-WorkshopDeliveries.lua  Minimap.lua
+GroupFinder.lua       GroupFinderIntegration.lua   GroupFinderChat.lua
+GroupFinderUI.lua     GroupFinderAPI.lua           GuildEvents.lua
+Workshop.lua          WorkshopRecipes.lua          WorkshopSync.lua
+WorkshopOrders.lua    WorkshopDeliveries.lua       Minimap.lua
 ```
 
 Наслідки, які не можна порушувати:
@@ -112,7 +112,9 @@ WorkshopDeliveries.lua  Minimap.lua
 
 ### Ключі `DB.settings`
 
-`roster` (`status` = `all|online|offline`, `sort` = `name|level|class|rank|zone`, `ascending` bool, `class`, `search`), `minimapAngle`, `alertPositions`, `groupFinderNotifications`, `guildEventNotifications`, `workshopOrderAlerts`.
+`roster` (`status` = `all|online|offline`, `sort` = `name|level|class|rank|zone`, `ascending` bool, `class`, `search`), `minimapAngle`, `showMinimapButton`, `alertPositions`, `groupFinderNotifications`, `guildEventNotifications`, `workshopOrderAlerts`, `versionIndicator`, `versionChatNotifications`, `versionSessionNotified`.
+
+Для визначення `realm` у всіх модулях використовується `Database:GetRealmScope()`: `Database:IsValidRealm("")` залишається `false`, але штатний порожній `GetRealmName() == ""` на WoW Forever `1.60.1` резолвиться в явний scope `"Forever"` (якщо `GetNormalizedRealmName()` і `GetCVar("realmName")` теж не дають валідного значення).
 
 `NormalizeRosterSettings` **жорстко** валідує `status`/`sort`/`ascending`/`class`/`search`. Додаєш новий ключ у `settings.roster` — додай і нормалізацію.
 
