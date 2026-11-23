@@ -248,4 +248,33 @@ lua_forever_ge.execute('''
     assert(next(OldKraken.DB.events.guildCalendarV1[fKey].owned) ~= nil, 'Forever event must stay intact')
 ''')
 
+# Alternative API priority & validation in Database.GetRealmScope()
+lua_alt = make_lua(('Database.lua',), realm='', guild='Kraken', player='Alice')
+lua_alt.execute('''
+    local db = OldKraken.Database
+
+    -- Valid GetNormalizedRealmName() takes precedence over GetCVar and 'Forever'
+    GetNormalizedRealmName = function() return 'NormRealm' end
+    GetCVar = function(k) return k == 'realmName' and 'CVarRealm' or nil end
+    assert(db:GetRealmScope() == 'NormRealm', 'GetNormalizedRealmName should precede GetCVar')
+
+    -- Empty or invalid GetNormalizedRealmName() falls through to valid GetCVar('realmName')
+    GetNormalizedRealmName = function() return '' end
+    assert(db:GetRealmScope() == 'CVarRealm', 'Valid GetCVar("realmName") should be used when normalized is empty')
+    GetNormalizedRealmName = function() return 'Bad\\001Norm' end
+    assert(db:GetRealmScope() == 'CVarRealm', 'Invalid GetNormalizedRealmName should fall through to GetCVar')
+
+    -- Empty or invalid GetCVar('realmName') falls back to 'Forever'
+    GetCVar = function(k) return k == 'realmName' and '' or nil end
+    assert(db:GetRealmScope() == 'Forever', 'Empty GetCVar should fall back to Forever')
+    GetCVar = function(k) return k == 'realmName' and 'Bad\\001CVar' or nil end
+    assert(db:GetRealmScope() == 'Forever', 'Invalid GetCVar should fall back to Forever')
+
+    -- Valid GetRealmName() always takes precedence over both alternatives
+    _realm = 'PrimaryRealm'
+    GetNormalizedRealmName = function() return 'NormRealm' end
+    GetCVar = function() return 'CVarRealm' end
+    assert(db:GetRealmScope() == 'PrimaryRealm', 'Valid GetRealmName should precede alternatives')
+''')
+
 print('test_realm_scope.py: ALL PASSED')
