@@ -531,41 +531,115 @@ for _,fn in ipairs(timers) do local ok,err=pcall(fn); assert(ok,tostring(err)) e
 assert(scope.orderDeliveryTallies[id][k]==nil, 'ordinary cleanup resumes after the order was found')
 ''')
 
-# 10. Empty GetRealmName() ("") on WoW Forever resolves to explicit 'Forever' scope:
-#     all 4 Workshop modules connect to 'Forever\001Kraken', legacy '\001Kraken' is preserved
-#     until explicit confirmation, and explicit confirmation migrates into 'Forever\001Kraken'.
-lua_forever = make_client(realm='', guild='Kraken', player='Alice')
-lua_forever.execute('''
-    OldKraken.DB.workshop.guilds = {
-        ['\\001Kraken'] = {
-            records = { ['Alice Tester'] = { professions = { [171] = { rank = 300, max = 300 } }, updated = 100 } },
-            recipes = { ['Alice Tester'] = { [171] = { [2329] = 1 } } },
-        },
-        ['Evermoon\\001Kraken'] = {
-            records = { ['Bob Tester'] = { professions = { [164] = { rank = 250, max = 300 } }, updated = 90 } },
-        },
+# 10. Unknown realms must not share a synthetic scope or reuse prior consent.
+lua = make_client(realm='', guild='Kraken', player='Alice')
+lua.execute("""
+    popupCount=0
+    function StaticPopup_Show(_,_,_,data) popupCount=popupCount+1; popupData=data; return {} end
+    OldKraken.DB.workshop.guilds={
+        ['\\001Kraken']={orderDrafts={['Alice Tester']={item='Legacy'}}},
+        ['Forever\\001Kraken']={orderDrafts={['Alice Tester']={item='Existing'}}},
     }
-''')
-trigger_connect(lua_forever)
-lua_forever.execute('''
-    local guilds = OldKraken.DB.workshop.guilds
-    assert(OldKraken.Database:IsValidRealm('') == false, 'IsValidRealm("") must stay false')
-    assert(OldKraken.Database:GetRealmScope() == 'Forever', 'GetRealmScope() must return Forever')
-    local fScope = guilds['Forever\\001Kraken']
-    assert(type(fScope) == 'table', 'Forever workshop scope must exist')
-    assert(type(fScope.records) == 'table' and type(fScope.recipes) == 'table' and type(fScope.orderOwners) == 'table',
-        'All Workshop modules must connect under Forever\\001Kraken')
-    assert(fScope.records['Alice Tester'] == nil, 'legacy data must not auto-migrate before confirmation')
-    assert(fScope.records['Bob Tester'] == nil, 'Evermoon data must stay isolated from Forever')
-    assert(guilds['\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy scope must remain intact')
-    assert(guilds['Evermoon\\001Kraken'].records['Bob Tester'] ~= nil, 'Evermoon scope must remain intact')
+    OldKraken.DB.workshop.legacyMigrations={['\\001Kraken']={confirmedDestination='Forever\\001Kraken'}}
+""")
+trigger_connect(lua)
+trigger_connect(lua)
+lua.execute("""
+    local guilds=OldKraken.DB.workshop.guilds
+    assert(OldKraken.Database:GetWorkshopRealmScope()==nil)
+    assert(popupCount==0 and select(2,OldKraken.Database:ConfirmWorkshopMigration())=='invalid')
+    assert(guilds['\\001Kraken'].orderDrafts['Alice Tester'].item=='Legacy')
+    assert(guilds['Forever\\001Kraken'].orderDrafts['Alice Tester'].item=='Existing')
+    assert(not guilds['Evermoon\\001Kraken'] and not guilds['Frostmourne\\001Kraken'])
+    function GetNormalizedRealmName() return _normalized end
+    function GetCVar(name) if name=='realmName' then return _cvar end end
+    _normalized='Evermoon'
+""")
+trigger_connect(lua)
+lua.execute("""
+    assert(popupCount==1 and popupData.realm=='Evermoon')
+    StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+    assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Legacy')
+    _normalized=''; _cvar='Frostmourne'
+""")
+trigger_connect(lua)
+lua.execute("""
+    assert(popupCount==2 and popupData.realm=='Frostmourne')
+    assert(not OldKraken.DB.workshop.guilds['Frostmourne\\001Kraken'].orderDrafts['Alice Tester'])
+    _cvar=''
+    StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+    assert(not OldKraken.DB.workshop.guilds['Frostmourne\\001Kraken'].orderDrafts['Alice Tester'])
+    assert(OldKraken.DB.workshop.guilds['Forever\\001Kraken'].orderDrafts['Alice Tester'].item=='Existing')
+""")
 
-    local ok, reason = OldKraken.Database:ConfirmWorkshopMigration()
-    assert(ok and reason == 'completed', 'explicit migration into Forever\\001Kraken must succeed')
-    assert(fScope.records['Alice Tester'] ~= nil and fScope.recipes['Alice Tester'][171][2329] == 1,
-        'confirmed migration must copy legacy data into Forever\\001Kraken')
-    assert(guilds['\\001Kraken'].records['Alice Tester'] ~= nil, 'legacy source must be preserved')
-''')
+# Consent recorded by older versions for the ambiguous Forever key is not trusted.
+lua = make_client(realm='Forever', guild='Kraken')
+lua.execute("""
+    popupCount=0
+    function StaticPopup_Show(_,_,_,data) popupCount=popupCount+1; popupData=data; return {} end
+    OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Legacy'}}}}
+    OldKraken.DB.workshop.legacyMigrations={['\\001Kraken']={
+        confirmedDestination='Forever\\001Kraken',inProgress={['Forever\\001Kraken']=true}}}
+""")
+trigger_connect(lua)
+lua.execute("""
+    assert(popupCount==1 and popupData.realm=='Forever', 'old ambiguous approval must not be reused')
+    local current=OldKraken.DB.workshop.guilds['Forever\\001Kraken']
+    assert(not current.orderDrafts['Alice Tester'])
+    StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+    assert(current.orderDrafts['Alice Tester'].item=='Legacy')
+    assert(OldKraken.DB.workshop.legacyMigrations['\\001Kraken'].verifiedDestinations['Forever\\001Kraken'])
+""")
+
+# Independent order versions preserve the replaced canonical copy for owners and observers.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute("""
+    local id='Alice Tester'; local key=id..'\\001ord1'
+    local function order(rev,note)
+        return {owner=id,id='ord1',rev=rev,ownerRev=rev,created=now,deadline=now+100,
+            profession=171,item='Flask',itemID=0,recipeID=0,quantity=5,reward=10,rewardSilver=0,
+            materials='customer',note=note,status='open',candidates={},acks={}}
+    end
+    OldKraken.DB.workshop.guilds={
+        ['\\001Kraken']={orderOwners={[id]={[key]=order(2,'legacy')}},orderObserved={[key]=order(2,'legacy observed')}},
+        ['Evermoon\\001Kraken']={orderOwners={[id]={[key]=order(1,'canonical')}},orderObserved={[key]=order(1,'canonical observed')}},
+    }
+    OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false)
+    assert(OldKraken.Database:ConfirmWorkshopMigration())
+    local g=OldKraken.DB.workshop.guilds; local current=g['Evermoon\\001Kraken']
+    assert(current.orderOwners[id][key].note=='legacy')
+    assert(current.orderObserved[key].note=='legacy observed')
+    local ownerConflict=current.migrationConflicts['orderOwners\\001'..id..'\\001'..key]
+    local observedConflict=current.migrationConflicts['orderObserved\\001'..key]
+    assert(ownerConflict.canonical.note=='canonical' and ownerConflict.legacy.note=='legacy')
+    assert(observedConflict.canonical.note=='canonical observed' and observedConflict.legacy.note=='legacy observed')
+    assert(g['\\001Kraken'].orderOwners[id][key].note=='legacy')
+    assert(OldKraken.Database.WorkshopMigrationConflicts()==2)
+    assert(OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false))
+    assert(ownerConflict.canonical.note=='canonical' and observedConflict.canonical.note=='canonical observed')
+""")
+
+# If the conflict archive is full, never replace a canonical order without its backup.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute("""
+    local id='Alice Tester'; local key=id..'\\001ord1'; local conflicts={}
+    for i=1,200 do conflicts['existing'..i]={section='existing',key=tostring(i)} end
+    local function order(rev,note)
+        return {owner=id,id='ord1',rev=rev,ownerRev=rev,created=now,deadline=now+100,
+            profession=171,item='Flask',itemID=0,recipeID=0,quantity=5,reward=10,rewardSilver=0,
+            materials='customer',note=note,status='open',candidates={},acks={}}
+    end
+    OldKraken.DB.workshop.guilds={
+        ['\\001Kraken']={orderOwners={[id]={[key]=order(2,'legacy')}},orderObserved={[key]=order(2,'legacy observed')}},
+        ['Evermoon\\001Kraken']={migrationConflicts=conflicts,orderOwners={[id]={[key]=order(1,'canonical')}},orderObserved={[key]=order(1,'canonical observed')}},
+    }
+    OldKraken.Database:MigrateWorkshopScope('Evermoon','Kraken',false)
+    local ok,status=OldKraken.Database:ConfirmWorkshopMigration()
+    assert(ok and status=='completedWithOverflow')
+    local g=OldKraken.DB.workshop.guilds; local current=g['Evermoon\\001Kraken']
+    assert(current.orderOwners[id][key].note=='canonical' and current.orderObserved[key].note=='canonical observed')
+    assert(g['\\001Kraken'].orderOwners[id][key].note=='legacy' and g['\\001Kraken'].orderObserved[key].note=='legacy observed')
+""")
 
 # A realm-less scope prompts once; acceptance transfers without a slash command.
 lua = make_client(realm='Evermoon', guild='Kraken')

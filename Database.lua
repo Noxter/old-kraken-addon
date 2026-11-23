@@ -574,7 +574,13 @@ local function MergeOrderOwners(target, source)
                 elseif type(tgt) == "table" and type(src) == "table" then
                     local tRev, sRev = tonumber(tgt.rev) or 0, tonumber(src.rev) or 0
                     if sRev > tRev then
-                        dstOrders[orderKey] = normalized
+                        -- Split scopes can contain independent edits even when revisions differ.
+                        -- Preserve the previous active order before accepting the newer one.
+                        if RecordConflict(target, "orderOwners", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
+                            overflow = true
+                        else
+                            dstOrders[orderKey] = normalized
+                        end
                     elseif sRev == tRev and not DeepEqual(tgt, src) then
                         if RecordConflict(target, "orderOwners", tostring(identity) .. "\001" .. tostring(orderKey), tgt, src) then
                             overflow = true
@@ -612,7 +618,11 @@ local function MergeOrderObserved(target, source)
                 or (sOwnerRev == tOwnerRev and sRev > tRev)
                 or (sOwnerRev == tOwnerRev and sRev == tRev and not src.relayed and tgt.relayed == true)
             if takeSource then
-                dst[orderKey] = normalized
+                if RecordConflict(target, "orderObserved", orderKey, tgt, src) then
+                    overflow = true
+                else
+                    dst[orderKey] = normalized
+                end
             elseif sOwnerRev == tOwnerRev and sRev == tRev and (src.relayed == true) == (tgt.relayed == true) and not DeepEqual(tgt, src) then
                 if RecordConflict(target, "orderObserved", orderKey, tgt, src) then
                     overflow = true
@@ -783,7 +793,7 @@ function Database.IsValidRealm(selfOrRealm, maybeRealm)
     return IsValidText(realm, 1, 128)
 end
 
-function Database.GetRealmScope()
+function Database.GetWorkshopRealmScope()
     local realm = type(GetRealmName) == "function" and GetRealmName() or nil
     if Database.IsValidRealm(realm) then
         return realm
@@ -800,8 +810,19 @@ function Database.GetRealmScope()
         if Database.IsValidRealm(cvar) then
             return cvar
         end
-        return "Forever"
+        -- An unknown realm cannot safely identify a guild across different realms.
+        -- Existing realm-less and Forever scopes remain untouched until a real realm is known.
+        return nil
     end
+    return nil
+end
+
+function Database.GetRealmScope()
+    local realm = Database.GetWorkshopRealmScope()
+    if realm then return realm end
+    local raw = type(GetRealmName) == "function" and GetRealmName() or nil
+    if type(issecretvalue) == "function" and issecretvalue(raw) then return nil end
+    if raw == "" then return "Forever" end
     return nil
 end
 
@@ -841,7 +862,7 @@ local function OfferWorkshopMigration(realm,guild,profile)
         OnAccept=function(_,data)
             if type(data)~='table' then return end
             migrationPopups[data.profile]=nil
-            local currentRealm=Database.GetRealmScope()
+            local currentRealm=Database.GetWorkshopRealmScope()
             local currentGuild=type(GetGuildInfo)=='function' and GetGuildInfo('player') or nil
             if not IsValidText(currentGuild,1,128) or currentRealm~=data.realm or currentGuild~=data.guild then
                 MigrationMessage('Світ або гільдія змінилися. Старі дані не перенесено.')
@@ -888,6 +909,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
     local statusMap = EnsureTable(meta, "status")
     local pendingMap = EnsureTable(meta, "pendingConfirmation")
     local inProgressMap = EnsureTable(meta, "inProgress")
+    local verifiedMap = EnsureTable(meta, "verifiedDestinations")
 
     local status = statusMap[canonicalKey]
     if status == "completed" or status == "completedWithOverflow" then
@@ -898,12 +920,16 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
     -- A confirmed run that was interrupted resumes on the next call; the user already
     -- agreed to this exact realm and guild. Otherwise confirmation is valid only for a
     -- canonical key that was previously offered through pendingConfirmation.
-    local resume = inProgressMap[canonicalKey] == true
+    -- Older releases also used "Forever" for an unknown realm, so their stored
+    -- consent for that key cannot establish which realm the user approved.
+    local trustedDestination = realm ~= "Forever" or verifiedMap[canonicalKey] == true
+    local resume = trustedDestination and inProgressMap[canonicalKey] == true
+    if not trustedDestination then inProgressMap[canonicalKey] = nil end
     local autoApproved = false
     if not resume then
         -- Only a realm explicitly approved for this legacy scope may be resumed
         -- without another question; the legacy key itself contains no realm.
-        if confirmed ~= true and meta.confirmedDestination == canonicalKey then
+        if confirmed ~= true and trustedDestination and meta.confirmedDestination == canonicalKey then
             confirmed = true
             autoApproved = true
             pendingMap[canonicalKey] = true
@@ -923,6 +949,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
             return false, "unconfirmed"
         end
         meta.confirmedDestination = canonicalKey
+        verifiedMap[canonicalKey] = true
     end
 
     if (type(source.orderOwners) == 'table' and next(source.orderOwners))
@@ -967,7 +994,7 @@ function Database.MigrateWorkshopScope(selfOrRealm, realmOrGuild, guildOrConfirm
 end
 
 function Database.ConfirmWorkshopMigration()
-    local realm = Database.GetRealmScope()
+    local realm = Database.GetWorkshopRealmScope()
     local guild = type(GetGuildInfo) == "function" and GetGuildInfo("player") or nil
     if not IsValidText(realm, 1, 128) or not IsValidText(guild, 1, 128) then
         return false, "invalid"
@@ -984,7 +1011,7 @@ function Database.ConfirmWorkshopMigration()
 end
 
 local function CurrentWorkshopScope()
-    local realm = Database.GetRealmScope()
+    local realm = Database.GetWorkshopRealmScope()
     local guild = type(GetGuildInfo) == 'function' and GetGuildInfo('player') or nil
     if not IsValidText(realm,1,128) or not IsValidText(guild,1,128) then return nil end
     local db = OldKraken.DB

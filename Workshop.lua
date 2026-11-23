@@ -164,13 +164,12 @@ local function validRealm(realm)
 end
 
 local function resolveRealm()
-    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
-        return OldKraken.Database:GetRealmScope()
+    if OldKraken.Database and type(OldKraken.Database.GetWorkshopRealmScope)=='function' then
+        return OldKraken.Database:GetWorkshopRealmScope()
     end
     local realm=type(GetRealmName)=='function' and GetRealmName() or nil
     if validRealm(realm) then return realm end
     if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
-    if realm=='' then return 'Forever' end
     return nil
 end
 
