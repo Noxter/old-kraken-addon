@@ -41,12 +41,20 @@ local function UpdateReannounceButton(control)
     end
 end
 local dungeonOptions = catalog.dungeon
-local dungeonLabels, dungeonLevels = {}, {}
-for _, options in ipairs({catalog.dungeon, catalog.raid, catalog.legacy and catalog.legacy.dungeon, catalog.legacy and catalog.legacy.raid}) do
-    if options then
-        for _, entry in ipairs(options) do
-            dungeonLabels[entry.value] = entry.label
-            if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+local dungeonLabels, dungeonLevels, dungeonCategories = {}, {}, {}
+for category, list in pairs({
+    dungeon = {catalog.dungeon, catalog.legacy and catalog.legacy.dungeon},
+    raid = {catalog.raid, catalog.legacy and catalog.legacy.raid},
+}) do
+    for _, options in ipairs(list) do
+        if options then
+            for _, entry in ipairs(options) do
+                dungeonLabels[entry.value] = entry.label
+                if entry.min and entry.max then
+                    dungeonLevels[entry.value] = entry
+                    dungeonCategories[entry.value] = category
+                end
+            end
         end
     end
 end
@@ -2764,7 +2772,7 @@ OldKraken:On('WORKSHOP_ALERT_SETTING', function() Finder:SyncAlertVisibility('wo
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not groupAlertsEnabled() then return end
-    local activityRange = (group.category == 'dungeon' or group.category == 'raid') and type(group.dungeon) == 'string' and group.dungeon ~= '' and dungeonLevels[group.dungeon] or nil
+    local activityRange = (group.category == 'dungeon' or group.category == 'raid') and type(group.dungeon) == 'string' and group.dungeon ~= '' and dungeonCategories[group.dungeon] == group.category and dungeonLevels[group.dungeon] or nil
     local effectiveMin = group.minLevel and activityRange and math.max(group.minLevel, activityRange.min) or group.minLevel or (activityRange and activityRange.min)
     local effectiveMax = group.maxLevel and activityRange and math.min(group.maxLevel, activityRange.max) or group.maxLevel or (activityRange and activityRange.max)
     if effectiveMin and effectiveMax then

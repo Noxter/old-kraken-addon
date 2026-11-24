@@ -85,5 +85,15 @@ local origGroupAlertsEnabled = OldKraken.GroupFinder.GroupAlertsEnabled
 OldKraken.GroupFinder.GroupAlertsEnabled = function() return false end
 assert(not fireGroup({dungeon = 'excavation', minLevel = 24, maxLevel = 60}, 27), '12. Disabled alerts must hide even when level matches')
 OldKraken.GroupFinder.GroupAlertsEnabled = origGroupAlertsEnabled
+
+-- 13. Partially specified group bounds with catalog activity -> still enforces catalog bounds
+assert(not fireGroup({dungeon = 'excavation', minLevel = nil, maxLevel = 60}, 42), '13a. nil minLevel ESW level 42 must hide')
+assert(fireGroup({dungeon = 'excavation', minLevel = nil, maxLevel = 60}, 27), '13b. nil minLevel ESW level 27 must show')
+assert(not fireGroup({dungeon = 'excavation', minLevel = 26, maxLevel = nil}, 25), '13c. nil maxLevel ESW level 25 must hide')
+assert(fireGroup({dungeon = 'excavation', minLevel = 26, maxLevel = nil}, 29), '13d. nil maxLevel ESW level 29 must show')
+
+-- 14. Category mismatch (e.g. raid with dungeon ID) -> ignores mismatched catalog range, uses group range
+assert(fireGroup({category = 'raid', dungeon = 'excavation', minLevel = 24, maxLevel = 60}, 42), '14a. Raid with dungeon ID must use group range')
+assert(not fireGroup({category = 'dungeon', dungeon = 'onyxia', minLevel = 20, maxLevel = 30}, 60), '14b. Dungeon with raid ID must use group range')
 ''')
 print('PASS: group alert activity level range intersection checks passed')
