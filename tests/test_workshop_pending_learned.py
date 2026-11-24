@@ -76,6 +76,15 @@ def test_workshop_pending_learned():
         _G.__testErrorPrints = errorPrints
         _G.__testSentProtocols = sentProtocols
         _G.__testPending = pending
+        _G.__testEventFrame = eventFrame
+        _G.__testDelayedProf = delayedProf
+        _G.__testProfMap = profMap
+        _G.__testScope = scope
+        _G.__testIdentity = identity
+        _G.__testLearnedRecipes = {}
+        C_TradeSkillUI.GetRecipeInfo = function(id)
+            return {name = 'Recipe ' .. tostring(id), learned = __testLearnedRecipes[id] == true}
+        end
     ''')
 
     for _ in range(11):
@@ -91,6 +100,54 @@ def test_workshop_pending_learned():
         for _, sent in ipairs(__testSentProtocols) do
             assert(sent.kind ~= 'WRLEARN', 'must not send WRLEARN for unlearned/ignored recipes')
         end
+
+        -- Clear 12001 so subsequent scenarios isolate their own counts.
+        __testPending[12001] = nil
+        for i = #__testInfoPrints, 1, -1 do __testInfoPrints[i] = nil end
+        for i = #__testSentProtocols, 1, -1 do __testSentProtocols[i] = nil end
+
+        -- 3. Late classification: unknown at NEW_RECIPE_LEARNED, resolves to secondary (185) later -> cleaned without notice.
+        __testEventFrame.scripts.OnEvent(__testEventFrame, 'NEW_RECIPE_LEARNED', 13001)
+        assert(__testPending[13001] == true, 'unknown recipe must initially enter pendingLearned')
+    ''')
+    tick(lua)
+    lua.execute('''
+        assert(__testPending[13001] == true, 'unknown recipe must remain pending before classification')
+        __testDelayedProf[13001] = 185
+    ''')
+    tick(lua)
+    lua.execute('''
+        assert(__testPending[13001] == nil, 'late-classified secondary recipe must be cleared from pendingLearned')
+        assert(#__testInfoPrints == 0 and #__testErrorPrints == 0, 'late-classified secondary recipe must not emit notices')
+
+        -- 4. Positive WRLEARN cycle: primary recipe resolves as learned -> stored locally and synced via WRLEARN once.
+        __testProfMap[13002] = 171
+        __testLearnedRecipes[13002] = true
+        __testEventFrame.scripts.OnEvent(__testEventFrame, 'NEW_RECIPE_LEARNED', 13002)
+        assert(__testPending[13002] == true, 'primary recipe must enter pendingLearned before scan')
+    ''')
+    for _ in range(3):
+        tick(lua)
+    lua.execute('''
+        assert(__testPending[13002] == nil, 'synced primary recipe must be cleared from pendingLearned')
+        local saved = __testScope.recipes[__testIdentity] and __testScope.recipes[__testIdentity][13002]
+        assert(type(saved) == 'table' and saved.profession == 171, 'learned primary recipe must be stored locally')
+        local wrlearnCount = 0
+        for _, sent in ipairs(__testSentProtocols) do
+            if sent.kind == 'WRLEARN' then wrlearnCount = wrlearnCount + 1 end
+        end
+        assert(wrlearnCount == 1, 'learned primary recipe must emit WRLEARN exactly once, got: ' .. tostring(wrlearnCount))
+
+        -- 5. Unresolvable recipe after 10 attempts: stays pending, emits 1 chatInfo notice, no repeat spam.
+        __testEventFrame.scripts.OnEvent(__testEventFrame, 'NEW_RECIPE_LEARNED', 13003)
+        assert(__testPending[13003] == true, 'unresolvable recipe must enter pendingLearned')
+    ''')
+    for _ in range(15):
+        tick(lua)
+    lua.execute('''
+        assert(__testPending[13003] == true, 'unresolvable recipe must not be dropped from pendingLearned')
+        assert(#__testErrorPrints == 0, 'unresolvable recipe must not emit chatError')
+        assert(#__testInfoPrints == 1, 'unresolvable recipe must emit exactly 1 chatInfo notice without repeat spam, got: ' .. tostring(#__testInfoPrints))
     ''')
     print('PASS: workshop pendingLearned filters secondary/gathering professions and uses chatInfo')
 
