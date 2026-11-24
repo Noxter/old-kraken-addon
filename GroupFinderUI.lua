@@ -2764,9 +2764,13 @@ OldKraken:On('WORKSHOP_ALERT_SETTING', function() Finder:SyncAlertVisibility('wo
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not groupAlertsEnabled() then return end
-    if group.minLevel and group.maxLevel then
+    local activityRange = (group.category == 'dungeon' or group.category == 'raid') and type(group.dungeon) == 'string' and group.dungeon ~= '' and dungeonLevels[group.dungeon] or nil
+    local effectiveMin = group.minLevel and activityRange and math.max(group.minLevel, activityRange.min) or group.minLevel or (activityRange and activityRange.min)
+    local effectiveMax = group.maxLevel and activityRange and math.min(group.maxLevel, activityRange.max) or group.maxLevel or (activityRange and activityRange.max)
+    if effectiveMin and effectiveMax then
+        if effectiveMin > effectiveMax then return end
         local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
-        if not level or level < group.minLevel or level > group.maxLevel then return end
+        if not level or level < 1 or level < effectiveMin or level > effectiveMax then return end
     end
     refreshPeople()
     local free = math.max(0, group.maxSize - #group.members)
