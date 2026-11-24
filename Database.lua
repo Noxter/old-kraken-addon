@@ -867,10 +867,11 @@ local function ShowMigrationDialog(promptText,T,data)
     end
     if not migrationFrame then
         local f=CreateFrame('Frame','OldKrakenWorkshopMigrationFrame',UIParent)
-        f:SetSize(440,176); f:SetPoint('TOP',UIParent,'TOP',0,-140); f:SetFrameStrata('DIALOG'); f:SetClampedToScreen(true)
+        f:SetSize(440,176); f:SetPoint('TOP',UIParent,'TOP',0,-140); f:SetClampedToScreen(true)
         f.TitleText=f:CreateFontString(nil,'OVERLAY','GameFontNormal')
         f.TitleText:SetText('Old Kraken')
         OldKraken.UIStyle.Window(f)
+        f:SetFrameStrata('DIALOG')
         local body=f:CreateFontString(nil,'OVERLAY','GameFontHighlight')
         if type(OldKraken.UIStyle.Font)=='function' then OldKraken.UIStyle.Font(body,13) end
         body:SetPoint('TOPLEFT',f,'TOPLEFT',20,-44); body:SetPoint('TOPRIGHT',f,'TOPRIGHT',-20,-44)

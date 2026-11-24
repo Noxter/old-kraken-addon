@@ -72,6 +72,8 @@ def make_client(realm='Realm', guild='Guild', player='Alice', secret_realm=False
         function methods:Show() self.shown = true end
         function methods:Hide() self.shown = false end
         function methods:IsShown() return self.shown end
+        function methods:SetFrameStrata(s) self.strata = s end
+        function methods:GetFrameStrata() return self.strata end
         function methods:CreateFontString() return CreateFrame() end
         function methods:CreateTexture() return CreateFrame() end
         function methods:GetFontString() return CreateFrame() end
@@ -726,7 +728,7 @@ lua.execute('''
     popupCount=0
     function StaticPopup_Show() popupCount=popupCount+1; return {} end
     OldKraken.UIStyle={
-        Window=function() end,
+        Window=function(f) f:SetFrameStrata('FULLSCREEN') end,
         Font=function() end,
         Button=function() end,
     }
@@ -737,6 +739,7 @@ lua.execute('''
     assert(popupCount==0, 'must not call StaticPopup_Show when UIStyle is present')
     local dlg=OldKrakenWorkshopMigrationFrame
     assert(dlg and dlg:IsShown(), 'custom migration dialog must be shown')
+    assert(dlg:GetFrameStrata()=='DIALOG', 'migration dialog strata must remain DIALOG after UIStyle.Window')
     dlg.acceptButton.scripts.OnClick()
     assert(not dlg:IsShown())
     assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
