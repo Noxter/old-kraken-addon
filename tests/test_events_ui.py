@@ -115,6 +115,7 @@ end
 function methods:Hide() self.shown = false end
 function methods:IsShown() return self.shown == true end
 function methods:CreateFontString() return CreateFrame() end
+function methods:GetStringHeight() return 14 end
 function methods:CreateTexture() return CreateFrame() end
 local meta = {__index=function(_, key)
     if key == 'TitleText' or key == 'CloseButton' then return nil end
@@ -205,4 +206,11 @@ assert(firstFrame.summaryLine:GetText():find('Власна назва рейду
 -- Cancel button exits creation mode back to the events list.
 firstFrame.cancelCreate.scripts.OnClick()
 assert(not firstFrame.creationMode and not firstFrame.summaryBar:IsShown())
+-- Regression: largeRoleIcon must only resize the leading :16:16: dimensions, not healer's :64:16:16:32: texcoords.
+firstFrame.previousPage.scripts.OnClick()
+firstFrame.eventRows[1].scripts.OnClick(firstFrame.eventRows[1])
+local selectedKey = firstFrame.visible and firstFrame.visible[1] and firstFrame.visible[1].key
+assert(selectedKey and OldKraken.GuildEvents:Signup(selectedKey, 'healer'))
+assert(firstFrame.signupRows[1] and firstFrame.signupRows[1].roleStatus.text:find(':26:26:0:0:64:16:16:32:0:16|t', 1, true),
+    'healer role icon texcoords corrupted: ' .. tostring(firstFrame.signupRows[1] and firstFrame.signupRows[1].roleStatus.text))
 ''')

@@ -730,7 +730,7 @@ local function readableFont(text,size)
     text:SetShadowColor(0,0,0,0.9); text:SetShadowOffset(1,-1)
 end
 local function largeRoleIcon(role,size)
-    return ((catalog.roleIcons[role] or ''):gsub(':16:16:',':'..size..':'..size..':'))
+    return ((catalog.roleIcons[role] or ''):gsub(':16:16:',':'..size..':'..size..':',1))
 end
 local function roleColumnText(e,classes,role)
     local count=0
