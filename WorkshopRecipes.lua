@@ -1119,15 +1119,24 @@ render=function()
             updateTypeFilterText()
         end
     end
-    frame.onlineOnly:SetShown(mastersView and true or false)
-    if mastersView then
-        if frame.onlineOnly.SetActive then
-            frame.onlineOnly:SetActive(mastersOnline)
-            if frame.onlineOnly.SetDotColor then frame.onlineOnly:SetDotColor(mastersOnline and 'success' or 'neutral') end
-            frame.onlineOnly:SetText(mastersOnline and T('Лише онлайн: так') or T('Лише онлайн: ні'))
+    local showOnlineOnly=not selectRecipe and not viewOwner
+    if frame.onlineOnly then
+        frame.onlineOnly:ClearAllPoints()
+        if frame.embedded then
+            frame.onlineOnly:SetPoint('TOPLEFT',frame,'TOPLEFT',showTypeFilter and 654 or 462,-61)
         else
+            frame.onlineOnly:SetPoint('TOPLEFT',frame,'TOPLEFT',showTypeFilter and 638 or 455,-74)
+        end
+        frame.onlineOnly:SetShown(showOnlineOnly)
+        if showOnlineOnly then
+            if frame.onlineOnly.SetActive then
+                frame.onlineOnly:SetActive(mastersOnline)
+                if frame.onlineOnly.SetDotColor then frame.onlineOnly:SetDotColor(mastersOnline and 'success' or 'neutral') end
+            end
             frame.onlineOnly:SetText(mastersOnline and T('Лише онлайн: так') or T('Лише онлайн: ні'))
         end
+    end
+    if mastersView then
         local masters={}
         local workshop=OldKraken.Workshop
         if workshop then
@@ -1206,6 +1215,7 @@ render=function()
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
             and (not showTypeFilter or matchesRecipeType(classifyRecipe(entry.record),selectedType))
+            and (selectRecipe or viewOwner or not mastersOnline or entry.owner==identity or online[entry.owner]==true)
             and matchesFilter(entry.record,filter) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
@@ -1251,6 +1261,13 @@ render=function()
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(displayRecipeName(r))
         local masters=Recipes:FindMasters(r.item,r.recipe,r.profession)
+        if not selectRecipe and not viewOwner and mastersOnline then
+            local onlineMasters={}
+            for _,m in ipairs(masters) do
+                if m.name==identity or online[m.name]==true then onlineMasters[#onlineMasters+1]=m end
+            end
+            masters=onlineMasters
+        end
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
         if viewOwner~=nil then
             selectedRecipeMaster=viewOwner~=identity and viewOwner or nil
@@ -1342,6 +1359,9 @@ render=function()
                 frame.detailTitle:SetText(T('Нічого не знайдено'))
                 frame.detailInfo:SetText(T('За поточним пошуком або фільтром типу рецептів не знайдено.'))
             end
+        elseif #list==0 and not selectRecipe and mastersOnline then
+            frame.detailTitle:SetText(T('Нічого не знайдено'))
+            frame.detailInfo:SetText(T('Серед майстрів онлайн рецептів не знайдено. Вимкніть фільтр «Лише онлайн», щоб побачити всі збережені рецепти.'))
         else
             frame.detailTitle:SetText(T('Оберіть рецепт')); frame.detailInfo:SetText(T('Перегляньте збережені рецепти або знайдіть предмет.'))
         end
@@ -1363,7 +1383,7 @@ local function switchTab(nextTab)
     tab=nextTab
     viewOwner,selectedEntry,selectedMaster=saved.owner,saved.selected,saved.master
     selectedRecipeMaster=nil
-    offset,mastersOnline=saved.offset or 0,saved.online==true
+    offset=saved.offset or 0
     if selectedEntry then
         local stored=people[selectedEntry.owner] and people[selectedEntry.owner][selectedEntry.record.recipe]
         selectedEntry=validRecord(stored) and {owner=selectedEntry.owner,record=stored} or nil
@@ -1444,9 +1464,9 @@ local function createWindow(parent)
     if OldKraken.UIStyle.Chip then
         f.onlineOnly = OldKraken.UIStyle.Chip(f, T('Лише онлайн: ні'), {dot = 'success', width = 170, height = 34, rounded = true})
         f.onlineOnly:SetPoint('TOPLEFT', f, 'TOPLEFT', 455, -74)
-        f.onlineOnly:SetScript('OnClick', function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end)
+        f.onlineOnly:SetScript('OnClick', function() mastersOnline=not mastersOnline; selectedEntry=nil; selectedRecipeMaster=nil; selectedMaster=nil; offset=0; render() end)
     else
-        f.onlineOnly=button(f,T('Лише онлайн: ні'),455,-74,160,function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end,nil,{rounded=true,height=34})
+        f.onlineOnly=button(f,T('Лише онлайн: ні'),455,-74,160,function() mastersOnline=not mastersOnline; selectedEntry=nil; selectedRecipeMaster=nil; selectedMaster=nil; offset=0; render() end,nil,{rounded=true,height=34})
     end
     f.pickProfession=CreateFrame('Frame','OldKrakenRecipePickerProfession',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f.pickProfession,{rounded=true})
     f.pickProfession:SetPoint('TOPLEFT',f,'TOPLEFT',439,-71); UIDropDownMenu_SetWidth(f.pickProfession,160)
@@ -1791,7 +1811,7 @@ function Recipes:Show(forceNavigation)
         self:CancelPicker()
         OldKraken.Workshop:Navigate('recipes',forceNavigation)
     elseif not frame then frame=createWindow() end
-    professionContext,temporaryProfessionContext,selectedMaster,tab,viewOwner,selectRecipe,selectedType=nil,false,nil,'recipes',nil,nil,'all'
+    professionContext,temporaryProfessionContext,selectedMaster,tab,viewOwner,selectRecipe,mastersOnline,selectedType=nil,false,nil,'recipes',nil,nil,false,'all'
     restoringView=true; frame.query:SetText(''); restoringView=false
     addCached('')
     frame:Show(); render()
