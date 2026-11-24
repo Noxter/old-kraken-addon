@@ -43,8 +43,12 @@ OldKraken.listeners.GROUP_FINDER_NEW(group)
 assert(alert.roleSlots[5].role=='' and alert.roleSlots[5].memberName=='Unknown Role')
 assert(alert.roleSlots[5].icon.texture:find('QuestionMark',1,true),'must not invent a role')
 OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(group,'Applicant','healer')
-assert(alert.height==112)
+assert(alert.width==480 and alert.height==122 and alert.alertChrome:IsShown() and alert.alertFooter.height==26)
+assert(alert.alertArt:IsShown() and alert.alertArt.width==52 and alert.alertArt.height==52)
 for _,slot in ipairs(alert.roleSlots) do assert(not slot:IsShown()) end
+OldKraken.listeners.GUILD_EVENTS_NEW_SIGNUP('e1',{owner='Owner',title='Onyxia',activity='onyxia',size=10,statuses={Owner='accepted',Person='accepted'}},'Person','dps')
+assert(alert.alertSubtitle.text:find('(2/10)',1,true),'event_signup must show participant count')
+assert(type(alert.alertArt.texture)=='string' and alert.alertArt.texture:find('Onyxia.tga',1,true),'event_signup must show Onyxia art')
 finder:PreviewAlert('group'); assert(alert.roleSlots[1]:IsShown() and alert.height==204)
 group.category='raid'; group.maxSize=200; group.members={'Tank Owner'}
 for i=2,200 do group.members[i]='Raider '..i end

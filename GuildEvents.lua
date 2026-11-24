@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Guild-only event calendar. The event owner is authoritative for signups.
 local Events = {}
 OldKraken.GuildEvents = Events
@@ -6,7 +12,9 @@ local comm, codec = OldKraken.Communication, OldKraken.GroupFinder
 local function memberSpecText(name)
     local transport = OldKraken.Communication
     local spec = name and transport and transport.GetRosterSpec and transport:GetRosterSpec(name)
-    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then
+        return OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name
+    end
 end
 local kinds = {raid='Рейд', dungeon='Підземелля', pvp='PvP', guild='Збір гільдії'}
 local roles = {tank='Танк', healer='Лікар', dps='DPS', flex='Учасник'}
@@ -30,18 +38,49 @@ StaticPopupDialogs.OLDKRAKEN_EVENT_DELETE={
     timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     OnAccept=function(_,callback) if type(callback)=='function' then callback() end end,
 }
-for _,options in ipairs({catalog.dungeon,catalog.raid}) do
-    for _,entry in ipairs(options) do if entry.value~='' then activityLabels[entry.value]=entry.label end end
+for _,options in ipairs({catalog.dungeon,catalog.raid,catalog.legacy and catalog.legacy.dungeon,catalog.legacy and catalog.legacy.raid}) do
+    if options then
+        for _,entry in ipairs(options) do if entry.value~='' then activityLabels[entry.value]=entry.label end end
+    end
+end
+local function displayEventTitle(e)
+    if type(e) ~= 'table' then return '' end
+    local title = type(e.title) == 'string' and e.title or ''
+    if catalog and type(catalog.IsCanonicalTitle) == 'function' and catalog.IsCanonicalTitle(e.activity, title) then
+        return activityLabels[e.activity] or title
+    end
+    return title
+end
+function Events:DisplayTitle(e)
+    return displayEventTitle(e)
 end
 local function validActivity(kind, id)
     if id=='' then return true end
     if type(id)~='string' then return false end
+    if catalog and catalog.IsValidActivity then return catalog.IsValidActivity(kind, id) end
     for _,entry in ipairs(catalog[kind] or {}) do if entry.value==id then return true end end
     return false
 end
 
 local function validText(s, low, high)
+    if type(issecretvalue) == 'function' and issecretvalue(s) then return false end
     return type(s) == 'string' and #s >= low and #s <= high and not s:find('[%z\1-\31\127]')
+end
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm) == 'function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    return validText(realm, 1, 128)
+end
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope) == 'function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue) == 'function' and issecretvalue(realm) then return nil end
+    if realm == '' then return 'Forever' end
+    return nil
 end
 local function eventKey(owner, id) return owner .. '\001' .. id end
 local function validID(s) return validText(s, 1, 64) and s:match('^[%w%-]+$') ~= nil end
@@ -306,15 +345,15 @@ function Events:PumpRaidInvites()
     local e=events[job.key]
     if not active or not e or e.owner~=identity or e.cancelled or e.kind~='raid' or GetTime()>job.expires then raidInvites=nil; return end
     if type(InCombatLockdown)=='function' and InCombatLockdown() then return end
-    if not canLeadInvites() then raidInvites=nil; print(T('Old Kraken: для запрошень потрібні права лідера або помічника рейду.')); return end
+    if not canLeadInvites() then raidInvites=nil; chatError(T('Old Kraken: для запрошень потрібні права лідера або помічника рейду.')); return end
     local inRaid=type(IsInRaid)=='function' and IsInRaid()
     local count=type(GetNumGroupMembers)=='function' and GetNumGroupMembers() or 0
     if not inRaid and count and count>0 then
         if not job.convertAt or GetTime()-job.convertAt>=5 then
             local convert=C_PartyInfo and C_PartyInfo.ConvertToRaid or ConvertToRaid
-            if type(convert)~='function' then raidInvites=nil; print(T('Old Kraken: перетворіть групу на рейд вручну.')); return end
+            if type(convert)~='function' then raidInvites=nil; chatError(T('Old Kraken: перетворіть групу на рейд вручну.')); return end
             local ok,result=pcall(convert); job.convertAt=GetTime()
-            if not ok or result==false then raidInvites=nil; print(T('Old Kraken: не вдалося перетворити групу на рейд.')); end
+            if not ok or result==false then raidInvites=nil; chatError(T('Old Kraken: не вдалося перетворити групу на рейд.')); end
         end
         return
     end
@@ -324,9 +363,9 @@ function Events:PumpRaidInvites()
         local name=job.names[job.index]; job.index=job.index+1
         if e.people[name] and e.statuses[name]=='accepted' and name~=identity and not alreadyGrouped(name) then
             local invite=C_PartyInfo and C_PartyInfo.InviteUnit or InviteUnit
-            if type(invite)~='function' then raidInvites=nil; print(T('Old Kraken: API запрошень недоступний.')); return end
+            if type(invite)~='function' then raidInvites=nil; chatError(T('Old Kraken: API запрошень недоступний.')); return end
             local ok,result=pcall(invite,name)
-            if not ok or result==false then raidInvites=nil; print(T('Old Kraken: не вдалося надіслати запрошення в рейд.')); return end
+            if not ok or result==false then raidInvites=nil; chatError(T('Old Kraken: не вдалося надіслати запрошення в рейд.')); return end
             if not inRaid then job.sentSolo=job.sentSolo+1 end
             return
         end
@@ -425,10 +464,10 @@ end
 
 local function connect()
     local name, guild = character(), type(GetGuildInfo)=='function' and GetGuildInfo('player')
-    local realm = type(GetRealmName)=='function' and GetRealmName() or ''
-    if not name or not validText(guild,1,128) or type(realm)~='string' or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
-        active=false; events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}; selected=nil
-        if window then window:Hide() end
+    local realm = resolveRealm()
+    if not name or not validText(guild,1,128) or not validRealm(realm) or not OldKraken.DB or type(OldKraken.DB.events)~='table' then
+        active,identity,profile,storage=false,nil,nil,nil; events,directEvents,relayEvents,dirty,intents,newDirty,relayDirty={}, {}, {}, {}, {}, {}, {}; selected=nil
+        if window and not OldKraken.UIHub then window:Hide() end
         return
     end
     local key=realm..'\001'..guild..'\001'..name
@@ -500,7 +539,7 @@ local function connect()
     comm:SendProtocol('CEVQUERY',''); fire()
 end
 local frame=CreateFrame('Frame')
-frame:RegisterEvent('PLAYER_LOGIN'); frame:RegisterEvent('GUILD_ROSTER_UPDATE'); frame:RegisterEvent('GROUP_ROSTER_UPDATE')
+frame:RegisterEvent('PLAYER_LOGIN'); pcall(frame.RegisterEvent,frame,'PLAYER_ENTERING_WORLD'); pcall(frame.RegisterEvent,frame,'PLAYER_GUILD_UPDATE'); frame:RegisterEvent('GUILD_ROSTER_UPDATE'); frame:RegisterEvent('GROUP_ROSTER_UPDATE')
 frame:SetScript('OnEvent',function(_,event)
     connect()
     if (event=='GUILD_ROSTER_UPDATE' or event=='GROUP_ROSTER_UPDATE') and window and window:IsShown() and refresh then refresh() end
@@ -509,7 +548,8 @@ if C_Timer and C_Timer.NewTicker then
     C_Timer.NewTicker(3,function()
         if not active then connect(); return end
         local name,guild=character(),type(GetGuildInfo)=='function' and GetGuildInfo('player')
-        if name~=identity or not guild or (type(GetRealmName)=='function' and (GetRealmName()..'\001'..guild..'\001'..name)~=profile) then active=false; connect(); return end
+        local realm=resolveRealm()
+        if name~=identity or not validText(guild,1,128) or not validRealm(realm) or (realm..'\001'..guild..'\001'..name)~=profile then active=false; connect(); return end
         local removed = false
         for key,e in pairs(events) do
             if e.when < GetServerTime()-172800 then events[key],directEvents[key],relayEvents[key],dirty[key],intents[key],newDirty[key],relayDirty[key],storage.relays[key]=nil,nil,nil,nil,nil,nil,nil,nil; removed=true end
@@ -743,7 +783,7 @@ refresh=function()
         if entry then
             local e=entry.event
             catalog.SetArtwork(row.art,e.activity)
-            row.title:SetText(e.title)
+            row.title:SetText(displayEventTitle(e))
             row.meta:SetText((kinds[e.kind] or e.kind)..' · '..acceptedCount(e)..'/'..e.size)
             if row.date then row.date:SetText(date('%d.%m %H:%M',e.when)) end
             if OldKraken.UIStyle.ApplySelection then OldKraken.UIStyle.ApplySelection(row, selected==entry.key) end
@@ -767,7 +807,7 @@ refresh=function()
             lines[#lines+1]=participantLabel(name,role,e.statuses[name],classes)
         end
         local own=e.owner==identity
-        window.detailsTitle:SetText(e.title); window.detailsTitle:Show()
+        window.detailsTitle:SetText(displayEventTitle(e)); window.detailsTitle:Show()
         window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsTitle,'BOTTOMLEFT',0,-8)
         local description=e.description~='' and (T('\n\n|cff9ba9bcОпис:|r\n')..e.description) or ''
         local activity=kinds[e.kind]..(e.activity~='' and ' · '..(activityLabels[e.activity] or e.activity) or '')
@@ -830,7 +870,7 @@ refresh=function()
                     row.hover=CreateFrame('Frame',nil,row); row.hover:SetPoint('TOPLEFT'); row.hover:SetSize(window.detailsWidth-118,30); row.hover:EnableMouse(true)
                     row.hover:SetScript('OnEnter',function(self) if GameTooltip and self.tooltipName then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltipName); GameTooltip:AddLine(self.tooltipStatus,1,1,1,true); GameTooltip:Show() end end)
                     row.hover:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
-                    row.accept=action(row,T('Прийняти'),0,-40,24,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then print(T('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.')) end end,nil,{rounded=true,capWidth=4,height=24})
+                    row.accept=action(row,T('Прийняти'),0,-40,24,function(self) if not Events:Decide(selected,self:GetParent().member,'accepted') then chatError(T('Old Kraken: не вдалося прийняти учасника; перевірте вільні місця.')) end end,nil,{rounded=true,capWidth=4,height=24})
                     row.reserve=action(row,T('Резерв'),100,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'reserve') end,nil,{rounded=true,capWidth=4,height=24})
                     row.reject=action(row,T('Відхилити'),200,-40,24,function(self) Events:Decide(selected,self:GetParent().member,'rejected') end,nil,{rounded=true,capWidth=4,height=24})
                     row.invite=action(row,T('Інвайт у рейд'),0,-68,24,function(self) Events:InviteMember(selected,self:GetParent().member) end,'primary',{rounded=true,capWidth=4,height=24})
@@ -868,16 +908,13 @@ refresh=function()
         if detailsScrollBar and detailsScrollBar.SetShown then detailsScrollBar:SetShown(#names > 5) end
         window.detailsContent:SetHeight(math.max(250,height+8))
         window.inviteAll:SetShown(own and e.kind=='raid')
-        if currentRole == 'flex' or not canPerformRole(identity, currentRole) then
-            currentRole = 'dps'
-            for _, candidate in ipairs({'tank', 'healer', 'dps'}) do
-                if canPerformRole(identity, candidate) then currentRole = candidate; break end
-            end
-            UIDropDownMenu_SetText(window.roleMenu, roles[currentRole])
-        end
+        window.roleSelector:Update()
         local canJoin=not e.relayed and not pending and (not e.people[identity] or e.statuses[identity]=='rejected')
         window.join:SetShown(canJoin)
-        window.roleMenu:SetShown(canJoin)
+        window.roleSelector:SetShown(canJoin)
+        if canJoin then
+            if currentRole ~= '' and canPerformRole(identity, currentRole) then window.join:Enable() else window.join:Disable() end
+        end
         window.leave:SetShown(not e.relayed and ((pending and pending.role~='leave') or (not pending and e.people[identity] ~= nil and e.statuses[identity]~='rejected')))
         window.cancel:SetShown(e.owner==identity)
         if window.leaveBaseX and window.leaveY then
@@ -907,12 +944,114 @@ refresh=function()
         if window.participantsDivider then window.participantsDivider:Hide() end
         window.roleSummary:Hide(); window.roleFlex:Hide(); window.flexButton:Hide(); for _,button in ipairs(window.roleButtons) do button:Hide() end; for _,column in ipairs(window.roleColumns) do column:Hide() end
         window.participantHeader:Hide(); window.detailsTitle:Hide(); window.details:ClearAllPoints(); window.details:SetPoint('TOPLEFT',window.detailsContent,'TOPLEFT',0,0)
-        window.details:SetText(T('Оберіть подію зі списку.')); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleMenu:Hide()
+        window.details:SetText(T('Оберіть подію зі списку.')); window.inviteAll:Hide(); window.cancel:Hide(); window.join:Hide(); window.leave:Hide(); window.roleSelector:Hide()
         local detailsScrollBar = _G.OldKrakenEventsDetailsScrollScrollBar
         if detailsScrollBar and detailsScrollBar.SetShown then detailsScrollBar:SetShown(false) end
         window.detailsContent:SetHeight(250)
     end
 end
+local function styleRoleSegment(b, active)
+    b.active = active and true or false
+    local colors = OldKraken.UIStyle and OldKraken.UIStyle.Colors
+    if not colors or type(b.fillParts) ~= 'table' then return end
+    local fill = active and colors.primaryButton or colors.button
+    local edge = active and colors.primaryButtonEdge or colors.buttonEdge
+    if fill then for _, t in ipairs(b.fillParts) do t:SetVertexColor(fill[1], fill[2], fill[3], fill[4] or 1); t.color = fill end end
+    if edge then for _, t in ipairs(b.ringParts or {}) do t:SetVertexColor(edge[1], edge[2], edge[3], edge[4] or 1); t.color = edge end end
+end
+local function roleChoiceLabel(value)
+    local icon = (catalog and catalog.roleIcons and catalog.roleIcons[value]) or ''
+    return (icon ~= '' and (icon .. ' ') or '') .. '|c' .. (roleColors[value] or 'ffb5b5b5') .. (roles[value] or T('Невідомо')) .. '|r'
+end
+local function createRoleSelector(parent, x, y, width)
+    local selector = CreateFrame('Frame', nil, parent)
+    selector:SetSize(width, 34)
+    selector:SetPoint('TOPLEFT', parent, 'TOPLEFT', x, y)
+    selector.buttons = {}
+    selector.allowedRoles = {}
+    selector.mode = 'none'
+    selector.selectedRole = ''
+    for i = 1, 3 do
+        local b = CreateFrame('Button', nil, selector, 'UIPanelButtonTemplate')
+        OldKraken.UIStyle.Button(b, nil, {rounded = true})
+        b:SetSize(42, 34)
+        b:SetScript('OnClick', function(self)
+            if not self.role or not canPerformRole(identity, self.role) then return end
+            currentRole = self.role
+            selector:Update()
+        end)
+        b:SetScript('OnEnter', function(self)
+            if GameTooltip and self.role then
+                GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+                GameTooltip:SetText(roles[self.role] or self.role)
+                GameTooltip:Show()
+            end
+        end)
+        b:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+        b:Hide()
+        selector.buttons[i] = b
+    end
+    local badge = CreateFrame('Frame', nil, selector)
+    if OldKraken.UIStyle and OldKraken.UIStyle.Panel then
+        OldKraken.UIStyle.Panel(badge, 0, 0, width, 34)
+    end
+    badge:SetSize(width, 34)
+    badge:SetPoint('TOPLEFT', selector, 'TOPLEFT', 0, 0)
+    badge.text = badge:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    readableFont(badge.text, 13)
+    badge.text:SetPoint('LEFT', badge, 'LEFT', 10, 0)
+    badge.text:SetPoint('RIGHT', badge, 'RIGHT', -10, 0)
+    badge.text:SetJustifyH('CENTER')
+    badge.text:SetWordWrap(false)
+    badge:Hide()
+    selector.badge = badge
+    function selector:Update()
+        local allowed = {}
+        for _, candidate in ipairs({'tank', 'healer', 'dps'}) do
+            if canPerformRole(identity, candidate) then allowed[#allowed + 1] = candidate end
+        end
+        self.allowedRoles = allowed
+        if currentRole == 'flex' or not canPerformRole(identity, currentRole) then
+            currentRole = allowed[1] or ''
+        end
+        self.selectedRole = currentRole
+        if #allowed >= 2 then
+            self.mode = 'buttons'
+            self.badge:Hide()
+            local gap = 4
+            local btnW = math.floor((width - gap * (#allowed - 1)) / #allowed)
+            for i = 1, 3 do
+                local b = self.buttons[i]
+                local r = allowed[i]
+                if r then
+                    b.role = r
+                    b:SetSize(btnW, 34)
+                    b:ClearAllPoints()
+                    b:SetPoint('TOPLEFT', self, 'TOPLEFT', (i - 1) * (btnW + gap), 0)
+                    b:SetText((catalog and catalog.roleIcons and catalog.roleIcons[r]) or (roles[r] or r))
+                    styleRoleSegment(b, r == currentRole)
+                    b:Show()
+                else
+                    b.role = nil
+                    b.active = false
+                    b:Hide()
+                end
+            end
+        elseif #allowed == 1 then
+            self.mode = 'badge'
+            for i = 1, 3 do self.buttons[i].role = nil; self.buttons[i].active = false; self.buttons[i]:Hide() end
+            self.badge.text:SetText(roleChoiceLabel(allowed[1]))
+            self.badge:Show()
+        else
+            self.mode = 'none'
+            for i = 1, 3 do self.buttons[i].role = nil; self.buttons[i].active = false; self.buttons[i]:Hide() end
+            self.badge.text:SetText(T('|cff9aa5b1Немає доступної ролі|r'))
+            self.badge:Show()
+        end
+    end
+    return selector
+end
+
 local function createWindow(parent)
     local f
     local embedded=parent~=nil
@@ -1006,11 +1145,11 @@ local function createWindow(parent)
             local entry=f.visible and f.visible[(page-1)*EVENTS_PER_PAGE+index]; local e=entry and events[entry.key]
             if not active or not e or e.owner~=identity or e.cancelled then return end
             local key,expectedProfile,expectedIdentity=entry.key,profile,identity
-            local popup=StaticPopup_Show('OLDKRAKEN_EVENT_DELETE',e.title,nil,function()
-                if not active or profile~=expectedProfile or identity~=expectedIdentity or not Events:Cancel(key) then print(T('Old Kraken: не вдалося видалити подію.')); return end
+            local popup=StaticPopup_Show('OLDKRAKEN_EVENT_DELETE',displayEventTitle(e),nil,function()
+                if not active or profile~=expectedProfile or identity~=expectedIdentity or not Events:Cancel(key) then chatError(T('Old Kraken: не вдалося видалити подію.')); return end
                 if selected==key then selected=nil; refresh() end
             end)
-            if not popup then print(T('Old Kraken: не вдалося відкрити підтвердження видалення.')); return end
+            if not popup then chatError(T('Old Kraken: не вдалося відкрити підтвердження видалення.')); return end
             if not popup.oldKrakenRestoreHook then
                 popup:HookScript('OnHide',function(self) if self.oldKrakenStrata then self:SetFrameStrata(self.oldKrakenStrata); self.oldKrakenStrata=nil end end)
                 popup.oldKrakenRestoreHook=true
@@ -1087,8 +1226,8 @@ local function createWindow(parent)
     f.flexButton=roleButton(f.roleFlex,'flex'); f.flexButton:SetWidth(detailsWidth)
     f.participantHeader=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontNormal'); f.participantHeader:SetWidth(detailsWidth); f.participantHeader:SetJustifyH('LEFT'); f.participantHeader:SetTextColor(0.88, 0.69, 0.32, 1); readableFont(f.participantHeader,15)
     f.details=f.detailsContent:CreateFontString(nil,'OVERLAY','GameFontHighlight'); f.details:SetPoint('TOPLEFT',f.detailsContent,'TOPLEFT',0,0); f.details:SetWidth(detailsWidth); f.details:SetJustifyH('LEFT'); f.details:SetJustifyV('TOP'); f.details:SetWordWrap(true); f.details:SetSpacing(4); readableFont(f.details,15)
-    f.roleMenu=selectMenu(f,'OldKrakenEventsRole',450+shift,embedded and -562 or -395,134,{'tank','healer','dps'},roles,function() return currentRole end,function(v) currentRole=v end,function(v) return canPerformRole(identity,v) end,nil,{rounded=true})
-    f.join=action(f,T('Записатися'),450+shift+140,embedded and -562 or -395,116,function() if selected and not Events:Signup(selected,currentRole) then print(T('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.')) end end,'primary',{rounded=true,height=34})
+    f.roleSelector=createRoleSelector(f,450+shift,embedded and -562 or -395,134)
+    f.join=action(f,T('Записатися'),450+shift+140,embedded and -562 or -395,116,function() if selected and currentRole~='' and not Events:Signup(selected,currentRole) then chatError(T('Old Kraken: не вдалося записатися; перевірте місця та зв’язок.')) end end,'primary',{rounded=true,height=34})
     f.leaveBaseX = 450 + shift
     f.leaveY = embedded and -562 or -395
     f.leave=action(f,T('Виписатися'),f.leaveBaseX+140,f.leaveY,116,function() if selected then Events:Signup(selected,'leave') end end,nil,{rounded=true,height=34})
@@ -1419,7 +1558,7 @@ local function createWindow(parent)
     end, nil, {rounded = true, height = 38})
 
     local function showSubmitError(msg)
-        print('|cffff5555Old Kraken|r: ' .. msg)
+        chatError(msg)
         if f.summaryLine then
             local d = (OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.danger) or {1, 0.48, 0.43, 1}
             f.summaryLine:SetTextColor(d[1], d[2], d[3])
@@ -1447,13 +1586,13 @@ local function createWindow(parent)
                 local msg = (T('[Old Kraken] Новий івент: ') .. eventTitle .. ' · ' .. date('%d.%m %H:%M', when) .. sizePart .. T(' — запис у вкладці «Івенти» (/okr).')):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
                 if sendChat then
                     local sent, err = pcall(sendChat, msg, 'GUILD')
-                    if not sent then print(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
+                    if not sent then chatError(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
                 else
-                    print(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
+                    chatError(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
                 end
             end
             resetDraft(); refresh()
-            print(T('Old Kraken: подію збережено; синхронізацію поставлено в чергу.'))
+            chatInfo(T('Old Kraken: подію збережено; синхронізацію поставлено в чергу.'))
         else
             showSubmitError(T('Перевірте назву, дату, кількість місць і належність до гільдії.'))
         end
@@ -1472,14 +1611,14 @@ local function createWindow(parent)
         f.description, f.description.label,
         f.summaryBar, f.cancelCreate, f.submit,
     }
-    f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleMenu,f.detailPanel}
+    f.viewControls={f.empty,f.emptyAction,f.previousPage,f.nextPage,f.pageLabel,scroll,f.join,f.leave,f.cancel,f.inviteAll,f.roleSelector,f.detailPanel}
     f.SetCreationMode=function(_,value) f.creationMode=value==true; refresh() end
     f:HookScript('OnShow',refresh)
     f:Hide(); return f
 end
 function Events:Show()
     if not active then connect() end
-    if not active then print(T('Old Kraken: календар доступний після входу до гільдії.')); return end
+    if not active then chatError(T('Old Kraken: календар доступний після входу до гільдії.')); return end
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('events')
     else
@@ -1496,6 +1635,7 @@ function Events:ShowEvent(key)
 end
 if OldKraken.UIHub then
     OldKraken.UIHub:RegisterPage('events', 'Івенти', '03', function(parent)
+        if not active then connect() end
         if not window then window=createWindow(parent) end
         return window
     end)
@@ -1508,8 +1648,9 @@ end
 
 function Events:PrintRelayDiagnostics()
     local s=self:GetRelayDiagnostics()
-    print('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
+    chatInfo('|cff2ec4b6Old Kraken|r: Guild Events relay diagnostics (session counters)')
     for _,reason in ipairs({'invalid_payload','rejected_relay_cancelled','rejected_relay_sender','rejected_relay_mismatch','rejected_relay_stale','rejected_relay_equivocation','rejected_direct_stale','rejected_direct_equivocation','rejected_capacity'}) do
+        -- Indented diagnostic sub-lines intentionally omit the addon prefix.
         print('  '..reason..': '..s[reason])
     end
 end

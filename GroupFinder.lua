@@ -178,7 +178,8 @@ function Finder:Create(title, category, description, maxSize, minLevel, maxLevel
     dungeon = dungeon or ''
     if role == '' then return false, 'role' end
     if not self:CanPerformRole(self.identity,role) then return false, 'class_role' end
-    if category == 'dungeon' and (maxSize ~= 5 or (role ~= 'tank' and role ~= 'healer' and role ~= 'dps')) then return false, 'roles' end
+    if category == 'dungeon' and maxSize ~= 5 then return false, 'dungeon_size' end
+    if category == 'dungeon' and role ~= 'tank' and role ~= 'healer' and role ~= 'dps' then return false, 'roles' end
     if type(dungeon) ~= 'string' or #dungeon > 32 or (dungeon ~= '' and not validID(dungeon)) or (category ~= 'dungeon' and category ~= 'raid' and dungeon ~= '') then return false, 'invalid' end
     if not validText(title, 1, 100) or not categories[category]
         or not validText(description, 0, 500) or not maxSize or maxSize % 1 ~= 0

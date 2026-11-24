@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Guild profession directory. Each character publishes only their own snapshot.
 local Workshop = {currentView='professions', navigationStack={}}
 OldKraken.Workshop = Workshop
@@ -61,6 +67,9 @@ local function changed()
     scheduleRender()
     if type(OldKraken.Fire)=='function' then OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED') end
 end
+OldKraken:On('WORKSHOP_SCOPE_MIGRATED',function(migratedProfile)
+    if active and profile==migratedProfile then changed() end
+end)
 -- Nil or invalid indexes and temporarily unavailable APIs are not removals.
 local function scan()
     if type(GetProfessions)~='function' or type(GetProfessionInfo)~='function' then return nil end
@@ -147,14 +156,35 @@ comm:RegisterHandler('WKQUERY',function(sender,_,payload)
     for owner in pairs(store.professionRelays) do professionRelayDirty[owner]=true end
 end)
 
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm)=='function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    return usable(realm,'string') and #realm>=1 and #realm<=128 and not realm:find('[%z\1-\31\127]')
+end
+
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
+    if realm=='' then return 'Forever' end
+    return nil
+end
+
 local function connect()
     local name=fullName()
     local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
-    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
-    if not name or not usable(guild,'string') or guild=='' or #guild>128 or not usable(realm,'string') or not OldKraken.DB then
+    local realm=resolveRealm()
+    if not name or not usable(guild,'string') or guild=='' or #guild>128 or guild:find('[%z\1-\31\127]') or not validRealm(realm) or not OldKraken.DB then
         active,identity,profile,store,records,nativeProfessions=false,nil,nil,nil,{},{}
-        if frame then frame:Hide() end
+        if frame and not OldKraken.UIHub then frame:Hide() end
         return
+    end
+    if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
+        OldKraken.Database:MigrateWorkshopScope(realm,guild,false)
     end
     local key=realm..'\001'..guild
     if active and profile==key and identity==name then return end
@@ -219,6 +249,9 @@ function Workshop:RefreshNativeProfessions()
     end
     if C_Timer and C_Timer.After then C_Timer.After(0,step) else step() end
     return true
+end
+function Workshop:IsActive()
+    return active == true
 end
 function Workshop:GetMemberProfessions(name)
     if not active or not usable(name,'string') then return {} end
@@ -302,12 +335,12 @@ local function updateOwn()
     changed(); return true
 end
 local listener=CreateFrame('Frame')
-for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','SKILL_LINES_CHANGED','LEARNED_SPELL_IN_SKILL_LINE','CHAT_MSG_SKILL','TRADE_SKILL_SHOW'}) do
+for _,event in ipairs({'PLAYER_LOGIN','PLAYER_ENTERING_WORLD','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','SKILL_LINES_CHANGED','LEARNED_SPELL_IN_SKILL_LINE','CHAT_MSG_SKILL','TRADE_SKILL_SHOW'}) do
     pcall(listener.RegisterEvent,listener,event)
 end
 listener:SetScript('OnEvent',function(_,event)
     ownProfessionCache=nil
-    if event=='PLAYER_LOGIN' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect(); changed()
+    if event=='PLAYER_LOGIN' or event=='PLAYER_ENTERING_WORLD' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect(); changed()
     elseif active then nextScan=0; changed() end
 end)
 if C_Timer and type(C_Timer.NewTicker)=='function' then
@@ -477,7 +510,7 @@ local function createWindow(parent)
             end
         end)
     end
-    button(content,T('Оновити'),embedded and 770 or 590,embedded and -50 or y(-43),embedded and 130 or 120,function() forceBroadcast=true; nextScan=0; queryPending=true; print(T('Old Kraken: запит професій поставлено в чергу.')) end,nil,{rounded=true,height=34})
+    button(content,T('Оновити'),embedded and 770 or 590,embedded and -50 or y(-43),embedded and 130 or 120,function() forceBroadcast=true; nextScan=0; queryPending=true; chatInfo(T('Old Kraken: запит професій поставлено в чергу.')) end,nil,{rounded=true,height=34})
     f.heading=content:CreateFontString(nil,'OVERLAY','GameFontHighlight')
     f.heading:SetPoint('TOPLEFT',content,'TOPLEFT',embedded and 0 or 20,embedded and -104 or y(-52))
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(f.heading, 13) end
@@ -639,11 +672,12 @@ function Workshop:Back()
     end
     local entry=table.remove(self.navigationStack)
     if not entry then return end
+    if type(entry.onBack)=='function' then entry.onBack(); return end
     self:SetView(entry.view)
     if entry.recipes and OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:RestoreView(entry.recipes) end
 end
 function Workshop:Show(view)
-    connect(); if not active then print(T('Old Kraken: майстерня доступна після входу до гільдії.')); return end
+    connect(); if not active then chatError(T('Old Kraken: майстерня доступна після входу до гільдії.')); return end
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('workshop')
         self.navigationStack={}
@@ -656,6 +690,7 @@ function Workshop:Show(view)
 end
 if OldKraken.UIHub then
     OldKraken.UIHub:RegisterPage('workshop','Майстерня','04',function(parent)
+        if not active then connect() end
         if not frame then frame=createWindow(parent) end
         return frame
     end)

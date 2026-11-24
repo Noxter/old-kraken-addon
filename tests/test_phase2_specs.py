@@ -611,5 +611,25 @@ assert(#f.signupRows>0 and f.signupRows[1].hover.tooltipStatus:find('Test Spec',
 """)
 
 
+    def test_spec_name_localization(self):
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute("OldKraken = {}")
+        lua.execute((ROOT / 'Locale.lua').read_text())
+        lua.execute("""
+OldKraken.InitializeLocale({settings={language='ukUA'}})
+assert(OldKraken.LocalizeSpecName('Feral Combat')=='Дикий бій')
+assert(OldKraken.LocalizeSpecName('Beast Mastery')=='Приборкання звірів')
+assert(OldKraken.LocalizeSpecName('Колдовство')=='Чаклунство')
+assert(OldKraken.LocalizeSpecName('Дикий бій')=='Дикий бій')
+assert(OldKraken.LocalizeSpecName('Custom Spec')=='Custom Spec')
+OldKraken.InitializeLocale({settings={language='enUS'}})
+assert(OldKraken.LocalizeSpecName('Дикий бій')=='Feral Combat')
+assert(OldKraken.LocalizeSpecName('Приборкання звірів')=='Beast Mastery')
+assert(OldKraken.LocalizeSpecName('Колдовство')=='Affliction')
+assert(OldKraken.LocalizeSpecName('Feral Combat')=='Feral Combat')
+assert(OldKraken.LocalizeSpecName('Custom Spec')=='Custom Spec')
+""")
+
+
 if __name__ == '__main__':
     unittest.main()

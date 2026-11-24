@@ -49,7 +49,9 @@ result=3; now=c.retryAt+1; c:Pump(); assert(#c.queue==1001)
 throwing=true; now=c.retryAt+1; c:Pump(); assert(#c.queue==1001 and prints==0)
 throwing=false; result=0; now=c.retryAt+1
 while #c.queue>0 do c:Pump(); now=now+0.7 end
-assert(#sent==1001 and sent[1]:find('GF2^JOIN^',1,true)==1)
+local joins=0
+for _,message in ipairs(sent) do if message:find('GF2^JOIN^',1,true)==1 then joins=joins+1 end end
+assert(#sent==1001 and joins==1)
 assert(c.stats.dropped==0 and prints==0 and next(c.pendingTransmissions)==nil)
 ''')
 receiver=client()
@@ -58,6 +60,14 @@ for part in [1,2]:
     for i in range(1,501):
         receiver.globals().OldKraken.Communication.OnAddonMessage(receiver.globals().OldKraken.Communication,'OLDKRKN',lua.globals().packets[i][part],'GUILD',f'Member {i}')
 receiver.execute('assert(received==500 and OldKraken.Communication.stats.invalid==0)')
+
+lua=client()
+lua.execute('''
+local c=OldKraken.Communication
+assert(c:SendProtocol('SYNC','background'))
+assert(c:SendProtocol('JOIN','action'))
+c:Pump(); assert(sent[1]:find('GF2^JOIN^',1,true)==1)
+''')
 
 lua=client()
 lua.execute('''

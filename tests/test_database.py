@@ -8,6 +8,7 @@ lua.execute(source)
 lua.execute('''
 local db = OldKraken.Database.Initialize()
 assert(db.schemaVersion == 3 and type(db.groupFinder) == 'table' and type(db.workshop) == 'table')
+assert(db.settings.showMinimapButton == true)
 assert(db.roster.keep == 'roster' and db.events.keep == 'event')
 assert(db.settings.roster.search == 'тест')
 OldKrakenDB = {schemaVersion=2, groupFinder={keep="finder"}}

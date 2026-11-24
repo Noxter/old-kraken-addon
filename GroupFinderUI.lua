@@ -1,10 +1,18 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Group Finder window and user actions.
 local Finder = OldKraken.GroupFinder
 local function memberSpecText(name)
     local comm = OldKraken.Communication
     local spec = name and comm and comm.GetRosterSpec and comm:GetRosterSpec(name)
-    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then return spec.name end
+    if spec and not (type(issecretvalue) == 'function' and issecretvalue(spec.name)) and type(spec.name) == 'string' and spec.name ~= '' then
+        return OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name
+    end
 end
 local window, selected, requestsWindow
 local refresh
@@ -34,10 +42,12 @@ local function UpdateReannounceButton(control)
 end
 local dungeonOptions = catalog.dungeon
 local dungeonLabels, dungeonLevels = {}, {}
-for _, options in ipairs({catalog.dungeon, catalog.raid}) do
-    for _, entry in ipairs(options) do
-        dungeonLabels[entry.value] = entry.label
-        if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+for _, options in ipairs({catalog.dungeon, catalog.raid, catalog.legacy and catalog.legacy.dungeon, catalog.legacy and catalog.legacy.raid}) do
+    if options then
+        for _, entry in ipairs(options) do
+            dungeonLabels[entry.value] = entry.label
+            if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+        end
     end
 end
 local function displayGroupTitle(group)
@@ -47,6 +57,17 @@ local function displayGroupTitle(group)
         return dungeonLabels[group.dungeon] or title
     end
     return title
+end
+if Finder then
+    function Finder:DisplayTitle(group)
+        return displayGroupTitle(group)
+    end
+end
+local function displayEventTitle(event)
+    if OldKraken.GuildEvents and type(OldKraken.GuildEvents.DisplayTitle) == 'function' then
+        return OldKraken.GuildEvents:DisplayTitle(event)
+    end
+    return type(event) == 'table' and type(event.title) == 'string' and event.title or ''
 end
 local activityOptions = {}
 for _, options in ipairs({catalog.dungeon, catalog.raid}) do
@@ -135,6 +156,9 @@ local function isGroupHiddenByOfflineOwner(key, group)
     local now = type(GetTime) == 'function' and GetTime() or 0
     return type(since) == 'number' and now - since >= OFFLINE_APPLICATION_TTL
 end
+function Finder:IsGroupHiddenByOfflineOwner(key, group)
+    return isGroupHiddenByOfflineOwner(key, group)
+end
 local function pruneOfflineApplications()
     if not guildRosterLoaded then
         for key in pairs(ownerOfflineSince) do ownerOfflineSince[key] = nil end
@@ -192,6 +216,7 @@ local function pruneOfflineApplications()
             refreshPeople()
             pruneOfflineApplications()
             if refresh then refresh() end
+            if type(OldKraken.Fire) == 'function' then OldKraken:Fire('GROUP_FINDER_OFFLINE_CHANGED') end
         end)
     end
     if changed then Finder:Changed() end
@@ -496,7 +521,8 @@ local function refreshRequests()
 end
 
 local function showRequests()
-    if not Finder.active then print(T('Old Kraken: пошук груп не ініціалізовано.')); return end
+    if not Finder.active and type(Finder.Connect) == 'function' then Finder:Connect() end
+    if not Finder.active then chatError(T('Old Kraken: пошук груп не ініціалізовано.')); return end
     if not window or not window:IsShown() then Finder:Show() end
     if not window or not window:IsShown() then return end
     if tab == 'create' then tab='mine'; selected=nil end
@@ -565,7 +591,7 @@ local function showRequests()
                     Finder:Changed()
                     if accept then invitePlayer(entry.name) end
                     refreshRequests()
-                else print(T('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.')) end
+                else chatError(T('Old Kraken: не вдалося обробити заявку. Перевірте наявність місць і зв’язок.')) end
             end
             row.accept = button(f, T('Прийняти'), 142, y - 12, 74, function() decide(true) end, 26, 'primary', {rounded = true})
             row.reject = button(f, T('Відхилити'), 222, y - 12, 76, function() decide(false) end, 26, 'danger', {rounded = true})
@@ -712,7 +738,7 @@ local function ensureGroupCard(f, index)
             for _, name in ipairs(group.members) do if name == Finder.identity then return end end
             if self.requiredRole then
                 if Finder:Apply(group.owner, group.id, self.requiredRole) then Finder:Changed(); refresh()
-                else print(T('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.')) end
+                else chatError(T('Old Kraken: місце вже зайняте або заявку не вдалося надіслати.')) end
                 return
             end
             f.slotMenu.groupKey = self.groupKey
@@ -749,7 +775,7 @@ local function ensureGroupCard(f, index)
             if Finder:DismissApplication(group.owner, group.id) then
                 if selected == entry.key then selected = nil end
                 Finder:Changed(); refresh()
-            else print(T('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.')) end
+            else chatError(T('Old Kraken: не вдалося відкликати заявку. Перевірте зв’язок.')) end
             return
         end
         if not group or group.owner ~= Finder.identity then return end
@@ -758,7 +784,7 @@ local function ensureGroupCard(f, index)
             Finder:Changed()
             refresh()
         else
-            print(T('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.'))
+            chatError(T('Old Kraken: не вдалося видалити групу. Перевірте зв’язок.'))
         end
     end)
     remove:SetScript('OnEnter', function(self)
@@ -1149,24 +1175,24 @@ refresh=function()
                     for j = 2, #current.members do if current.members[j] == name then present = true; break end end
                     if not present then return end
                     if not current.partyObserved then
-                        print(T('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.'))
+                        chatError(T('|cffff5555Old Kraken|r: Склад паті ще не визначено. Спробуйте пізніше.'))
                     elseif current.partyObserved[name] then
                         if type(UnitIsGroupLeader) == 'function' and not UnitIsGroupLeader('player') then
-                            print(T('|cffff5555Old Kraken|r: Для виключення гравця потрібні права лідера групи.'))
+                            chatError(T('|cffff5555Old Kraken|r: Для виключення гравця потрібні права лідера групи.'))
                         elseif not C_PartyInfo or type(C_PartyInfo.UninviteUnit) ~= 'function' then
-                            print(T('|cffff5555Old Kraken|r: API виключення недоступний. Видаліть гравця з паті вручну.'))
+                            chatError(T('|cffff5555Old Kraken|r: API виключення недоступний. Видаліть гравця з паті вручну.'))
                         else
                             local ok, result = pcall(C_PartyInfo.UninviteUnit, name)
                             if ok and result ~= false then
-                                print(T('|cff2ec4b6Old Kraken|r: Спроба виключити ') .. name .. T(' з паті. Перевірте повідомлення гри.'))
+                                chatInfo(T('|cff2ec4b6Old Kraken|r: Спроба виключити ') .. name .. T(' з паті. Перевірте повідомлення гри.'))
                             else
-                                print(T('|cffff5555Old Kraken|r: Не вдалося виключити ') .. name .. T(' з паті.'))
+                                chatError(T('|cffff5555Old Kraken|r: Не вдалося виключити ') .. name .. T(' з паті.'))
                             end
                         end
                     elseif Finder:RemoveMember(current.id, name) then
                         Finder:Changed(); refresh()
                     else
-                        print(T('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.'))
+                        chatError(T('|cffff5555Old Kraken|r: Не вдалося видалити резерв. Перевірте зв’язок.'))
                     end
                     end
                     local popup = StaticPopup_Show('OLDKRAKEN_REMOVE_MEMBER', name, nil, remove)
@@ -1318,14 +1344,17 @@ refresh=function()
     if showCards then window.UpdateActivityCards() end
     local advanced=tab=='create' and window.advancedCreation
     window.creationOptions:SetShown(advanced)
-    for _,box in ipairs({window.titleBox,window.maxBox,window.minBox,window.maxLevelBox}) do
+    for _,box in ipairs({window.titleBox,window.minBox,window.maxLevelBox}) do
         box:SetShown(advanced); box.label:SetShown(advanced)
     end
+    local showMaxBox = advanced and category ~= 'dungeon'
+    window.maxBox:SetShown(showMaxBox); window.maxBox.label:SetShown(showMaxBox)
+    window.titleBox:SetWidth(category == 'dungeon' and 320 or 240)
     window.descriptionBox:SetShown(tab=='create'); window.descriptionBox.label:Hide()
     if window.commentHint then window.commentHint:SetShown(tab=='create' and (window.descriptionBox:GetText() or '')=='') end
     window.categoryButton:SetShown(advanced); window.categoryLabel:SetShown(advanced)
     window.dungeonLabel:Hide()
-    window.maxBox.label:SetText(category=='dungeon' and T('Місць (5)') or T('Місць'))
+    window.maxBox.label:SetText(T('Місць'))
     window.createButton:SetShown(tab=='create')
     window.createButton:SetText(T('Зібрати групу'))
     local colors = OldKraken.UIStyle.Colors or {}
@@ -1423,7 +1452,7 @@ local function createWindow(parent)
     -- Header notification chip (right side of the shared header row)
     f.alertButton = button(f, T('Сповіщення: увімк.'), 732, 0, 168, function()
         if Finder:SetGroupAlertsEnabled(not Finder:GroupAlertsEnabled()) then refresh()
-        else print(T('Old Kraken: не вдалося зберегти налаштування сповіщень.')) end
+        else chatError(T('Old Kraken: не вдалося зберегти налаштування сповіщень.')) end
     end, 31)
     local alertLabel = f.alertButton:GetFontString()
     if alertLabel then
@@ -1456,7 +1485,7 @@ local function createWindow(parent)
                     or Finder.pending[key] == 'pending' then return end
                 for _, name in ipairs(group.members) do if name == Finder.identity then return end end
                 if Finder:Apply(group.owner, group.id, choice) then Finder:Changed(); refresh()
-                else print(T('Old Kraken: не вдалося подати заявку. Перевірте зв’язок.')) end
+                else chatError(T('Old Kraken: не вдалося подати заявку. Перевірте зв’язок.')) end
             end
             UIDropDownMenu_AddButton(info, level)
         end
@@ -1602,9 +1631,9 @@ local function createWindow(parent)
             Finder:Changed()
             refresh()
         elseif reason == 'revision' then
-            print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+            chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
         else
-            print(T('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.'))
+            chatError(T('Old Kraken: не вдалося оновити опис. Перевірте довжину тексту та зв’язок.'))
         end
     end
     f.editDescBox:SetScript('OnEnterPressed', saveEditedDescription)
@@ -1740,6 +1769,14 @@ local function createWindow(parent)
     f.titleBox = input(f, T('Назва'), 20, -330, 240, '')
     f.descriptionBox = input(f, T('Опис'), 275, -330, 250, '')
     f.maxBox = input(f, T('Місць'), 20, -385, 65, '5')
+    f.maxBox:SetScript('OnEnter', function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, 'ANCHOR_TOP')
+            GameTooltip:SetText(T('Загальний розмір групи разом із вами (1–200).'))
+            GameTooltip:Show()
+        end
+    end)
+    f.maxBox:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     f.minBox = input(f, T('Мін. рівень'), 105, -385, 80, '1')
     f.maxLevelBox = input(f, T('Макс. рівень'), 205, -385, 80, '60')
     f.createFields = {f.titleBox, f.descriptionBox, f.maxBox, f.minBox, f.maxLevelBox}
@@ -1779,6 +1816,7 @@ local function createWindow(parent)
         local recommended = dungeonLevels[value]
         if recommended then
             f.minBox:SetText(tostring(recommended.min)); f.maxLevelBox:SetText(tostring(recommended.max))
+            if recommended.size then f.maxBox:SetText(tostring(recommended.size)) end
         end
         f.dungeonSelection:SetText(value~='' and dungeonLabels[value] or T('Без конкретного підземелля'))
         f.UpdateActivityCards()
@@ -1934,21 +1972,54 @@ local function createWindow(parent)
         end
         return text:sub(1, cut)
     end
-    local function announceGroupInGuildChat(activityName, currentCount, maxPlayers, minLv, maxLv, descText)
+    local function announceGroupInGuildChat(activityName, currentCount, maxPlayers, minLv, maxLv, descText, group)
         if type(IsInGuild) ~= 'function' or not IsInGuild() then return end
         local sendChat = (type(SendChatMessage) == 'function' and SendChatMessage)
             or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
         if not sendChat then
-            print(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
+            chatError(T('|cffff5555Old Kraken|r: API відправки в гільд-чат недоступне.'))
             return
         end
-        local metaParts = {(currentCount or 1) .. '/' .. (maxPlayers or 5)}
+        local maxSize = maxPlayers or 5
+        local count = currentCount or 1
+        local metaParts = {}
         if minLv and maxLv and minLv > 0 and maxLv > 0 then
-            metaParts[#metaParts + 1] = T('рівні ') .. minLv .. '–' .. maxLv
+            metaParts[#metaParts + 1] = minLv == maxLv and ('lvl ' .. minLv) or ('lvl ' .. minLv .. '–' .. maxLv)
+        end
+        if type(group) == 'table' and group.category == 'dungeon' and maxSize == 5 and type(Finder.DungeonSlots) == 'function' then
+            local slots = Finder:DungeonSlots(group)
+            local extra = math.max(0, count - (type(group.members) == 'table' and #group.members or 1))
+            local counts = {tank = 0, healer = 0, dps = 0}
+            for i = #slots, 1, -1 do
+                local slot = slots[i]
+                if not slot.member then
+                    if extra > 0 then
+                        extra = extra - 1
+                    elseif counts[slot.role] ~= nil then
+                        counts[slot.role] = counts[slot.role] + 1
+                    end
+                end
+            end
+            local roleParts = {}
+            for _, r in ipairs({'tank', 'healer', 'dps'}) do
+                local n = counts[r]
+                if n > 0 then
+                    local label = roleLabels[r] or r
+                    roleParts[#roleParts + 1] = n > 1 and (n .. ' ' .. label) or label
+                end
+            end
+            if #roleParts > 0 then
+                metaParts[#metaParts + 1] = T('потрібні: ') .. table.concat(roleParts, ', ')
+            end
+        else
+            local freeSlots = math.max(0, maxSize - count)
+            if freeSlots > 0 then
+                metaParts[#metaParts + 1] = string.format(T('вільно: %d'), freeSlots)
+            end
         end
         local cleanActivity = tostring(activityName or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
-        local prefix = T('[Old Kraken] Збір групи: ') .. cleanActivity .. ' (' .. table.concat(metaParts, ', ') .. ')'
-        local suffix = T(' — запис у вкладці «Групи» (/okr).')
+        local prefix = 'LFG ' .. cleanActivity .. (#metaParts > 0 and (' · ' .. table.concat(metaParts, ' · ')) or '')
+        local suffix = ' — Old Kraken'
         local note = ((descText or ''):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')):match('^%s*(.-)%s*$')
         local maxBytes = 255
         if #prefix + #suffix > maxBytes then
@@ -1969,19 +2040,53 @@ local function createWindow(parent)
         end
         local msg = prefix .. notePart .. suffix
         local sent, err = pcall(sendChat, msg, 'GUILD')
-        if not sent then print(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
+        if not sent then chatError(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
+    end
+    local function createErrorMessage(err, titleText, maxText, minText, maxLevelText)
+        if err == 'role' then return T('Old Kraken: оберіть вашу роль у групі.') end
+        if err == 'class_role' then return T('Old Kraken: обрана роль недоступна для вашого класу.') end
+        if err == 'dungeon_size' then return T('Old Kraken: для підземелля кількість місць має дорівнювати 5.') end
+        if err == 'roles' then return T('Old Kraken: для підземелля потрібна роль танка, лікаря або DPS.') end
+        if err == 'capacity' then return T('Old Kraken: досягнуто ліміт активних оголошень.') end
+        if err == 'queue' then return T('Old Kraken: не вдалося надіслати оголошення. Перевірте, чи ви в гільдії та стан зв’язку (/okr comm status).') end
+        if err == 'invalid' then
+            if titleText == '' or #titleText > 100 then
+                return T('Old Kraken: введіть назву групи (1–100 символів) або оберіть підземелля.')
+            end
+            local maxNum = tonumber(maxText)
+            if not maxNum or maxNum % 1 ~= 0 or maxNum < 1 or maxNum > 200 then
+                return T('Old Kraken: кількість місць має бути цілим числом від 1 до 200.')
+            end
+            local minLv, maxLv = tonumber(minText), tonumber(maxLevelText)
+            if not minLv or not maxLv or minLv % 1 ~= 0 or maxLv % 1 ~= 0 or minLv < 1 or maxLv > 255 or minLv > maxLv then
+                return T('Old Kraken: перевірте діапазон рівнів (мін. <= макс., від 1 до 255).')
+            end
+            return T('Old Kraken: перевірте коректність заповнених полів.')
+        end
+        return T('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.')
     end
     f.announceGuildEnabled = true
     f.createButton = button(f, T('Створити'), 550, -455, 150, function()
         local titleText = (f.titleBox:GetText() or ''):match('^%s*(.-)%s*$')
-        local ok = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), f.maxBox:GetText(), f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
+        local maxPlayers = category == 'dungeon' and '5' or f.maxBox:GetText()
+        local ok, result = Finder:Create(f.titleBox:GetText(), category, f.descriptionBox:GetText(), maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText(), role, dungeon)
         if ok then
+            local createdId = type(result) == 'string' and result ~= '' and result or nil
+            if type(Finder.SyncPartyNow) == 'function' then Finder:SyncPartyNow() end
             if f.announceGuildEnabled then
+                local createdGroup = type(Finder.identity) == 'string' and Finder.identity ~= '' and createdId and type(Finder.groups) == 'table' and Finder.groups[Finder.identity .. '\001' .. createdId]
+                local currentCount = (type(createdGroup) == 'table' and type(createdGroup.members) == 'table' and #createdGroup.members) or 1
+                if type(IsInGroup) == 'function' and IsInGroup() and type(GetNumGroupMembers) == 'function' then
+                    local okCount, partyCount = pcall(GetNumGroupMembers)
+                    if okCount and type(partyCount) == 'number' and partyCount > currentCount then
+                        currentCount = math.min(tonumber(maxPlayers) or partyCount, partyCount)
+                    end
+                end
                 local activityName = titleText ~= '' and titleText or ((dungeon ~= '' and dungeonLabels[dungeon]) or categoryLabels[category] or T('Група'))
-                announceGroupInGuildChat(activityName, 1, tonumber(f.maxBox:GetText()) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText())
+                announceGroupInGuildChat(activityName, currentCount, tonumber(maxPlayers) or 5, tonumber(f.minBox:GetText()), tonumber(f.maxLevelBox:GetText()), f.descriptionBox:GetText(), createdGroup)
             end
             Finder:Changed(); tab='mine'; refresh()
-        else print(T('Old Kraken: перевірте поля, доступність ролі та стан зв’язку. Для підземелля потрібна роль танка, лікаря або DPS.')) end
+        else chatError(createErrorMessage(result, titleText, maxPlayers, f.minBox:GetText(), f.maxLevelBox:GetText())) end
     end, nil, 'primary')
     f.advancedCreation=false
     local colors = OldKraken.UIStyle.Colors or {}
@@ -2067,18 +2172,18 @@ local function createWindow(parent)
             return
         end
         if role == '' or not Finder:CanPerformRole(Finder.identity, role) then
-            print(T('Old Kraken: оберіть доступну роль для подачі заявки.'))
+            chatError(T('Old Kraken: оберіть доступну роль для подачі заявки.'))
             return
         end
         if g and Finder:Apply(g.owner, g.id, role) then Finder:Changed(); refresh()
-        elseif g then print(T('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.')) end
+        elseif g then chatError(T('Old Kraken: місце для цієї ролі зайняте або заявку не вдалося надіслати.')) end
     end, 40, 'primary')
     f.applicationActionButton = button(f, T('Відкликати'), 739, -550, 144, function()
         local g=selected and Finder.groups[selected]
         if not g or g.owner == Finder.identity or not Finder.pending[selected] then return end
         if Finder:DismissApplication(g.owner, g.id) then
             Finder:Changed(); selected=nil; refresh()
-        else print(T('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.')) end
+        else chatError(T('Old Kraken: не вдалося обробити заявку. Перевірте зв’язок.')) end
     end, 40)
     f.cancelButton = button(f, T('Закрити набір'), 587, -554, 144, function()
         local g=selected and Finder.groups[selected]
@@ -2090,10 +2195,10 @@ local function createWindow(parent)
         local ok, reason, seconds = Finder:Reannounce(group.id)
         if ok then
             local activityName = (group.title and group.title ~= '' and displayGroupTitle(group)) or (group.dungeon and group.dungeon ~= '' and dungeonLabels[group.dungeon]) or categoryLabels[group.category] or T('Група')
-            announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description)
-            print(T('Old Kraken: повторне оголошення додано до черги гільдії.'))
-        elseif reason == 'cooldown' then print(T('Old Kraken: повторити оголошення можна через ') .. seconds .. T(' с.'))
-        else print(T('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.')) end
+            announceGroupInGuildChat(activityName, type(group.members) == 'table' and #group.members or 1, group.maxSize, group.minLevel, group.maxLevel, group.description, group)
+            chatInfo(T('Old Kraken: повторне оголошення додано до черги гільдії.'))
+        elseif reason == 'cooldown' then chatError(T('Old Kraken: повторити оголошення можна через ') .. seconds .. T(' с.'))
+        else chatError(T('Old Kraken: не вдалося надіслати оголошення. Перевірте зв’язок.')) end
         UpdateReannounceButton(f.bumpButton)
     end, 36)
     f.reopenButton = button(f, T('Відкрити набір знову'), 587, -550, 296, function()
@@ -2101,9 +2206,9 @@ local function createWindow(parent)
         if not group or group.owner ~= Finder.identity or not group.closed or group.hidden then return end
         local ok, reason = Finder:Reopen(group.id)
         if ok then Finder:Changed(); refresh()
-        elseif reason == 'payload' then print(T('Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір.'))
-        elseif reason == 'revision' then print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
-        else print(T('Old Kraken: не вдалося відкрити набір знову. Перевірте зв’язок.')) end
+        elseif reason == 'payload' then chatError(T('Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір.'))
+        elseif reason == 'revision' then chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+        else chatError(T('Old Kraken: не вдалося відкрити набір знову. Перевірте зв’язок.')) end
     end, 40, 'primary', {rounded = true})
     f.bumpButton:SetScript('OnUpdate', function(self, elapsed)
         self.countdownElapsed = (self.countdownElapsed or 0) + elapsed
@@ -2120,7 +2225,8 @@ local function createWindow(parent)
 end
 
 function Finder:Show()
-    if not self.active then print(T('Old Kraken: пошук груп не ініціалізовано.')) return end
+    if not self.active and type(self.Connect) == 'function' then self:Connect() end
+    if not self.active then chatError(T('Old Kraken: пошук груп не ініціалізовано.')) return end
     refreshPeople()
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('groups')
@@ -2197,9 +2303,9 @@ local alertCaptions = {
     event='ПОДІЯ ГІЛЬДІЇ', event_signup='ЗАПИС НА ПОДІЮ', workshop='МАЙСТЕРНЯ',
 }
 local alertActions = {
-    group='Клік — відкрити групу', request='Клік — мої оголошення',
-    decision='Клік — переглянути заявку', event='Клік — відкрити подію',
-    event_signup='Клік — відкрити подію', workshop='Клік — відкрити замовлення',
+    group='ЛКМ — відкрити групу', request='ЛКМ — мої оголошення',
+    decision='ЛКМ — переглянути заявку', event='ЛКМ — відкрити подію',
+    event_signup='ЛКМ — відкрити подію', workshop='ЛКМ — відкрити замовлення',
 }
 
 local function paintAlertRoster(group)
@@ -2242,27 +2348,27 @@ local function paintAlertRoster(group)
                     local current=key and Finder.groups[key]
                     if not current or current.closed then
                         groupAlert:Hide()
-                        print(T('Old Kraken: набір уже недоступний.')); return
+                        chatError(T('Old Kraken: набір уже недоступний.')); return
                     end
                     if current.category=='dungeon' and current.maxSize==5 then
                         local live=Finder:DungeonSlots(current)[self.slotIndex]
                         if not live or live.member or live.role~=self.role then
                             paintAlertRoster(current)
                             if refreshAlertRoster then refreshAlertRoster() end
-                            print(T('Old Kraken: це місце вже зайняте.')); return
+                            chatError(T('Old Kraken: це місце вже зайняте.')); return
                         end
                     elseif #current.members>=current.maxSize then
                         if refreshAlertRoster then refreshAlertRoster() end
-                        print(T('Old Kraken: групу вже зібрано.')); return
+                        chatError(T('Old Kraken: групу вже зібрано.')); return
                     end
                     if Finder.pending[key]=='pending' then
-                        print(T('Old Kraken: заявку вже подано; очікуйте рішення автора.')); return
+                        chatError(T('Old Kraken: заявку вже подано; очікуйте рішення автора.')); return
                     end
                     if Finder:Apply(current.owner,current.id,self.role) then
                         Finder:Changed()
                         groupAlert:Hide()
                     else
-                        print(T('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.'))
+                        chatError(T('Old Kraken: роль уже зайнята або заявку не вдалося надіслати.'))
                     end
                     return
                 end
@@ -2397,7 +2503,8 @@ end
 local function logAlert(title, subtitle, kind)
     local isEvent = kind == 'event' or kind == 'event_signup'
     local isWorkshop = kind == 'workshop'
-    print('|cff2ec4b6Old Kraken|r: ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or '') .. (isEvent and '. /okr events' or (isWorkshop and '. /okr orders' or '. /okr group')))
+    local label = isEvent and T('[Івенти]') or (isWorkshop and T('[Майстерня]') or T('[Групи]'))
+    chatInfo(label .. ' ' .. title .. (subtitle ~= '' and (' · ' .. subtitle) or ''))
 end
 
 local function playAlertSound()
@@ -2412,8 +2519,12 @@ end
 local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isPreview)
     local isEvent = kind == 'event' or kind == 'event_signup'
     local isWorkshop = kind == 'workshop'
-    logAlert(title, subtitle, kind)
-    if not shouldShowAlertBanner(kind, isPreview) then return end
+    if not shouldShowAlertBanner(kind, isPreview) then
+        if kind ~= 'group' and kind ~= 'request' then
+            logAlert(title, subtitle, kind)
+        end
+        return
+    end
     if not groupAlert then
         groupAlert = CreateFrame('Button', nil, UIParent, 'UIPanelButtonTemplate')
         groupAlert.roleSlots = {}
@@ -2435,7 +2546,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
         groupAlert.alertAccent:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', 2, -2)
         groupAlert.alertAccent:SetPoint('TOPRIGHT', groupAlert, 'TOPRIGHT', -2, -2)
         groupAlert.alertAccent:SetHeight(2)
-        groupAlert.alertAccent:SetColorTexture(0.85, 0.5, 0.18, 0.9)
+        groupAlert.alertAccent:SetColorTexture(0.88, 0.69, 0.32, 0.75)
         groupAlert.alertArt = groupAlert:CreateTexture(nil, 'ARTWORK')
         groupAlert.alertArt:SetSize(60, 60)
         groupAlert.alertArt:SetPoint('LEFT', groupAlert, 'LEFT', 8, 0)
@@ -2541,15 +2652,21 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     end
     for _,control in ipairs(groupAlert.roleSlots or {}) do control:Hide() end
     local graphical=kind=='group' and rosterGroup~=nil
-    groupAlert:SetSize(graphical and 620 or 560,graphical and 204 or 112)
-    groupAlert.alertAccent:SetShown(not graphical)
-    groupAlert.alertArt:SetSize(graphical and 90 or 60,graphical and 118 or 60)
-    groupAlert.alertChrome:SetShown(graphical)
-    local highlight=groupAlert:GetHighlightTexture(); if highlight then highlight:SetAlpha(graphical and 0 or 1) end
+    groupAlert:SetSize(graphical and 620 or 480, graphical and 204 or 122)
+    groupAlert.alertAccent:SetShown(true)
+    groupAlert.alertArt:SetSize(graphical and 90 or 52, graphical and 118 or 52)
+    groupAlert.alertArt:ClearAllPoints()
+    groupAlert.alertArt:SetPoint('LEFT', groupAlert, 'LEFT', graphical and 10 or 12, 0)
+    groupAlert.alertChrome:SetShown(true)
+    local highlight=groupAlert:GetHighlightTexture(); if highlight then highlight:SetAlpha(0) end
     groupAlert.kind, groupAlert.groupKey = kind, key
-    local hasGroupArt = kind == 'group'
-    groupAlert.alertArt:SetShown(hasGroupArt)
-    if hasGroupArt then catalog.SetArtwork(groupAlert.alertArt, dungeonId) end
+    groupAlert.alertArt:Show()
+    if kind == 'group' or (isEvent and type(dungeonId) == 'string' and dungeonId ~= '') then
+        catalog.SetArtwork(groupAlert.alertArt, dungeonId)
+    elseif OldKraken.UIStyle and OldKraken.UIStyle.EmblemPath then
+        groupAlert.alertArt:SetTexture(OldKraken.UIStyle.EmblemPath())
+        if groupAlert.alertArt.SetTexCoord then groupAlert.alertArt:SetTexCoord(0, 1, 0, 1) end
+    end
     groupAlert.positionKind = isWorkshop and 'workshop' or (isEvent and 'event' or (kind == 'group' and 'group' or 'request'))
     local settings = OldKraken.DB and OldKraken.DB.settings
     local positions = type(settings) == 'table' and settings.alertPositions
@@ -2561,7 +2678,7 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     else
         groupAlert:SetPoint('TOP', UIParent, 'TOP', 0, -160)
     end
-    local textLeft = graphical and 116 or (hasGroupArt and 82 or 18)
+    local textLeft = graphical and 116 or 76
     groupAlert.alertCaption:ClearAllPoints()
     groupAlert.alertTitle:ClearAllPoints()
     groupAlert.alertSubtitle:ClearAllPoints()
@@ -2569,19 +2686,18 @@ local function showAlert(title, subtitle, kind, key, dungeonId, rosterGroup, isP
     groupAlert.alertTitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', textLeft, -28)
     groupAlert.alertTitle:SetPoint('RIGHT', groupAlert, 'RIGHT', -12, 0)
     groupAlert.alertSubtitle:SetPoint('TOPLEFT', groupAlert, 'TOPLEFT', textLeft, -51)
-    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, 8)
+    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT', groupAlert, 'BOTTOMRIGHT', -12, graphical and 12 or 34)
     groupAlert.alertCaption:SetText(alertCaptions[kind] or 'OLD KRAKEN')
     groupAlert.alertTitle:SetText(title)
     groupAlert.alertFooter:ClearAllPoints()
     groupAlert.alertFooter:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft-7,7)
     groupAlert.alertFooter:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-7,7)
-    groupAlert.alertFooter:SetHeight(graphical and 32 or 58)
+    groupAlert.alertFooter:SetHeight(graphical and 32 or 26)
     groupAlert.alertHint:ClearAllPoints()
-    groupAlert.alertHint:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft,12)
+    groupAlert.alertHint:SetPoint('BOTTOMLEFT',groupAlert,'BOTTOMLEFT',textLeft,10)
     groupAlert.alertHint:SetPoint('RIGHT',groupAlert,'RIGHT',-12,0)
     groupAlert.alertHint:SetHeight(16)
-    groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or T('Клік — відкрити'))..T('|r  |cffb0baca· перетягніть, щоб перемістити|r'))
-    groupAlert.alertSubtitle:SetPoint('BOTTOMRIGHT',groupAlert,'BOTTOMRIGHT',-12,12)
+    groupAlert.alertHint:SetText('|cff8ccfff'..(alertActions[kind] or T('ЛКМ — відкрити'))..T('|r  |cffb0baca· ПКМ — сховати · перетягніть|r'))
     if graphical then
         paintAlertRoster(rosterGroup)
         groupAlert.alertSubtitle:ClearAllPoints()
@@ -2620,17 +2736,26 @@ end)
 OldKraken:On('GUILD_EVENTS_NEW', function(key, event)
     if not eventAlertsEnabled() then return end
     local subtitle = event.owner .. ' · ' .. date('%d.%m.%Y %H:%M', event.when)
-    showAlert(T('Нова подія: ') .. event.title, subtitle, 'event', key)
+    showAlert(T('Нова подія: ') .. displayEventTitle(event), subtitle, 'event', key, event.activity)
 end)
 OldKraken:On('GUILD_EVENTS_NEW_SIGNUP', function(key, event, name, role)
     if not eventAlertsEnabled() then return end
     refreshPeople()
+    local accepted = 0
+    if type(event.statuses) == 'table' then
+        for _, st in pairs(event.statuses) do
+            if st == 'accepted' then accepted = accepted + 1 end
+        end
+    end
+    local countText = (type(event.size) == 'number' and event.size > 0)
+        and (' (' .. accepted .. '/' .. event.size .. ')')
+        or (accepted > 0 and (' (' .. accepted .. ')') or '')
     local signupRole=role=='flex' and T('Учасник') or roleLabel(role)
-    showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. event.title, 'event_signup', key)
+    showAlert(T('Новий запис: ') .. playerLabel(name), signupRole .. ' · ' .. displayEventTitle(event) .. countText, 'event_signup', key, event.activity)
 end)
 OldKraken:On('GUILD_EVENTS_CANCELLED', function(key, event)
     if not eventAlertsEnabled() then return end
-    showAlert(T('Подію скасовано'), event.title .. T(' · Автор: ') .. event.owner, 'event_signup', key)
+    showAlert(T('Подію скасовано'), displayEventTitle(event) .. T(' · Автор: ') .. event.owner, 'event_signup', key, event.activity)
 end)
 OldKraken:On('GUILD_EVENTS_ALERT_SETTING', function()
     Finder:SyncAlertVisibility('event')
@@ -2639,13 +2764,13 @@ OldKraken:On('WORKSHOP_ALERT_SETTING', function() Finder:SyncAlertVisibility('wo
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not groupAlertsEnabled() then return end
-    if group.category == 'dungeon' then
+    if group.minLevel and group.maxLevel then
         local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
         if not level or level < group.minLevel or level > group.maxLevel then return end
     end
     refreshPeople()
     local free = math.max(0, group.maxSize - #group.members)
-    local actual = group.partyObserved and 1 or nil
+    local actual = group.partyObserved and 1 or (#group.members <= 1 and #group.members or nil)
     for i, name in ipairs(group.members) do
         if actual and i > 1 and group.partyObserved[name] then actual = actual + 1 end
     end

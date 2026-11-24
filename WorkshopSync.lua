@@ -1,7 +1,7 @@
 -- Versioned recipe snapshots; only snapshots received directly from their owner are relayed.
 local comm,codec,recipes=OldKraken.Communication,OldKraken.GroupFinder,OldKraken.WorkshopRecipes
 local active,identity,profile,store=false,nil,nil,nil
-local indices,jobs,incoming,lastRequest={}, {}, {}, {}
+local indices,indexCount,jobs,incoming,lastRequest={},0,{},{},{}
 local nextQuery=0
 local function int(n,min,max) return type(n)=='number' and n==n and n%1==0 and n>=min and n<=max end
 local function text(s,max) return type(s)=='string' and #s>0 and #s<=max and not s:find('[%z\1-\31\127]') end
@@ -12,10 +12,30 @@ local function player()
     if type(b)=='string' and b~='' then a=a..' '..b end
     return text(a,128) and a or nil
 end
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm)=='function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return false end
+    return text(realm,128)
+end
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
+    if realm=='' then return 'Forever' end
+    return nil
+end
 local function connect()
-    local name=player(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=type(GetRealmName)=='function' and GetRealmName()
-    if not name or not text(guild,128) or type(realm)~='string' or not OldKraken.DB then
-        active,identity,profile,store=false,nil,nil,nil; indices,jobs,incoming,lastRequest={}, {}, {}, {}; return
+    local name=player(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=resolveRealm()
+    if not name or not text(guild,128) or not validRealm(realm) or not OldKraken.DB then
+        active,identity,profile,store=false,nil,nil,nil; indices,indexCount,jobs,incoming,lastRequest={},0,{},{},{}; return
+    end
+    if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
+        OldKraken.Database:MigrateWorkshopScope(realm,guild,false)
     end
     local key=realm..'\001'..guild
     if active and identity==name and profile==key then return end
@@ -26,7 +46,7 @@ local function connect()
     if type(store.recipeDirectSnapshots)~='table' then store.recipeDirectSnapshots={} end
     if type(store.recipeSnapshotViews)~='table' then store.recipeSnapshotViews={} end
     active,identity,profile=true,name,key
-    indices,jobs,incoming,lastRequest={}, {}, {}, {}; nextQuery=0
+    indices,indexCount,jobs,incoming,lastRequest={},0,{},{},{}; nextQuery=0
 end
 local function snapshot(owner)
     if owner==identity then return recipes:ExportSnapshot() end
@@ -36,8 +56,12 @@ local function snapshot(owner)
     return saved.rev,saved.records
 end
 local function scheduleIndex(target,owner)
-    if size(indices)>=2000 then return end
-    indices[target..'\001'..owner]={target=target,owner=owner,expires=GetTime()+1800}
+    local k=target..'\001'..owner
+    if indices[k]==nil then
+        if indexCount>=2000 then return end
+        indexCount=indexCount+1
+    end
+    indices[k]={target=target,owner=owner,expires=GetTime()+1800}
 end
 comm:RegisterHandler('WRQ',function(sender,_,payload)
     if not active or not text(sender,128) or sender==identity or payload~='' then return end
@@ -145,7 +169,9 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     local k,index=next(indices)
     if k and #comm.queue<=8 then
         local rev,records=snapshot(index.owner)
-        if now>=index.expires or not rev or comm:SendProtocol('WRIDX',codec._pack({index.target,index.owner,string.format('%.0f',rev),#records})) then indices[k]=nil end
+        if now>=index.expires or not rev or comm:SendProtocol('WRIDX',codec._pack({index.target,index.owner,string.format('%.0f',rev),#records})) then
+            if indices[k]~=nil then indices[k]=nil; indexCount=math.max(0,indexCount-1) end
+        end
     end
     local jobKey,job=next(jobs)
     if jobKey and #comm.queue<=8 then

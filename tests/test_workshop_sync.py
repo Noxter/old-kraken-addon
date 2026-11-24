@@ -188,8 +188,101 @@ def test_invalid_snapshot_index_and_page_are_ignored():
     assert lua.globals().imported["Alice Realm"] is None
 
 
+def test_index_count_limit_dedup_dequeue_reset_and_zero_full_scans():
+    record = {
+        "recipe": 555, "item": 777, "profession": 171,
+        "seen": 1700000000, "name": "Perf recipe", "product": "Elixir",
+    }
+    lua = client("Alice", [record])
+    # Seed 499 direct snapshots so each WRQ schedules 500 indexes (own + 499).
+    lua.execute("""
+        local snapshots = OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots
+        for i = 1, 499 do
+            snapshots['Crafter' .. i .. ' Realm'] = {
+                rev = 1,
+                records = { { recipe = 555, item = 777, profession = 171, seen = 1700000000, name = 'Perf recipe', product = 'Elixir' } },
+            }
+        end
+        -- Instrument pairs() to fail if WRQ ever iterates over a large table (i.e. indices).
+        local real_pairs = pairs
+        local large_pairs_calls = 0
+        pairs = function(t)
+            local k1 = next(t)
+            if k1 ~= nil and type(k1) == 'string' and k1:find('\\001', 1, true) then
+                large_pairs_calls = large_pairs_calls + 1
+            end
+            return real_pairs(t)
+        end
+        -- Exact 1999 -> 2000 -> 2001 boundary check with single-key increments
+        for s = 1, 3 do
+            handlers['WRQ']('Sender' .. s .. ' Realm', 'request', '')
+        end
+        -- Add 499 entries from Sender4 (own + 498 snapshots) -> 1999 total
+        local removed = snapshots['Crafter499 Realm']
+        snapshots['Crafter499 Realm'] = nil
+        handlers['WRQ']('Sender4 Realm', 'request', '')
+        snapshots['Crafter499 Realm'] = removed
+        -- 2000th key (1999 -> 2000) must be accepted; 2001st must be rejected
+        local savedSnapshots = OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots
+        OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots = {}
+        handlers['WRQ']('Exact2000 Realm', 'request', '')
+        handlers['WRQ']('Exact2001 Realm', 'request', '')
+        OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots = savedSnapshots
+        -- Re-adding the same key for an existing sender when at 2000 must not increment or fail
+        now = now + 70
+        handlers['WRQ']('Sender1 Realm', 'request', '')
+        assert(large_pairs_calls == 0, 'WRQ/scheduleIndex must not call pairs(indices), got ' .. large_pairs_calls)
+        pairs = real_pairs
+    """)
+    # Drain all 2000 scheduled WRIDX packets via ticker without exceeding the 1800s TTL
+    lua.execute("for _ = 1, 2000 do ticker() end")
+    drained = lua.globals().drain("WRIDX")
+    assert len(drained) == 2000, f"expected 2000 WRIDX packets, got {len(drained)}"
+
+    # After draining, Sender5 can now schedule again (decremented on removal)
+    lua.execute("handlers['WRQ']('Sender5 Realm', 'request', '')")
+    lua.execute("for _ = 1, 500 do ticker() end")
+    drained_after = lua.globals().drain("WRIDX")
+    assert len(drained_after) == 500, f"expected 500 WRIDX packets after dequeue, got {len(drained_after)}"
+
+    # Expired entries removed by ticker also decrement indexCount
+    lua.execute("""
+        for s = 10, 13 do
+            handlers['WRQ']('ExpSender' .. s .. ' Realm', 'request', '')
+        end
+        now = now + 1801
+        for _ = 1, 2000 do ticker() end
+        assert(#drain('WRIDX') == 0, 'expired entries must not send WRIDX')
+        handlers['WRQ']('AfterExp Realm', 'request', '')
+        for _ = 1, 500 do ticker() end
+        assert(#drain('WRIDX') == 500, 'indexCount must be 0 after expiry cleanup')
+    """)
+
+    # Reset on guild change clears indices and indexCount to 0
+    lua.execute("""
+        handlers['WRQ']('Sender6 Realm', 'request', '')
+        function GetGuildInfo() return 'OtherGuild' end
+        eventHandler(nil, 'PLAYER_GUILD_UPDATE')
+        drain('WRIDX')
+        -- Now 2000 new entries can be scheduled in the new guild
+        local snapshots = OldKraken.DB.workshop.guilds['TestRealm\\001OtherGuild'].recipeDirectSnapshots
+        for i = 1, 499 do
+            snapshots['Other' .. i .. ' Realm'] = {
+                rev = 1,
+                records = { { recipe = 555, item = 777, profession = 171, seen = 1700000000, name = 'Perf recipe', product = 'Elixir' } },
+            }
+        end
+        for s = 1, 4 do
+            handlers['WRQ']('NewSender' .. s .. ' Realm', 'request', '')
+        end
+    """)
+    lua.execute("for _ = 1, 2000 do ticker() end")
+    assert len(lua.globals().drain("WRIDX")) == 2000
+
+
 if __name__ == "__main__":
     test_direct_snapshot_round_trip_and_duplicate_protection()
     test_relayed_snapshot_is_not_promoted_to_direct_authority()
     test_invalid_snapshot_index_and_page_are_ignored()
+    test_index_count_limit_dedup_dequeue_reset_and_zero_full_scans()
     print("Workshop sync checks passed")

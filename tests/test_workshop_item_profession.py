@@ -4,8 +4,7 @@ owner=client('Owner'); worker=client('Worker')
 tick(owner); tick(worker)
 owner.execute('''
 OldKraken.WorkshopOrders:Show()
-selectOption(OldKrakenOrderProfession,171)
-OldKrakenWorkshopOrdersFrame.item:SetText('Profession check')
+pickOrderRecipe(OldKrakenWorkshopOrdersFrame.orderForm,'Profession check',171,0,9101)
 click('Опублікувати')
 ''')
 tick(owner); flush(owner,worker)
@@ -23,6 +22,7 @@ assert(not scope.orderIntents['Worker Mon'][key],'hidden button handler must not
 function GetProfessions() return 1 end
 for _,f in ipairs(frames) do if f.events.SKILL_LINES_CHANGED then f.scripts.OnEvent(f,'SKILL_LINES_CHANGED') end end
 assert(OldKraken.Workshop:HasProfession(171))
+scope.recipes['Worker Mon'][9101]={recipe=9101,item=0,profession=171,seen=now,name='Profession check',product='Profession check'}
 OldKraken.WorkshopOrders:Show(key); assert(panel.offer:IsShown())
 -- Cached recipe knowledge cannot substitute for a currently learned profession.
 scope.recipes['Worker Mon'][123]={recipe=123,item=456,profession=171,seen=now,name='Cached',product='Cached'}
@@ -74,8 +74,7 @@ notices={}
 ''')
 owner.execute('''
 OldKraken.WorkshopOrders:Show()
-selectOption(OldKrakenOrderProfession,171)
-OldKrakenWorkshopOrdersFrame.item:SetText('item:98765')
+pickOrderRecipe(OldKrakenWorkshopOrdersFrame.orderForm,'item:98765',171,0,9102)
 click('Опублікувати')
 ''')
 tick(owner)

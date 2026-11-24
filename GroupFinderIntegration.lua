@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- Experimental integration; requires validation against the target client.
 local finder = OldKraken.GroupFinder
 local comm = OldKraken.Communication
@@ -10,9 +16,29 @@ local soloSince = nil
 local diagnostics = { received = 0, accepted = 0, rejected = 0 }
 local REANNOUNCE_DELAY = 300
 
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm) == 'function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    if type(issecretvalue) == 'function' and issecretvalue(realm) then return false end
+    return type(realm) == 'string' and #realm >= 1 and #realm <= 128 and not realm:find('[%z\1-\31\127]')
+end
+
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope) == 'function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue) == 'function' and issecretvalue(realm) then return nil end
+    if realm == '' then return 'Forever' end
+    return nil
+end
+
 local function profileKey(name, guild)
-    local realm = GetRealmName and GetRealmName() or ''
-    if type(realm) ~= 'string' then realm = '' end
+    if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == '' then return nil end
+    local realm = resolveRealm()
+    if not validRealm(realm) then return nil end
     return realm .. '\001' .. guild .. '\001' .. name
 end
 
@@ -342,62 +368,67 @@ local function reconcileParty(additionsOnly)
     local complete, changed, reason = finder:SyncPartyMembers(party, partyRoles)
     partyDirty = not complete
     if reason == 'payload' and diagnostics.partySyncError ~= 'payload' then
-        print(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
+        chatError(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
     end
     diagnostics.partySyncError = reason
     if changed then saveOwned(); OldKraken:Fire('GROUP_FINDER_CHANGED') end
+end
+
+function finder:SyncPartyNow()
+    if not active then return end
+    reconcileParty(true)
 end
 
 function finder:PrintSyncStatus()
     local total = 0
     for _ in pairs(self.groups or {}) do total = total + 1 end
     local realm = GetRealmName and GetRealmName() or T('невідомо')
-    print('|cff2ec4b6Old Kraken|r: Group Finder: ' .. (active and T('активний') or T('не ініціалізований')) ..
+    chatInfo('|cff2ec4b6Old Kraken|r: Group Finder: ' .. (active and T('активний') or T('не ініціалізований')) ..
         T('; гравець: ') .. tostring(self.identity or '-') .. '; realm: ' .. tostring(realm) .. T('; груп: ') .. total)
-    print(T('|cff2ec4b6Old Kraken|r: отримано оголошень: ') .. diagnostics.received ..
+    chatInfo(T('|cff2ec4b6Old Kraken|r: отримано оголошень: ') .. diagnostics.received ..
         T('; додано/оновлено: ') .. diagnostics.accepted .. T('; не додано (включно з повторами): ') .. diagnostics.rejected)
-    print(T('|cff2ec4b6Old Kraken|r: останній sender: ') .. tostring(diagnostics.lastSender or '-') ..
+    chatInfo(T('|cff2ec4b6Old Kraken|r: останній sender: ') .. tostring(diagnostics.lastSender or '-') ..
         T('; після перевірки: ') .. tostring(diagnostics.lastNormalized or T('не визначено')))
     if diagnostics.partySyncError == 'payload' then
-        print(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
+        chatError(T('|cffff5555Old Kraken|r: Склад не синхронізовано: оголошення перевищує 2560 байтів. Скоротіть назву або опис.'))
     elseif diagnostics.partySyncError == 'unavailable' then
-        print(T('|cffff5555Old Kraken|r: Гра не повернула повний склад паті або рейду; аддон повторить перевірку.'))
+        chatError(T('|cffff5555Old Kraken|r: Гра не повернула повний склад паті або рейду; аддон повторить перевірку.'))
     end
 end
 
 function finder:RequestSyncNow()
-    if not active then print(T('|cffff5555Old Kraken|r: Group Finder не ініціалізований.')); return false end
+    if not active then chatError(T('|cffff5555Old Kraken|r: Group Finder не ініціалізований.')); return false end
     if C_GuildInfo and type(C_GuildInfo.GuildRoster) == 'function' then pcall(C_GuildInfo.GuildRoster) end
-    if not comm:RequestSync() then print(T('|cffff5555Old Kraken|r: не вдалося додати запит синхронізації до черги.')); return false end
+    if not comm:RequestSync() then chatError(T('|cffff5555Old Kraken|r: не вдалося додати запит синхронізації до черги.')); return false end
     self:OnQuery()
-    print(T('|cff2ec4b6Old Kraken|r: запит синхронізації додано до черги.'))
+    chatInfo(T('|cff2ec4b6Old Kraken|r: запит синхронізації додано до черги.'))
     return true
 end
 
 local frame = CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
+frame:RegisterEvent('PLAYER_ENTERING_WORLD')
+pcall(frame.RegisterEvent, frame, 'PLAYER_GUILD_UPDATE')
 frame:RegisterEvent('GUILD_ROSTER_UPDATE')
 frame:RegisterEvent('GROUP_ROSTER_UPDATE')
 pcall(frame.RegisterEvent, frame, 'PLAYER_ROLES_ASSIGNED')
 pcall(frame.RegisterEvent, frame, 'ROLE_CHANGED_INFORM')
-frame:SetScript('OnEvent', function(_, event)
-    if event == 'GROUP_ROSTER_UPDATE' or event == 'PLAYER_ROLES_ASSIGNED' or event == 'ROLE_CHANGED_INFORM' then
-        partyDirty = true
-        -- Capture a confirmed join or role update; defer removals until the
-        -- next tick so transient, incomplete roster updates cannot disband it.
-        if active then reconcileParty(event == 'GROUP_ROSTER_UPDATE') end
-        return
-    end
+
+local function connect()
     local identity, name = playerIdentity()
     local guild = GetGuildInfo and GetGuildInfo('player')
     if type(name) ~= 'string' or name == '' or type(guild) ~= 'string' or guild == ''
         or not OldKraken.DB or type(OldKraken.DB.groupFinder) ~= 'table' then
         deactivate()
-        return
+        return false
     end
     -- Sender identity representation must be verified on the target realm.
     local key = profileKey(name, guild)
-    if active and currentKey == key then return end
+    if not key then
+        deactivate()
+        return false
+    end
+    if active and currentKey == key then return true end
     deactivate()
     storage = OldKraken.DB.groupFinder[key]
     if type(storage) ~= 'table' then storage = {}; OldKraken.DB.groupFinder[key] = storage end
@@ -616,7 +647,7 @@ frame:SetScript('OnEvent', function(_, event)
                 -- At the protocol limit the local closure is retained, but peers
                 -- holding the same revision cannot accept a newer snapshot.
                 if group.revision < 2147483647 then group.revision = group.revision + 1
-                else print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.')) end
+                else chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.')) end
                 comm:SendProtocol('CANCEL', finder:EncodeGroup(group))
             else finder.lastActivity[group.id] = ts end
         end
@@ -635,7 +666,8 @@ frame:SetScript('OnEvent', function(_, event)
             if not active then return end
             local currentGuild = GetGuildInfo and GetGuildInfo('player')
             local currentName = UnitName and UnitName('player')
-            if not currentGuild or not currentName or profileKey(currentName, currentGuild) ~= currentKey then
+            local nextKey = profileKey(currentName, currentGuild)
+            if not nextKey or nextKey ~= currentKey then
                 deactivate()
                 return
             end
@@ -654,19 +686,19 @@ frame:SetScript('OnEvent', function(_, event)
                             finder.lastActivity[group.id] = nil
                             activityChanged = true
                             OldKraken:Fire('GROUP_FINDER_CHANGED')
-                            print(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+                            chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
                         elseif finder:Cancel(group.id) then
                             OldKraken:Fire('GROUP_FINDER_CHANGED')
                             local title = group.title or group.id
                             local catalog = OldKraken.ActivityCatalog
                             if catalog and catalog.IsCanonicalTitle and catalog.IsCanonicalTitle(group.dungeon, title) then
-                                for _, list in ipairs({catalog.dungeon or {}, catalog.raid or {}}) do
+                                for _, list in ipairs({catalog.dungeon or {}, catalog.raid or {}, (catalog.legacy and catalog.legacy.dungeon) or {}}) do
                                     for _, entry in ipairs(list) do
                                         if entry.value == group.dungeon then title = entry.label; break end
                                     end
                                 end
                             end
-                            print(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності.'), title))
+                            chatInfo(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності.'), title))
                         end
                     end
                 end
@@ -686,4 +718,24 @@ frame:SetScript('OnEvent', function(_, event)
             if finder:Prune() then saveOwned() end
         end)
     end
+    return true
+end
+
+function finder:Connect()
+    return connect()
+end
+
+frame:SetScript('OnEvent', function(_, event)
+    if event == 'GROUP_ROSTER_UPDATE' or event == 'PLAYER_ROLES_ASSIGNED' or event == 'ROLE_CHANGED_INFORM' then
+        partyDirty = true
+        -- Capture a confirmed join or role update; defer removals until the
+        -- next tick so transient, incomplete roster updates cannot disband it.
+        if active then reconcileParty(event == 'GROUP_ROSTER_UPDATE') end
+        return
+    end
+    connect()
 end)
+
+if type(OldKraken.On) == 'function' then
+    OldKraken:On('INITIALIZED', function() connect() end)
+end

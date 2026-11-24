@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 local ADDON_NAME = ...
 
 local Roster = {}
@@ -16,6 +22,18 @@ local drawing = false
 local CLASS_ORDER = {
     "DRUID", "HUNTER", "MAGE", "PALADIN", "PRIEST",
     "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
+}
+
+local CLASS_NAMES = {
+    DRUID = "Druid",
+    HUNTER = "Hunter",
+    MAGE = "Mage",
+    PALADIN = "Paladin",
+    PRIEST = "Priest",
+    ROGUE = "Rogue",
+    SHAMAN = "Shaman",
+    WARLOCK = "Warlock",
+    WARRIOR = "Warrior",
 }
 
 local STATUS_LABELS = {
@@ -47,6 +65,39 @@ local function HasAddon(name)
 end
 
 local copyFrame, memberMenu
+local selectedProfileName, savedScrollOffset = nil, 0
+local OpenMemberProfile, CloseMemberProfile, RenderMemberProfile
+
+local function isSelfMember(memberName)
+    if type(memberName) ~= 'string' or memberName == '' or type(UnitName) ~= 'function' then
+        return false
+    end
+    local first, second = UnitName('player')
+    if type(first) ~= 'string' or first == '' then return false end
+    local full = (type(second) == 'string' and second ~= '') and (first .. ' ' .. second) or first
+    if memberName == full then return true end
+    local realm = type(GetRealmName) == 'function' and GetRealmName() or nil
+    if type(realm) == 'string' and realm ~= '' then
+        if memberName == (first .. '-' .. realm) or memberName == (full .. '-' .. realm) then
+            return true
+        end
+    end
+    return memberName == first and not memberName:find('-', 1, true)
+end
+
+local function isWorkshopAvailable()
+    local ws = OldKraken.Workshop
+    if not ws or type(ws.GetMemberProfessions) ~= 'function' or not OldKraken.DB then
+        return false
+    end
+    if type(ws.IsActive) == 'function' then
+        return ws:IsActive() == true
+    end
+    if type(IsInGuild) == 'function' and IsInGuild() == false then
+        return false
+    end
+    return true
+end
 local function CopyName(name)
     if not copyFrame then
         copyFrame = CreateFrame('Frame', 'OldKrakenCopyNameFrame', UIParent, 'BasicFrameTemplateWithInset')
@@ -97,6 +148,7 @@ local function ShowMemberMenu(row)
             info.func = function() CloseDropDownMenus(); callback() end
             UIDropDownMenu_AddButton(info, level)
         end
+        Action(T('Відкрити профіль'), function() if OpenMemberProfile then OpenMemberProfile(member) end end)
         Action(T('Запросити в групу'), function() OldKraken:InvitePlayer(member.name) end, not member.isOnline)
         Action(T('Шепнути'), function() ChatFrame_SendTell(member.name) end, not member.isOnline)
         Action(T("Скопіювати ім'я"), function() CopyName(member.name) end)
@@ -162,18 +214,24 @@ local function SafeText(value, fallback)
     return tostring(value)
 end
 
-local function ClassLabel(classToken)
-    if not classToken or classToken == "" then
+local function ClassLabel(classToken, fallbackName)
+    if classToken == "ALL" then
         return T("Усі класи")
     end
 
-    for _, member in ipairs(rosterData) do
-        if member.classFile == classToken and member.class then
-            return member.class
-        end
+    if type(classToken) == "string" and CLASS_NAMES[classToken] then
+        return CLASS_NAMES[classToken]
     end
 
-    return classToken
+    if fallbackName ~= nil and fallbackName ~= "" then
+        return tostring(fallbackName)
+    end
+
+    if classToken ~= nil and classToken ~= "" then
+        return tostring(classToken)
+    end
+
+    return T("Усі класи")
 end
 
 local function UpdateFilterButtonLabels()
@@ -583,6 +641,174 @@ local function CreateRosterWindow(parent)
         if previousResize then previousResize(self, width, height) end
         if not drawing then Roster:RenderVisible() end
     end)
+    local function createProfilePanel(parent)
+        local colors = OldKraken.UIStyle.Colors or {}
+        local panel = CreateFrame('Frame', nil, parent)
+        panel:SetPoint('TOPLEFT', parent, 'TOPLEFT', 0, -48)
+        panel:SetPoint('BOTTOMRIGHT', parent, 'BOTTOMRIGHT', 0, 0)
+        panel:SetFrameLevel((type(parent.GetFrameLevel) == 'function' and parent:GetFrameLevel() or 1) + 12)
+        panel:EnableMouse(true)
+        local bg = panel:CreateTexture(nil, 'BACKGROUND')
+        bg:SetAllPoints(panel)
+        local winCol = colors.window or {0.025, 0.035, 0.055, 1}
+        bg:SetColorTexture(winCol[1], winCol[2], winCol[3], 1)
+
+        local backBtn = CreateFrame('Button', nil, panel, 'UIPanelButtonTemplate')
+        OldKraken.UIStyle.Button(backBtn, nil, {rounded = true})
+        backBtn:SetSize(172, 30)
+        backBtn:SetPoint('TOPLEFT', panel, 'TOPLEFT', 14, -10)
+        backBtn:SetText(T('‹ Назад до ростера'))
+        backBtn:SetScript('OnClick', function() if CloseMemberProfile then CloseMemberProfile() end end)
+        panel.backButton = backBtn
+
+        if OldKraken.UIStyle.Panel then
+            OldKraken.UIStyle.Panel(panel, 14, -50, 872, 108)
+            OldKraken.UIStyle.Panel(panel, 14, -172, 426, 194)
+            OldKraken.UIStyle.Panel(panel, 460, -172, 426, 194)
+            OldKraken.UIStyle.Panel(panel, 14, -380, 872, 74)
+        end
+
+        local nameText = panel:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
+        nameText:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -66)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(nameText, 19, true) end
+        panel.nameText = nameText
+
+        local metaText = panel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+        metaText:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -96)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(metaText, 13) end
+        panel.metaText = metaText
+
+        local statusDot = panel:CreateTexture(nil, 'OVERLAY')
+        statusDot:SetSize(10, 10)
+        statusDot:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -126)
+        panel.statusDot = statusDot
+
+        local statusText = panel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+        statusText:SetPoint('LEFT', statusDot, 'RIGHT', 8, 0)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(statusText, 13) end
+        panel.statusText = statusText
+
+        local addonText = panel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        addonText:SetPoint('TOPRIGHT', panel, 'TOPRIGHT', -32, -72)
+        addonText:SetJustifyH('RIGHT')
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(addonText, 12) end
+        panel.addonText = addonText
+
+        local specTitle = panel:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+        specTitle:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -188)
+        specTitle:SetText(T('Спеціалізація'))
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(specTitle, 14, true) end
+        if colors.brandGold then specTitle:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
+
+        local specIcon = panel:CreateTexture(nil, 'OVERLAY')
+        specIcon:SetSize(36, 36)
+        specIcon:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -222)
+        panel.specIcon = specIcon
+
+        local specName = panel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+        specName:SetPoint('TOPLEFT', panel, 'TOPLEFT', 78, -222)
+        specName:SetWidth(344)
+        specName:SetJustifyH('LEFT')
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(specName, 14, true) end
+        panel.specName = specName
+
+        local specPoints = panel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        specPoints:SetPoint('TOPLEFT', panel, 'TOPLEFT', 78, -244)
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(specPoints, 13) end
+        if colors.mutedText then specPoints:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+        panel.specPoints = specPoints
+
+        local profTitle = panel:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+        profTitle:SetPoint('TOPLEFT', panel, 'TOPLEFT', 478, -188)
+        profTitle:SetText(T('Професії'))
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(profTitle, 14, true) end
+        if colors.brandGold then profTitle:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
+
+        local profEmpty = panel:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+        profEmpty:SetPoint('TOPLEFT', panel, 'TOPLEFT', 478, -222)
+        profEmpty:SetWidth(390)
+        profEmpty:SetJustifyH('LEFT')
+        if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(profEmpty, 13) end
+        if colors.mutedText then profEmpty:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+        panel.profEmpty = profEmpty
+
+        panel.profRows = {}
+        for i = 1, 5 do
+            local prow = CreateFrame('Button', nil, panel)
+            prow:SetSize(390, 26)
+            prow:SetPoint('TOPLEFT', panel, 'TOPLEFT', 478, -216 - (i - 1) * 28)
+            prow.icon = prow:CreateTexture(nil, 'ARTWORK')
+            prow.icon:SetSize(20, 20)
+            prow.icon:SetPoint('LEFT', prow, 'LEFT', 0, 0)
+            prow.text = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+            prow.text:SetPoint('LEFT', prow.icon, 'RIGHT', 8, 0)
+            prow.text:SetWidth(240)
+            prow.text:SetJustifyH('LEFT')
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.text, 13) end
+            prow.value = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+            prow.value:SetPoint('RIGHT', prow, 'RIGHT', -2, 0)
+            prow.value:SetWidth(118)
+            prow.value:SetJustifyH('RIGHT')
+            if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.value, 13) end
+            if colors.mutedText then prow.value:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+            prow:SetScript('OnClick', function(self)
+                if self.memberName and self.professionID and not self.isGathering and OldKraken.WorkshopRecipes then
+                    local targetMember = panel.member
+                    OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName, self.professionID, function()
+                        Roster:Show()
+                        if targetMember and OpenMemberProfile then OpenMemberProfile(targetMember) end
+                    end)
+                end
+            end)
+            prow:Hide()
+            panel.profRows[i] = prow
+        end
+
+        local function makeActionBtn(label, x, width, variant, onClick)
+            local b = CreateFrame('Button', nil, panel, 'UIPanelButtonTemplate')
+            OldKraken.UIStyle.Button(b, variant, {rounded = true})
+            b:SetSize(width, 34)
+            b:SetPoint('TOPLEFT', panel, 'TOPLEFT', x, -400)
+            b:SetText(label)
+            b:SetScript('OnClick', onClick)
+            return b
+        end
+        panel.whisperButton = makeActionBtn(T('Шепнути'), 32, 130, nil, function()
+            if panel.member and panel.member.isOnline and not isSelfMember(panel.member.name) and type(ChatFrame_SendTell) == 'function' then
+                ChatFrame_SendTell(panel.member.name)
+            end
+        end)
+        panel.inviteButton = makeActionBtn(T('Запросити в групу'), 172, 168, nil, function()
+            if panel.member and panel.member.isOnline and not isSelfMember(panel.member.name) and OldKraken.InvitePlayer then
+                OldKraken:InvitePlayer(panel.member.name)
+            end
+        end)
+        panel.recipesButton = makeActionBtn(T('Переглянути рецепти'), 350, 180, 'primary', function()
+            if panel.member and panel.firstCraftProfessionID and OldKraken.WorkshopRecipes then
+                local targetMember = panel.member
+                OldKraken.WorkshopRecipes:ShowMemberProfession(panel.member.name, panel.firstCraftProfessionID, function()
+                    Roster:Show()
+                    if targetMember and OpenMemberProfile then OpenMemberProfile(targetMember) end
+                end)
+            end
+        end)
+        panel.orderButton = makeActionBtn(T('Створити замовлення'), 540, 180, nil, function()
+            if OldKraken.WorkshopOrders then
+                OldKraken.WorkshopOrders:Show()
+                if type(OldKraken.WorkshopOrders.OpenCreateForm) == 'function' then
+                    OldKraken.WorkshopOrders:OpenCreateForm()
+                end
+            end
+        end)
+        panel.copyButton = makeActionBtn(T("Скопіювати ім'я"), 730, 140, nil, function()
+            if panel.member then CopyName(panel.member.name) end
+        end)
+
+        panel:Hide()
+        return panel
+    end
+
+    frame.profilePanel = createProfilePanel(frame)
     frame:SetScript('OnShow', function() Roster:ScheduleRefresh(true) end)
     frame.scrollFrame = scroll
     frame.contentFrame = content
@@ -590,6 +816,17 @@ local function CreateRosterWindow(parent)
 
     UpdateFilterButtonLabels()
     return frame
+end
+
+local function setButtonEnabled(btn, enabled)
+    if not btn then return end
+    if enabled then
+        if type(btn.Enable) == 'function' then btn:Enable() end
+        if type(btn.SetAlpha) == 'function' then btn:SetAlpha(1) end
+    else
+        if type(btn.Disable) == 'function' then btn:Disable() end
+        if type(btn.SetAlpha) == 'function' then btn:SetAlpha(0.45) end
+    end
 end
 
 local function formatOfflineDuration(duration)
@@ -605,10 +842,186 @@ local function formatOfflineDuration(duration)
     return #parts > 0 and table.concat(parts, ' ') or T('< 1 год')
 end
 
+RenderMemberProfile = function(member)
+    if not rosterFrame or not rosterFrame.profilePanel or not member then return end
+    local panel = rosterFrame.profilePanel
+    panel.member = member
+    local colors = OldKraken.UIStyle.Colors or {}
+    local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.classFile]
+    panel.nameText:SetText(member.name or '')
+    if classColor then
+        panel.nameText:SetTextColor(classColor.r, classColor.g, classColor.b)
+    elseif colors.text then
+        panel.nameText:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
+    end
+
+    local levelPart = string.format(T('Рівень %d'), tonumber(member.level) or 0)
+    local classPart = CLASS_NAMES[member.classFile] or member.class or member.classFile or ''
+    local rankPart = (type(member.rank) == 'string' and member.rank ~= '') and member.rank or '—'
+    panel.metaText:SetText(levelPart .. ' · ' .. classPart .. ' · ' .. rankPart)
+
+    if member.isOnline then
+        panel.statusDot:SetTexture('Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga')
+        local zonePart = (type(member.zone) == 'string' and member.zone ~= '') and (' · ' .. member.zone) or ''
+        panel.statusText:SetText('|cff69dc8c' .. T('В мережі') .. '|r' .. zonePart)
+    else
+        panel.statusDot:SetTexture('Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
+        local ago = formatOfflineDuration(member.lastOnline)
+        panel.statusText:SetText('|cff9aa5b1' .. T('Офлайн') .. (ago and (' · ' .. ago) or '') .. '|r')
+    end
+
+    local comm = OldKraken.Communication
+    local version = comm and comm.GetRosterVersion and comm:GetRosterVersion(member.name)
+    if version then
+        panel.addonText:SetText(T('Аддон: ') .. version)
+    elseif HasAddon(member.name) then
+        panel.addonText:SetText(T('Аддон: ') .. T('активний'))
+    else
+        panel.addonText:SetText(T('Аддон: ') .. T('Не виявлено'))
+    end
+
+    local selfMember = isSelfMember(member.name)
+    local spec = comm and comm.GetRosterSpec and comm:GetRosterSpec(member.name)
+    if type(spec) == 'table' and spec.icon and type(spec.name) == 'string' and spec.name ~= '' then
+        local specLabel = OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name
+        panel.specIcon:SetTexture(spec.icon)
+        panel.specIcon:Show()
+        if type(panel.specName.ClearAllPoints) == 'function' then
+            panel.specName:ClearAllPoints()
+            panel.specName:SetPoint('TOPLEFT', panel, 'TOPLEFT', 78, -222)
+        end
+        if type(panel.specPoints.ClearAllPoints) == 'function' then
+            panel.specPoints:ClearAllPoints()
+            panel.specPoints:SetPoint('TOPLEFT', panel, 'TOPLEFT', 78, -244)
+        end
+        panel.specName:SetText(specLabel)
+        panel.specPoints:SetText(type(spec.points) == 'string' and spec.points ~= '' and (T('Розподіл очок: ') .. spec.points) or '')
+    else
+        panel.specIcon:SetTexture(nil)
+        panel.specIcon:Hide()
+        if type(panel.specName.ClearAllPoints) == 'function' then
+            panel.specName:ClearAllPoints()
+            panel.specName:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -222)
+        end
+        if type(panel.specPoints.ClearAllPoints) == 'function' then
+            panel.specPoints:ClearAllPoints()
+            panel.specPoints:SetPoint('TOPLEFT', panel, 'TOPLEFT', 32, -244)
+        end
+        panel.specName:SetText(T('Дані спеціалізації відсутні.'))
+        panel.specPoints:SetText(selfMember and T('Відкрийте таланти (N), щоб оновити спек.') or T('Гравець ще не оновив таланти з аддоном.'))
+    end
+
+    local firstCraftID = nil
+    local workshopReady = isWorkshopAvailable()
+    local professions = workshopReady and OldKraken.Workshop:GetMemberProfessions(member.name) or {}
+    for _, prow in ipairs(panel.profRows) do prow:Hide() end
+    if not workshopReady then
+        panel.profEmpty:SetText(T('Дані про професії недоступні.'))
+        panel.profEmpty:Show()
+    elseif #professions == 0 then
+        panel.profEmpty:SetText(T('Професії ще не зафіксовані.'))
+        panel.profEmpty:Show()
+    else
+        panel.profEmpty:Hide()
+        local isGathering = function(id)
+            return OldKraken.Workshop and OldKraken.Workshop.IsGatheringProfession and OldKraken.Workshop:IsGatheringProfession(id)
+        end
+        local isSecondary = function(id)
+            return OldKraken.Workshop and OldKraken.Workshop.IsSecondaryProfession and OldKraken.Workshop:IsSecondaryProfession(id)
+        end
+        local function profTier(id)
+            if isSecondary(id) then return 3 end
+            if isGathering(id) then return 2 end
+            return 1
+        end
+        local ordered = {}
+        for i = 1, #professions do ordered[i] = professions[i] end
+        table.sort(ordered, function(a, b)
+            local ta, tb = profTier(a.id), profTier(b.id)
+            if ta ~= tb then return ta < tb end
+            return (a.id or 0) < (b.id or 0)
+        end)
+        for i = 1, math.min(5, #ordered) do
+            local p = ordered[i]
+            local prow = panel.profRows[i]
+            local pname, picon = OldKraken.Workshop:ProfessionInfo(p.id)
+            local nonCraft = isGathering(p.id) or isSecondary(p.id)
+            if not nonCraft and not firstCraftID then firstCraftID = p.id end
+            prow.memberName = member.name
+            prow.professionID = p.id
+            prow.isGathering = nonCraft
+            prow.icon:SetTexture(picon or 134400)
+            local detail = p.native and T('Із ігрового ростера') or (p.rank and (tostring(p.rank) .. '/' .. tostring(p.maximum or '?')) or '')
+            prow.text:SetText(pname)
+            if prow.value then prow.value:SetText(detail) end
+            prow:Show()
+        end
+    end
+    panel.firstCraftProfessionID = firstCraftID
+
+    setButtonEnabled(panel.whisperButton, member.isOnline and not selfMember)
+    setButtonEnabled(panel.inviteButton, member.isOnline and not selfMember)
+    setButtonEnabled(panel.recipesButton, firstCraftID ~= nil and OldKraken.WorkshopRecipes ~= nil)
+    setButtonEnabled(panel.orderButton, not selfMember and OldKraken.WorkshopOrders ~= nil)
+    setButtonEnabled(panel.copyButton, true)
+    if type(panel.whisperButton.SetShown) == 'function' then panel.whisperButton:SetShown(not selfMember) end
+    if type(panel.inviteButton.SetShown) == 'function' then panel.inviteButton:SetShown(not selfMember) end
+    if type(panel.orderButton.SetShown) == 'function' then panel.orderButton:SetShown(not selfMember) end
+    if type(panel.recipesButton.ClearAllPoints) == 'function' then
+        panel.recipesButton:ClearAllPoints()
+        panel.recipesButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 32 or 350, -400)
+    end
+    if type(panel.copyButton.ClearAllPoints) == 'function' then
+        panel.copyButton:ClearAllPoints()
+        panel.copyButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 222 or 730, -400)
+    end
+end
+
+OpenMemberProfile = function(member)
+    if not member or not rosterFrame or not rosterFrame.profilePanel then return end
+    if not selectedProfileName and rosterFrame.scrollFrame and type(rosterFrame.scrollFrame.GetVerticalScroll) == 'function' then
+        savedScrollOffset = tonumber((rosterFrame.scrollFrame:GetVerticalScroll())) or 0
+    end
+    selectedProfileName = member.name
+    if rosterFrame.scrollFrame then rosterFrame.scrollFrame:Hide() end
+    if rosterFrame.emptyText then rosterFrame.emptyText:Hide() end
+    if rosterFrame.emptyReset then rosterFrame.emptyReset:Hide() end
+    if rosterFrame.totalChip and type(rosterFrame.totalChip.Hide) == 'function' then rosterFrame.totalChip:Hide() end
+    if rosterFrame.onlineChip and type(rosterFrame.onlineChip.Hide) == 'function' then rosterFrame.onlineChip:Hide() end
+    if rosterFrame.shownChip and type(rosterFrame.shownChip.Hide) == 'function' then rosterFrame.shownChip:Hide() end
+    RenderMemberProfile(member)
+    rosterFrame.profilePanel:Show()
+end
+
+CloseMemberProfile = function()
+    selectedProfileName = nil
+    if not rosterFrame then return end
+    if rosterFrame.profilePanel then rosterFrame.profilePanel:Hide() end
+    if rosterFrame.totalChip and type(rosterFrame.totalChip.Show) == 'function' then rosterFrame.totalChip:Show() end
+    if rosterFrame.onlineChip and type(rosterFrame.onlineChip.Show) == 'function' then rosterFrame.onlineChip:Show() end
+    if rosterFrame.shownChip and type(rosterFrame.shownChip.Show) == 'function' then rosterFrame.shownChip:Show() end
+    if rosterFrame.scrollFrame then
+        rosterFrame.scrollFrame:Show()
+        if type(rosterFrame.scrollFrame.SetVerticalScroll) == 'function' then
+            rosterFrame.scrollFrame:SetVerticalScroll(savedScrollOffset or 0)
+        end
+    end
+    Roster:Render()
+end
+
+local function HandleRowClick(row, mouseButton)
+    if not row or not row.member then return end
+    if mouseButton == 'LeftButton' then
+        if OpenMemberProfile then OpenMemberProfile(row.member) end
+    else
+        ShowMemberMenu(row)
+    end
+end
+
 local function CreateRow(index, parent)
     local row = CreateFrame("Button", nil, parent)
-    row:RegisterForClicks('RightButtonUp')
-    row:SetScript('OnClick', ShowMemberMenu)
+    row:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+    row:SetScript('OnClick', HandleRowClick)
     row:SetSize(CONTENT_WIDTH, ROW_HEIGHT)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
     local zebra = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.zebra or {1, 1, 1, 0.035}
@@ -663,8 +1076,8 @@ local function CreateRow(index, parent)
     row.cellHovers = {}
     for _, cellIndex in ipairs({1, 2, 4, 5, 7}) do
         local hover = CreateFrame('Button', nil, row)
-        hover:RegisterForClicks('RightButtonUp')
-        hover:SetScript('OnClick', function() ShowMemberMenu(row) end)
+        hover:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+        hover:SetScript('OnClick', function(_, mouseButton) HandleRowClick(row, mouseButton) end)
         if cellIndex == 4 then hover:ClearAllPoints(); hover:SetPoint('LEFT', row, 'LEFT', 374, 0); hover:SetSize(80, ROW_HEIGHT)
         else hover:SetAllPoints(row.cells[cellIndex]) end
         hover:EnableMouse(true)
@@ -789,6 +1202,22 @@ function Roster:Render()
     UpdateFilterButtonLabels()
     UpdateSortHeaders()
 
+    if selectedProfileName then
+        local found
+        for _, member in ipairs(rosterData) do
+            if member.name == selectedProfileName then
+                found = member
+                break
+            end
+        end
+        if found then
+            RenderMemberProfile(found)
+            return
+        end
+        CloseMemberProfile()
+        return
+    end
+
     self:RenderVisible()
 end
 
@@ -885,7 +1314,9 @@ function Roster:RenderVisible()
         cells[1]:SetText(SafeText(member.name))
         cells[2]:SetText(SafeText(member.rank))
         cells[3]:SetText(SafeText(member.level))
-        cells[4]:SetText(SafeText(member.class))
+        local hasClass = (member.classFile ~= nil and member.classFile ~= "") or (member.class ~= nil and member.class ~= "")
+        local classText = hasClass and ClassLabel(member.classFile, member.class) or "-"
+        cells[4]:SetText(classText)
         local offlineText = not member.isOnline and formatOfflineDuration(member.lastOnline)
         local zoneText = SafeText(member.zone)
         local locationText = offlineText and (T('Офлайн') .. ' · ' .. offlineText) or zoneText
@@ -894,8 +1325,8 @@ function Roster:RenderVisible()
         row.onlineDot:SetTexture(member.isOnline and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
-        row.cellHovers[4].fullText = SafeText(member.class)
-        if spec and spec.name then row.cellHovers[4].fullText = row.cellHovers[4].fullText .. '\n' .. spec.name end
+        row.cellHovers[4].fullText = classText
+        if spec and spec.name then row.cellHovers[4].fullText = row.cellHovers[4].fullText .. '\n' .. (OldKraken.LocalizeSpecName and OldKraken.LocalizeSpecName(spec.name) or spec.name) end
         row.cellHovers[5].fullText = offlineText and (T('Офлайн') .. ': ' .. offlineText .. (zoneText ~= '' and ('\n' .. zoneText) or '')) or zoneText
 
         local classColor = member.classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.classFile]
@@ -992,7 +1423,7 @@ end
 
 function Roster:RequestUpdate()
     if not IsInGuild or not IsInGuild() then
-        print(T("|cff2ec4b6Old Kraken|r: персонаж не перебуває в гільдії."))
+        chatInfo(T("|cff2ec4b6Old Kraken|r: персонаж не перебуває в гільдії."))
         return
     end
 
@@ -1002,13 +1433,13 @@ function Roster:RequestUpdate()
     elseif GuildRoster then
         GuildRoster()
     else
-        print(T("|cff2ec4b6Old Kraken|r: API оновлення ростера недоступний."))
+        chatError(T("|cff2ec4b6Old Kraken|r: API оновлення ростера недоступний."))
     end
 end
 
 function Roster:Show()
     if not GetSettings() then
-        print(T("|cff2ec4b6Old Kraken|r: база даних ще не ініціалізована."))
+        chatError(T("|cff2ec4b6Old Kraken|r: база даних ще не ініціалізована."))
         return
     end
 
@@ -1079,6 +1510,49 @@ SlashCmdList["OLDKRAKEN"] = function(message)
         return
     elseif command == 'orders' then
         if OldKraken.WorkshopOrders then OldKraken.WorkshopOrders:Show() end
+        return
+    elseif command == 'workshop migrate' then
+        if OldKraken.Database and type(OldKraken.Database.ConfirmWorkshopMigration) == 'function' then
+            local ok, status = OldKraken.Database:ConfirmWorkshopMigration()
+            if ok and status == 'completedWithOverflow' then
+                chatInfo(T('Міграцію Майстерні завершено, але не всі конфлікти вмістилися у сховище конфліктів. Старі дані збережено без змін.'))
+            elseif ok then
+                chatInfo(T('Міграцію Майстерні завершено.'))
+            elseif status == 'unavailable' then
+                chatError(T('Майстерня ще завантажується. Спробуйте перенесення пізніше.'))
+            else
+                chatInfo(T('Немає очікуваної міграції Майстерні для поточного світу.'))
+            end
+            if ok and type(OldKraken.Database.WorkshopMigrationConflicts)=='function' then
+                local count=OldKraken.Database.WorkshopMigrationConflicts()
+                if count>0 then chatInfo(T('Збережено розбіжностей: ')..count..T('. Переглянути: /okr workshop conflicts')) end
+            end
+        end
+        return
+    elseif command == 'workshop conflicts' then
+        if OldKraken.Database and type(OldKraken.Database.WorkshopMigrationConflicts)=='function' then
+            local count,sections,overflow=OldKraken.Database.WorkshopMigrationConflicts()
+            chatInfo(T('Невирішених розбіжностей Майстерні: ')..count)
+            if sections.orderDrafts then
+                chatInfo(T('Чернетка: /okr workshop draft legacy — стара; /okr workshop draft canonical — поточна до перенесення.'))
+            end
+            if sections.pendingDeliveryTallies then
+                chatInfo(T('Облік передач очікує відповідного замовлення; невідповідні дані збережено окремо.'))
+            end
+            if count>(sections.orderDrafts or 0)+(sections.pendingDeliveryTallies or 0) or overflow then
+                chatInfo(T('Інші розбіжності збережені в даних аддона; старий розділ не видалено.'))
+            end
+        end
+        return
+    elseif command == 'workshop draft legacy' or command == 'workshop draft canonical' then
+        if OldKraken.Database and type(OldKraken.Database.ChooseWorkshopDraft)=='function' then
+            local choice=command=='workshop draft legacy' and 'legacy' or 'canonical'
+            if OldKraken.Database.ChooseWorkshopDraft(choice) then
+                chatInfo(T('Обрану чернетку відновлено.'))
+            else
+                chatInfo(T('Для цього персонажа немає збереженої розбіжності чернеток.'))
+            end
+        end
         return
     elseif command == 'workshop' or command == 'craft' then
         if OldKraken.Workshop then OldKraken.Workshop:Show() end

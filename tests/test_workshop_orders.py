@@ -28,8 +28,9 @@ def client(name, embedded=False):
                 self.currentPage=key; page.frame:Show(); return page.frame
             end
         end
-        function OldKraken:On() end
-        function OldKraken:Fire(...) notices[#notices+1]={...} end
+        OldKraken.listeners={}
+        function OldKraken:On(name,fn) self.listeners[name]=self.listeners[name] or {}; table.insert(self.listeners[name],fn) end
+        function OldKraken:Fire(name,...) notices[#notices+1]={name,...}; for _,fn in ipairs(self.listeners[name] or {}) do fn(...) end end
         function print(...) end
         function UnitName() return player,'Mon' end
         function GetGuildInfo() return 'Guild' end
@@ -39,6 +40,8 @@ def client(name, embedded=False):
         function date() return 'date' end
         function GetProfessions() return 1 end
         function GetProfessionInfo() return 'Alchemy',nil,50,300,nil,nil,171 end
+        local TEST_RECIPE_NAMES={[9001]='Manual potion',[9002]='Late potion',[9003]='Security potion',[9004]='Relay potion',[9005]='Embedded potion',[9101]='Profession check',[9102]='item:98765',[9201]='Drafted item',[9202]='Ready to publish'}
+        C_TradeSkillUI={GetRecipeOutputItemData=function(id) local n=TEST_RECIPE_NAMES[id]; if n then return {hyperlink='['..n..']'} end end}
         UIParent={}; UISpecialFrames={}; StaticPopupDialogs={}
         function StaticPopup_Show(name,a,b,callback)
             popup={callback=callback,GetFrameStrata=function() return 'DIALOG' end,SetFrameStrata=function() end,HookScript=function() end}
@@ -81,6 +84,23 @@ def client(name, embedded=False):
         function click(text)
             for _,f in ipairs(frames) do if f.text==text and f.scripts.OnClick and f.shown~=false then f.scripts.OnClick(f); return end end
             error('button not found: '..text)
+        end
+        function pickOrderRecipe(form, name, prof, itemId, recipeId)
+            local p = prof or 171
+            local rid = recipeId or 9001
+            local iid = itemId or 0
+            local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+            scope.recipes['Helper Crafter'] = scope.recipes['Helper Crafter'] or {}
+            scope.recipes['Helper Crafter'][rid] = {recipe=rid, item=iid, profession=p, seen=now, name=name, product=name}
+            OldKraken:Fire('INITIALIZED', OldKraken.DB)
+            form.item.scripts.OnClick(form.item)
+            for _, row in ipairs(frames) do
+                if type(row.entry)=='table' and type(row.entry.record)=='table' and row.entry.record.recipe==rid and row.scripts.OnClick then
+                    row.scripts.OnClick(row)
+                    return
+                end
+            end
+            error('recipe row not found: '..tostring(rid))
         end
         C_Timer={NewTicker=function(_,fn) timers[#timers+1]=fn end}
         OldKraken.Communication={queue={}}
@@ -126,11 +146,14 @@ def test_orders():
     tick(alice); tick(bob)
     alice.execute('''
         OldKraken.WorkshopOrders:Show(); local f=OldKrakenWorkshopOrdersFrame
-        f.item:SetText('Manual potion'); click('Опублікувати')
-        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; assert(next(s.orderOwners['Alice Mon'])==nil)
-        selectOption(OldKrakenOrderProfession,171); click('Опублікувати')
+        pickOrderRecipe(f.orderForm,'Manual potion',171,0,9001); click('Опублікувати')
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
         for k,v in pairs(s.orderOwners['Alice Mon']) do orderKey=k; order=v end
         assert(order and order.profession==171 and order.status=='open')
+    ''')
+    bob.execute('''
+        local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        s.recipes['Bob Mon']={[9001]={recipe=9001,item=0,profession=171,seen=now,name='Manual potion',product='Manual potion'},[9002]={recipe=9002,item=0,profession=171,seen=now,name='Late potion',product='Late potion'}}
     ''')
     tick(alice); flush(alice, bob, True)
 
@@ -138,7 +161,7 @@ def test_orders():
     bob.execute('''
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; for k,v in pairs(s.orderObserved) do orderKey=k; order=v end
         assert(order and order.item=='Manual potion')
-        local n=0; for _,e in ipairs(notices) do if e[1]=='WORKSHOP_ORDER_NOTICE' and e[2]=='Нове замовлення: Manual potion' then n=n+1; assert(e[3]:find('рецепт не підтверджено')) end end; assert(n==1)
+        local n=0; for _,e in ipairs(notices) do if e[1]=='WORKSHOP_ORDER_NOTICE' and e[2]=='Нове замовлення: Manual potion' then n=n+1 end end; assert(n==1)
         OldKraken.WorkshopOrders:Show(); selectOption(OldKrakenOrdersView,'available')
         click('Запропонувати допомогу')
     ''')
@@ -159,8 +182,8 @@ def test_orders():
         assert(OldKraken.WorkshopRecipes:Knows(987,456)); assert(#OldKraken.WorkshopRecipes:FindMasters(987,456)==1)
     ''')
     alice.execute('''
-        local f=OldKrakenWorkshopOrdersFrame; f.item:SetText('Late potion')
-        selectOption(OldKrakenOrderProfession,171); click('Опублікувати')
+        local f=OldKrakenWorkshopOrdersFrame; pickOrderRecipe(f.orderForm,'Late potion',171,0,9002)
+        click('Опублікувати')
         for k,v in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Alice Mon']) do if v.item=='Late potion' then orderKey=k; order=v end end
     ''')
     tick(alice); flush(alice, bob)
@@ -196,8 +219,7 @@ def test_relayed_actions_cannot_impersonate_worker():
     alice.execute('''
         OldKraken.WorkshopOrders:Show()
         local f=OldKrakenWorkshopOrdersFrame
-        f.item:SetText('Security potion')
-        selectOption(OldKrakenOrderProfession,171)
+        pickOrderRecipe(f.orderForm,'Security potion',171,0,9003)
         click('Опублікувати')
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
         for k,v in pairs(s.orderOwners['Alice Mon']) do orderKey=k; order=v end
@@ -270,8 +292,8 @@ def test_order_relay_and_owner_authority():
     alice, bob, carol, dave = (client(name) for name in ('Alice', 'Bob', 'Carol', 'Dave'))
     tick(alice); tick(bob)
     alice.execute('''
-        OldKraken.WorkshopOrders:Show(); OldKrakenWorkshopOrdersFrame.item:SetText('Relay potion')
-        selectOption(OldKrakenOrderProfession,171); click('Опублікувати')
+        OldKraken.WorkshopOrders:Show(); pickOrderRecipe(OldKrakenWorkshopOrdersFrame.orderForm,'Relay potion',171,0,9004)
+        click('Опублікувати')
         for k,v in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Alice Mon']) do orderKey=k; order=v end
     ''')
     tick(alice); flush(alice, bob)
@@ -284,6 +306,7 @@ def test_order_relay_and_owner_authority():
     tick(carol); flush(carol, bob); tick(bob); flush(bob, carol, True)
     carol.execute('''
         local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        s.recipes['Carol Mon']={[9004]={recipe=9004,item=0,profession=171,seen=now,name='Relay potion',product='Relay potion'}}
         for k,v in pairs(s.orderObserved) do orderKey=k; order=v end
         assert(order and order.item=='Relay potion' and order.relayed and order.ownerRev==0)
         assert(not s.orderRelays[orderKey])
@@ -353,6 +376,105 @@ def test_order_relay_and_owner_authority():
     dave.execute("local s=OldKraken.DB.workshop.guilds['Realm\\001Guild']; local o; for _,v in pairs(s.orderObserved) do o=v end; assert(o and o.status=='deleted')")
 
 
+def test_open_draft_refreshes_after_migration():
+    lua = client('Alice')
+    lua.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        local guilds=OldKraken.DB.workshop.guilds
+        guilds['\\001Guild']={orderDrafts={['Alice Mon']={item='Manual potion',quantity='5',note='legacy note',
+            profession=171,materials='customer',deadline=86400,recipe={item=0,recipe=9001,owner='Crafter Mon'}}}}
+        OldKraken.WorkshopOrders:Show()
+        local form=OldKrakenWorkshopOrdersFrame.orderForm
+        assert(form.note:GetText()~='legacy note')
+        assert(select(2,OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false))=='pending')
+        local ok,status=OldKraken.Database:ConfirmWorkshopMigration()
+        assert(ok and status=='completed')
+        assert(form.note:GetText()=='legacy note' and form.quantity:GetText()=='5', 'open form must reload the migrated draft')
+        form.note:SetText('edited after migration')
+        local draft=guilds['Realm\\001Guild'].orderDrafts['Alice Mon']
+        assert(draft.item=='Manual potion' and draft.note=='edited after migration')
+        assert(guilds['\\001Guild'].orderDrafts['Alice Mon'].note=='legacy note')
+    ''')
+
+
+def test_conflicting_drafts_can_be_selected_without_losing_either_copy():
+    lua = client('Alice')
+    lua.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        local guilds=OldKraken.DB.workshop.guilds
+        local current=guilds['Realm\\001Guild']
+        current.orderDrafts['Alice Mon']={item='Manual potion',quantity='1',note='canonical note',profession=171,
+            materials='customer',deadline=86400,recipe={item=0,recipe=9001,owner='Crafter Mon'}}
+        guilds['\\001Guild']={orderDrafts={['Alice Mon']={item='Manual potion',quantity='5',note='legacy note',
+            profession=171,materials='customer',deadline=86400,recipe={item=0,recipe=9001,owner='Crafter Mon'}}}}
+        OldKraken.WorkshopOrders:Show()
+        local form=OldKrakenWorkshopOrdersFrame.orderForm
+        assert(form.note:GetText()=='canonical note')
+        OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false)
+        assert(OldKraken.Database:ConfirmWorkshopMigration())
+        local count,sections=OldKraken.Database.WorkshopMigrationConflicts()
+        assert(count==1 and sections.orderDrafts==1 and form.note:GetText()=='canonical note')
+        assert(OldKraken.Database.ChooseWorkshopDraft('legacy'))
+        assert(form.note:GetText()=='legacy note' and current.orderDrafts['Alice Mon'].quantity=='5')
+        assert(OldKraken.Database.WorkshopMigrationConflicts()==0)
+        assert(OldKraken.Database.ChooseWorkshopDraft('canonical'))
+        assert(form.note:GetText()=='canonical note' and current.orderDrafts['Alice Mon'].quantity=='1')
+        local conflict=current.migrationConflicts['orderDrafts\\001Alice Mon']
+        assert(conflict.canonical.note=='canonical note' and conflict.legacy.note=='legacy note')
+        assert(conflict.beforeDraftChoice.note=='legacy note' and conflict.selected=='canonical')
+        assert(guilds['\\001Guild'].orderDrafts['Alice Mon'].note=='legacy note')
+    ''')
+
+
+def test_migration_chat_commands_report_and_restore_draft_conflict():
+    lua = client('Alice')
+    lua.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        SlashCmdList={}; messages={}
+        function OldKraken:Print(msg) messages[#messages+1]=msg end
+        function OldKraken:PrintError(msg) messages[#messages+1]=msg end
+        function OldKraken.Communication:HandleCommand() return false end
+    ''')
+    lua.execute((ROOT / 'GuildRoster.lua').read_text(encoding='utf-8'))
+    lua.execute('''
+        local g=OldKraken.DB.workshop.guilds
+        g['Realm\\001Guild'].orderDrafts['Alice Mon']={item='Current',quantity='1'}
+        g['\\001Guild']={orderDrafts={['Alice Mon']={item='Old',quantity='2'}}}
+        OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false)
+        SlashCmdList.OLDKRAKEN('workshop migrate')
+        assert(messages[#messages]:find('/okr workshop conflicts',1,true))
+        SlashCmdList.OLDKRAKEN('workshop conflicts')
+        assert(messages[#messages]:find('/okr workshop draft legacy',1,true))
+        SlashCmdList.OLDKRAKEN('workshop draft legacy')
+        assert(g['Realm\\001Guild'].orderDrafts['Alice Mon'].item=='Old')
+        SlashCmdList.OLDKRAKEN('workshop draft canonical')
+        assert(g['Realm\\001Guild'].orderDrafts['Alice Mon'].item=='Current')
+    ''')
+
+
+def test_migrated_order_is_broadcast_without_reloading():
+    alice, bob = client('Alice'), client('Bob')
+    alice.execute((ROOT / 'Database.lua').read_text(encoding='utf-8'))
+    alice.execute('''
+        OldKrakenDB=OldKraken.DB; OldKraken.Database.Initialize()
+        local id='Alice Mon'; local k=id..'\\001migrated'
+        OldKraken.DB.workshop.guilds['\\001Guild']={orderOwners={[id]={[k]={
+            owner=id,id='migrated',rev=1,created=now,deadline=now+3600,profession=171,
+            item='Migrated item',quantity=1,reward=0,materials='customer',note='',status='open',candidates={},acks={}}}}}
+        OldKraken.Database:MigrateWorkshopScope('Realm','Guild',false)
+        assert(OldKraken.Database:ConfirmWorkshopMigration())
+    ''')
+    tick(alice)
+    flush(alice, bob)
+    bob.execute('''
+        local order=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved['Alice Mon\\001migrated']
+        assert(order and order.item=='Migrated item', 'migrated order must broadcast while the session remains open')
+    ''')
+
+
 def test_embedded_orders():
     lua = client('Cara', embedded=True)
     tick(lua)
@@ -377,8 +499,7 @@ def test_embedded_orders():
         local form=workshop.ordersView.createForm
         assert(form:IsShown(), 'new-order form did not open modally')
         assert(form.width==900 and form.height==480, 'new-order form size mismatch')
-        form.item:SetText('Embedded potion')
-        selectOption(OldKrakenOrderProfession,171)
+        pickOrderRecipe(form,'Embedded potion',171,0,9005)
         click('Опублікувати')
         assert(not form:IsShown(), 'successful order creation did not close the modal')
         local orders=OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Cara Mon']
@@ -441,6 +562,10 @@ def test_bop_filter_reloads_after_item_data():
 
 
 if __name__ == '__main__':
+    test_open_draft_refreshes_after_migration()
+    test_conflicting_drafts_can_be_selected_without_losing_either_copy()
+    test_migration_chat_commands_report_and_restore_draft_conflict()
+    test_migrated_order_is_broadcast_without_reloading()
     test_orders()
     test_relayed_actions_cannot_impersonate_worker()
     test_embedded_orders()

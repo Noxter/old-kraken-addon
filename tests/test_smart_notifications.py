@@ -121,38 +121,38 @@ finder.requests["g2"] = {}
 -- Ensure player level matches dungeon level filter
 UnitLevel = function() return 15 end
 
--- 2. Open world out of combat: background events show banner, sound, and chat
+-- 2. Open world out of combat: background events show banner and sound without redundant chat log
 resetMocks()
 OldKraken.listeners.GROUP_FINDER_NEW(otherGroup)
 local alert = findAlert()
 assert(alert and alert:IsShown(), 'open world out of combat must show background group banner')
-assert(soundPlays == 1 and #chatLogs == 1)
+assert(soundPlays == 1 and #chatLogs == 0)
 
--- 3. Party and Raid out of combat: background events muted (no banner, no sound), chat preserved; request shown normally
+-- 3. Party and Raid out of combat: background events muted (no banner, no sound); decision/workshop/event/event_signup log to chat, group does not; request shown normally
 for _, instType in ipairs({'party', 'raid'}) do
     resetMocks()
     IsInInstance = function() return true, instType end
     OldKraken.listeners.GROUP_FINDER_NEW(otherGroup)
     assert(not alert:IsShown(), instType .. ' out of combat must suppress group banner')
     assert(soundPlays == 0, instType .. ' out of combat must suppress sound')
-    assert(#chatLogs == 1, instType .. ' out of combat must preserve chat log')
+    assert(#chatLogs == 0, instType .. ' out of combat must not log group banner to chat')
 
     OldKraken.listeners.GROUP_FINDER_APPLICATION_STATUS(otherGroup, 'reject')
-    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 2, instType .. ' must suppress decision banner')
+    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 1, instType .. ' must suppress decision banner and log to chat')
 
     OldKraken.listeners.WORKSHOP_ORDER_NOTICE('Замовлення', 'Тест', 'ord1')
-    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 3, instType .. ' must suppress workshop banner')
+    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 2, instType .. ' must suppress workshop banner and log to chat')
 
     OldKraken.listeners.GUILD_EVENTS_NEW('ev1', {owner = 'Org', title = 'Raid', when = 1700000000})
-    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 4, instType .. ' must suppress event banner')
+    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 3, instType .. ' must suppress event banner and log to chat')
 
     OldKraken.listeners.GUILD_EVENTS_NEW_SIGNUP('ev1', {owner = 'Org', title = 'Raid'}, 'Player', 'dps')
-    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 5, instType .. ' must suppress event_signup banner')
+    assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 4, instType .. ' must suppress event_signup banner and log to chat')
 
-    -- Request in party/raid out of combat must still show normally
+    -- Request in party/raid out of combat must still show normally without redundant chat log
     fakeNow = fakeNow + 100
     OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(ownGroup1, 'Helper', 'healer')
-    assert(alert:IsShown() and soundPlays == 1 and #chatLogs == 6,
+    assert(alert:IsShown() and soundPlays == 1 and #chatLogs == 4,
         instType .. ' out of combat must show request banner: shown=' .. tostring(alert:IsShown()) .. ' sound=' .. tostring(soundPlays) .. ' logs=' .. tostring(#chatLogs))
 end
 
@@ -161,7 +161,7 @@ for _, instType in ipairs({'pvp', 'arena'}) do
     resetMocks()
     IsInInstance = function() return true, instType end
     OldKraken.listeners.GROUP_FINDER_NEW(otherGroup)
-    assert(alert:IsShown() and soundPlays == 1 and #chatLogs == 1, instType .. ' out of combat must NOT suppress background banner')
+    assert(alert:IsShown() and soundPlays == 1 and #chatLogs == 0, instType .. ' out of combat must NOT suppress background banner')
 end
 
 -- 5. IsInInstance pcall error / nil / invalid return must NOT activate suppression
@@ -178,13 +178,15 @@ for _, badFn in ipairs({
     assert(alert:IsShown() and soundPlays == 1, 'invalid/error IsInInstance must not suppress banner')
 end
 
--- 6. Combat suppresses all banners & sounds (including request and Preview), preserves chat
+-- 6. Combat suppresses all banners & sounds (including request and Preview), preserves chat for decision/workshop/event/event_signup only
 resetMocks()
 InCombatLockdown = function() return true end
 OldKraken.listeners.GROUP_FINDER_NEW(otherGroup)
-assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 1)
+assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 0)
 finder:PreviewAlert('group')
-assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 2, 'Preview during combat must NOT show banner or sound')
+assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 0, 'Preview during combat must NOT show banner or sound')
+OldKraken.listeners.GROUP_FINDER_APPLICATION_STATUS(otherGroup, 'reject')
+assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 1, 'decision during combat must log to chat')
 fireCombatEnd()
 assert(not alert:IsShown() and soundPlays == 0, 'background/preview events must NOT be deferred after combat')
 
@@ -193,7 +195,7 @@ for _, inst in ipairs({{false, 'none'}, {true, 'party'}, {true, 'raid'}}) do
     resetMocks()
     IsInInstance = function() return inst[1], inst[2] end
     finder:PreviewAlert('group')
-    assert(alert:IsShown() and soundPlays == 1 and #chatLogs == 1, 'Preview out of combat must bypass instance filter: ' .. inst[2])
+    assert(alert:IsShown() and soundPlays == 1 and #chatLogs == 0, 'Preview out of combat must bypass instance filter: ' .. inst[2])
 end
 
 -- 8. Deferred requests during combat: single, multiple, multi-group, deduplicated re-apply, withdraw, accept/reject, closed/deleted group
@@ -202,7 +204,7 @@ resetMocks()
 InCombatLockdown = function() return true end
 finder.requests["g1"]['App1'] = 'dps'
 OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(ownGroup1, 'App1', 'dps')
-assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 1)
+assert(not alert:IsShown() and soundPlays == 0 and #chatLogs == 0)
 InCombatLockdown = function() return false end
 fireCombatEnd()
 assert(alert:IsShown() and soundPlays == 1, 'deferred single request must show after combat')

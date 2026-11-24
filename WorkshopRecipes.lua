@@ -1,4 +1,10 @@
 local T = OldKraken.Translate or function(text) return text end
+local function chatInfo(msg)
+    if OldKraken.Print then OldKraken:Print(msg) else print('|cff2ec4b6Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
+local function chatError(msg)
+    if OldKraken.PrintError then OldKraken:PrintError(msg) else print('|cffff5555Old Kraken|r: ' .. tostring(msg or ''):gsub('^|c%x%x%x%x%x%x%x%xOld Kraken|r:%s*', ''):gsub('^Old Kraken:%s*', '')) end
+end
 -- On-demand guild recipe search. Never treat a filtered scan as a complete list.
 local Recipes={}
 OldKraken.WorkshopRecipes=Recipes
@@ -58,20 +64,51 @@ local function changed()
     if C_Timer and C_Timer.After then changedPending=true; C_Timer.After(0.15,flush) else flush() end
 end
 
+OldKraken:On('WORKSHOP_SCOPE_MIGRATED',function(migratedProfile)
+    if not active or profile~=migratedProfile then return end
+    indexRevision=indexRevision+1; indexedRevision=-1
+    summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
+    ownItemsRevision=-1; recipeChanged=true
+    local saved=scope.recipeVersions[identity]
+    if integer(saved,0,8999999999999999) then
+        scope.recipeVersions[identity]=math.max(saved+1,GetServerTime()*1000)
+    end
+    changed()
+end)
+
 local function validRecord(r)
     return type(r)=='table' and integer(r.recipe,1,100000000) and integer(r.item,0,100000000)
         and integer(r.profession,1,1000000) and professionNames[r.profession] and integer(r.seen,1,GetServerTime()+600)
         and safeText(r.name,1,120) and safeText(r.product,0,120)
 end
+local function validRealm(realm)
+    if OldKraken.Database and type(OldKraken.Database.IsValidRealm)=='function' then
+        return OldKraken.Database:IsValidRealm(realm)
+    end
+    return safeText(realm,1,128)
+end
+local function resolveRealm()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope)=='function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm=type(GetRealmName)=='function' and GetRealmName() or nil
+    if validRealm(realm) then return realm end
+    if type(issecretvalue)=='function' and issecretvalue(realm) then return nil end
+    if realm=='' then return 'Forever' end
+    return nil
+end
 local function connect()
     local name=myName(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player')
-    local realm=type(GetRealmName)=='function' and GetRealmName()
-    if not name or not safeText(guild,1,128) or not usable(realm,'string') or not OldKraken.DB then
+    local realm=resolveRealm()
+    if not name or not safeText(guild,1,128) or not validRealm(realm) or not OldKraken.DB then
         if Recipes.CancelPicker then Recipes:CancelPicker() end
         active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts,learnWarned={},{},{}
         tabStates={}
         indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
         if frame then frame:Hide() end; return
+    end
+    if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
+        OldKraken.Database:MigrateWorkshopScope(realm,guild,false)
     end
     local k=realm..'\001'..guild
     if active and identity==name and profile==k then return end
@@ -461,19 +498,19 @@ local function addCached(query,filter,professionFilter)
     end,function() changed() end,function() return searchJob==job end)
 end
 local function search(value)
-    if not active or not safeText(value,1,200) then print(T('Old Kraken: введіть назву або посилання на предмет.')); return false end
+    if not active or not safeText(value,1,200) then chatError(T('Old Kraken: введіть назву або посилання на предмет.')); return false end
     local item=value:match('item:(%d+)')
     local q=item and ('item:'..item) or lower(value:match('^%s*(.-)%s*$'))
-    if not safeText(q,3,80) then print(T('Old Kraken: введіть назву або посилання на предмет.')); return false end
+    if not safeText(q,3,80) then chatError(T('Old Kraken: введіть назву або посилання на предмет.')); return false end
     local now=GetTime()
     offset=0; addCached(q,nil,selectRecipe and pickerProfession or nil)
     if now-lastQuery<10 then
         if activeQuery and activeQuery.query~=q then activeQuery=nil end
-        changed(); print(T('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.')); return false
+        changed(); chatInfo(T('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.')); return false
     end
     sequence=sequence+1
     local token=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
-    if not comm:SendProtocol('WRQUERY',codec._pack({token,q})) then activeQuery=nil; changed(); print(T('Old Kraken: показано збережені результати; запит гільдії надіслати не вдалося.')); return false end
+    if not comm:SendProtocol('WRQUERY',codec._pack({token,q})) then activeQuery=nil; changed(); chatError(T('Old Kraken: показано збережені результати; запит гільдії надіслати не вдалося.')); return false end
     lastQuery=now; activeQuery={token=token,query=q,untilTime=now+(q:match('^prof:%d+$') and 600 or 120)}; changed(); return true
 end
 comm:RegisterHandler('WRQUERY',function(sender,_,payload)
@@ -735,7 +772,7 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
             checked=checked+1; if checked>=50 then break end
         end
     end
-    if #newlyTimedOut>0 then print(formatPendingNotice(newlyTimedOut)) end
+    if #newlyTimedOut>0 then chatError(formatPendingNotice(newlyTimedOut)) end
     while #sendQueue>0 and sendQueue[1].expires<GetTime() do table.remove(sendQueue,1) end
     if #sendQueue>0 and #comm.queue<=8 and comm:SendProtocol(sendQueue[1].kind or 'WRRESULT',sendQueue[1].payload) then table.remove(sendQueue,1) end
     if recipeChanged then recipeChanged=false; OldKraken:Fire('WORKSHOP_RECIPES_CHANGED') end
@@ -927,17 +964,17 @@ local function recipeIcon(r)
     end
     return 134400
 end
+function Recipes:ItemName(id)
+    if not integer(id,1,100000000) then return nil end
+    local name=clientItemName(id)
+    if not name then requestItemData(id) end
+    return name
+end
 function Recipes:ItemLabel(id)
-    local name,icon
-    if C_Item and type(C_Item.GetItemNameByID)=='function' then
-        local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and safeText(value,1,160) then name=value end
-    end
-    if not name then
-        local ok,value=getItemInfo(id); if ok and safeText(value,1,160) then name=value end
-    end
+    local name=self:ItemName(id)
+    local icon
     local getIcon=C_Item and C_Item.GetItemIconByID or GetItemIcon
     if type(getIcon)=='function' then local ok,value=pcall(getIcon,id); if ok and (usable(value,'number') or usable(value,'string')) then icon=value end end
-    if not name then requestItemData(id) end
     return '|T'..tostring(icon or 134400)..':22:22:0:0|t |cffffffff'..(name or T('Завантаження назви…'))..'|r'
 end
 local itemEvents=CreateFrame('Frame')
@@ -1498,7 +1535,7 @@ local function createWindow(parent)
             f.infoScroll:SetVerticalScroll(0)
             if self.entry and tab=='masters' and not selectRecipe then selectedMaster=self.entry; render()
             elseif self.entry and selectRecipe then
-                if self.entry.owner==identity then print(T('Old Kraken: для замовлення оберіть рецепт іншого майстра.')); return end
+                if self.entry.owner==identity then chatError(T('Old Kraken: для замовлення оберіть рецепт іншого майстра.')); return end
                 local entry=self.entry
                 local callback=selectRecipe; Recipes:CancelPicker()
                 if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Back() else f:Hide() end
@@ -1734,7 +1771,7 @@ function Recipes:RestoreView(state)
     frame.status:SetText(state.status or ''); render()
 end
 function Recipes:Show(forceNavigation)
-    connect(); if not active then print(T('Old Kraken: пошук рецептів доступний членам гільдії.')); return end
+    connect(); if not active then chatError(T('Old Kraken: пошук рецептів доступний членам гільдії.')); return end
     if OldKraken.UIHub and OldKraken.Workshop then
         OldKraken.UIHub:ShowPage('workshop')
         if OldKraken.Workshop.currentView=='recipes' and not forceNavigation and not selectRecipe then frame:Show(); render(); return end
@@ -1800,9 +1837,12 @@ function Recipes:ShowProfession(profession,forceNavigation)
     frame.status:SetText(professionNames[profession]..T(': збережені рецепти та відповіді онлайн-майстрів; список може бути неповним.'))
     search('prof:'..profession); frame:Raise(); render()
 end
-function Recipes:ShowMemberProfession(name,profession)
+function Recipes:ShowMemberProfession(name,profession,onBack)
     if not safeText(name,1,128) or not professionNames[profession] then return end
     self:ShowProfession(profession,true)
+    if type(onBack)=='function' and OldKraken.Workshop and type(OldKraken.Workshop.navigationStack)=='table' and #OldKraken.Workshop.navigationStack>0 then
+        OldKraken.Workshop.navigationStack[#OldKraken.Workshop.navigationStack]={onBack=onBack}
+    end
     if active and frame then
         viewOwner=name; selectedEntry=nil
         frame.status:SetText(name..' · '..professionNames[profession]..T(': збережені рецепти; список може бути неповним.'))

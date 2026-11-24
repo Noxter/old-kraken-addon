@@ -121,11 +121,8 @@ function UnitGetAvailableRoles(unit)
 end
 assert(not events:Signup(key,'tank') and not events:Signup(key,'healer'))
 assert(events:Signup(key,'dps'))
-options={}; ui.roleMenu.initialize(ui.roleMenu,1)
-for _,info in ipairs(options) do
-    if info.value=='tank' or info.value=='healer' then assert(info.disabled) end
-    if info.value=='dps' or info.value=='flex' then assert(not info.disabled) end
-end
+assert(ui.roleSelector.mode=='badge' and ui.roleSelector.selectedRole=='dps' and ui.roleSelector.badge:IsShown())
+for i=1,3 do assert(not ui.roleSelector.buttons[i]:IsShown()) end
 local finder=OldKraken.GroupFinder
 handlers.CEVRSVP('Caster',nil,finder._pack({e.owner,e.id,'tank','2000000000100','001'}))
 assert(not e.people.Caster)

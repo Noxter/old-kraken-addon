@@ -121,7 +121,8 @@ function PlaySound() alertSoundCalls = alertSoundCalls + 1 end
 local methods = {}
 function methods:SetText(v) self.text = v end
 function methods:GetText() return self.text or '' end
-function methods:SetSize(width, height) self.width = width; self.height = height end
+function methods:SetSize(w, h) self.width = w; self.height = h end
+function methods:SetHeight(h) self.height = h end
 function methods:SetTexture(texture) self.texture = texture end
 function methods:SetTexCoord(...) self.texCoord = {...} end
 function methods:SetAlpha(value) self.alpha = value end
@@ -331,6 +332,18 @@ ui.titleBox:SetText('Рейд на Оніксію')
 ui.descriptionBox:SetText(string.rep('Привіт ', 35))
 ui.createButton.scripts.OnClick()
 assert(type(sentGuildChat) == 'string' and #sentGuildChat <= 255, 'guild chat announce exceeded 255 bytes: ' .. tostring(sentGuildChat and #sentGuildChat))
+assert(sentGuildChat:find('^LFG ') and sentGuildChat:find('потрібні: ', 1, true) and sentGuildChat:find(' — Old Kraken$', 1, false), 'unexpected guild chat format: ' .. tostring(sentGuildChat))
+sentGuildChat = nil
+function IsInGroup() return true end
+function GetNumGroupMembers() return 2 end
+ui.tabBar.tabs.create.scripts.OnClick()
+selectActivityCard('sfk')
+ui.titleBox:SetText('SFK party')
+ui.descriptionBox:SetText('')
+ui.createButton.scripts.OnClick()
+assert(type(sentGuildChat) == 'string' and sentGuildChat:find('^LFG SFK party · lvl 22–30 · потрібні: Танк, Лікар, DPS — Old Kraken$'), 'unexpected guild chat announce: ' .. tostring(sentGuildChat))
+IsInGroup = nil
+GetNumGroupMembers = nil
 
 OldKraken.listeners.GROUP_FINDER_NEW(wcGroup)
 local alert
@@ -347,9 +360,11 @@ assert(alert.groupKey == wcGroup.owner .. '\\001' .. wcGroup.id)
 alert.scripts.OnClick(alert, 'LeftButton')
 assert(not alert:IsShown() and ui.details.text:find(wcGroup.title, 1, true))
 OldKraken.listeners.GROUP_FINDER_NEW_REQUEST(tankGroup, 'Another Applicant', 'healer')
-assert(not alert.alertArt:IsShown())
+assert(alert.alertArt:IsShown() and alert.alertArt.width == 52 and alert.alertArt.height == 52)
+assert(alert.width == 480 and alert.height == 122)
+assert(alert.alertChrome:IsShown() and alert.alertFooter.height == 26)
 assert(alert.alertCaption.text == 'НОВА ЗАЯВКА')
-assert(alert.alertHint.text:find('Клік — мої оголошення', 1, true))
+assert(alert.alertHint.text:find('ЛКМ — мої оголошення', 1, true) and alert.alertHint.text:find('ПКМ — сховати', 1, true))
 alert.dragging = false
 alert.scripts.OnUpdate(alert, 8)
 assert(alert:IsShown() and alert.alpha == 1)

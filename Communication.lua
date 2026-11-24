@@ -15,9 +15,11 @@ Communication.handlers = {}
 Communication.stats = { sent = 0, retried = 0, dropped = 0, received = 0, invalid = 0 }
 local MAX_QUEUE = 4096
 local ACTION_RESERVE = 256
+local MAX_ERROR_ATTEMPTS = 5
 Communication.MAX_QUEUE = MAX_QUEUE
 Communication.BACKGROUND_LIMIT = MAX_QUEUE - ACTION_RESERVE
 Communication.pendingTransmissions = {}
+Communication.reservedReplaySlots = 0
 Communication.retryAt, Communication.backoff = 0, 0
 Communication.stats.deduplicated, Communication.stats.backpressure, Communication.stats.restarted = 0, 0, 0
 local PRIORITY = {JOIN=0,RESPONSE=0,CANCEL=0,CEVRSVP=0,CVCANCEL=0,
@@ -84,6 +86,8 @@ local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = tr
     WORDER = true, WORELAY = true, WOREQ = true, WOPAY = true, WOERROR = true, WOQUERY = true,
     WOACT = true, WOPAYR = true, WORESULT = true, WORESR = true }
 local GROUP_SNAPSHOTS={ANNOUNCE=true,UPDATE=true,SYNC=true,CANCEL=true,BUMP=true}
+local CRITICAL_KINDS={JOIN=true,RESPONSE=true,CANCEL=true,ANNOUNCE=true,UPDATE=true,BUMP=true,
+    CEVENT=true,CVNEW=true,CEVRSVP=true,WORDER=true,WOREQ=true,WOPAY=true,WORESULT=true}
 -- Group Finder owns these kinds; every other kind belongs to another subsystem and
 -- must survive a Group Finder state reset.
 local GROUP_FINDER_KINDS={ANNOUNCE=true,CANCEL=true,JOIN=true,RESPONSE=true,
@@ -109,6 +113,15 @@ function Communication:RegisterHandler(kind, callback)
     return true
 end
 
+local function effectiveQueueSize(self)
+    return #self.queue+self.reservedReplaySlots
+end
+
+local function releaseReplayReservation(self,job)
+    self.reservedReplaySlots=self.reservedReplaySlots-(job.replayReserved or 0)
+    job.replayReserved=0
+end
+
 function Communication:SendProtocol(kind, payload)
     if not VALID_TYPES[kind] or type(payload) ~= "string" or #payload > PART_BYTES * MAX_PARTS then
         return false, "invalid payload or type"
@@ -127,7 +140,7 @@ function Communication:SendProtocol(kind, payload)
     local id = sessionID .. "-" .. tostring(messageSequence)
     local count = math.max(1, math.ceil(#payload / PART_BYTES))
     local limit=priority==0 and MAX_QUEUE or (MAX_QUEUE-ACTION_RESERVE)
-    if #self.queue+count>limit then self.stats.backpressure=self.stats.backpressure+1; return false,'queue full' end
+    if effectiveQueueSize(self)+count>limit then self.stats.backpressure=self.stats.backpressure+1; return false,'queue full' end
     local messages = {}
     for part = 1, count do
         local data = payload:sub((part - 1) * PART_BYTES + 1, part * PART_BYTES)
@@ -135,7 +148,7 @@ function Communication:SendProtocol(kind, payload)
         if #message > 240 then return false, "message too long" end
         messages[part] = message
     end
-    local job={key=pendingKey,id=id,messages=messages,remaining=count,priority=priority,
+    local job={key=pendingKey,id=id,kind=kind,messages=messages,remaining=count,priority=priority,
         recordKey=groupRecordKey(kind,payload),snapshot=GROUP_SNAPSHOTS[kind]}
     local originalCount = #self.queue
     for part, message in ipairs(messages) do
@@ -162,7 +175,10 @@ function Communication:ClearProtocolState()
             local job = entry.job
             if job then
                 job.remaining = job.remaining - 1
-                if job.remaining == 0 then self.pendingTransmissions[job.key] = nil end
+                if job.remaining == 0 then
+                    releaseReplayReservation(self,job)
+                    self.pendingTransmissions[job.key] = nil
+                end
             end
             table.remove(self.queue, i)
         end
@@ -173,7 +189,7 @@ function Communication:ClearProtocolState()
     for key, item in pairs(completed) do
         if GROUP_FINDER_KINDS[item.kind] then completed[key] = nil end
     end
-    self.retryAt,self.backoff=0,0
+    if #self.queue==0 then self.retryAt,self.backoff=0,0 end
 end
 
 local function PlayerName()
@@ -189,7 +205,11 @@ local function FullPlayerName()
 end
 
 local function Print(message)
-    print("|cff2ec4b6Old Kraken|r: " .. message)
+    if OldKraken.Print then
+        OldKraken:Print(message)
+    else
+        print("|cff2ec4b6Old Kraken|r: " .. tostring(message or ""))
+    end
 end
 
 local function IsOurMessagePrefix(prefix)
@@ -243,7 +263,7 @@ function Communication:QueueMessage(message,job,part)
         return false
     end
 
-    if #self.queue >= MAX_QUEUE then
+    if effectiveQueueSize(self) >= MAX_QUEUE then
         self.stats.backpressure=self.stats.backpressure+1
         return false
     end
@@ -263,7 +283,13 @@ local function finishEntry(self,index,accepted)
         local job=entry.job
         job.remaining=job.remaining-1
         if accepted and not job.startedAt then job.startedAt=GetTime() end
-        if job.remaining==0 then self.pendingTransmissions[job.key]=nil end
+        if job.remaining==0 then
+            releaseReplayReservation(self,job)
+            self.pendingTransmissions[job.key]=nil
+        elseif accepted then
+            job.replayReserved=(job.replayReserved or 0)+1
+            self.reservedReplaySlots=self.reservedReplaySlots+1
+        end
     end
 end
 local function deferEntry(self,entry,reason)
@@ -273,37 +299,82 @@ local function deferEntry(self,entry,reason)
     self.retryAt=GetTime()+self.backoff+math.random()
     self.lastSendError=reason
 end
+local function dropEntryOrJob(self,index,entry,reason,notifyCritical)
+    local job=entry.job
+    if not job then
+        table.remove(self.queue,index)
+    else
+        if job.dropped then return end
+        job.dropped=true
+        for i=#self.queue,1,-1 do
+            if self.queue[i].job==job then table.remove(self.queue,i) end
+        end
+        job.remaining=0
+        releaseReplayReservation(self,job)
+        if job.key and self.pendingTransmissions[job.key]==job then self.pendingTransmissions[job.key]=nil end
+    end
+    self.stats.dropped=self.stats.dropped+1
+    if job and notifyCritical and CRITICAL_KINDS[job.kind] then
+        pcall(Print,'Не вдалося надіслати повідомлення: '..job.kind)
+        if type(OldKraken.Fire)=='function' then
+            pcall(OldKraken.Fire,OldKraken,'COMMUNICATION_SEND_FAILED',job.kind,job.id,reason)
+        end
+    end
+end
+local function entryError(self,index,entry,reason,now)
+    entry.errorAttempts=(entry.errorAttempts or 0)+1
+    self.stats.retried=self.stats.retried+1
+    self.lastSendError=reason
+    if entry.errorAttempts>=MAX_ERROR_ATTEMPTS then
+        dropEntryOrJob(self,index,entry,reason,true)
+    else
+        entry.errorBackoff=math.min(60,(entry.errorBackoff or 0)==0 and 2 or entry.errorBackoff*2)
+        entry.nextTryAt=now+entry.errorBackoff+math.random()
+    end
+end
 function Communication:Pump()
     EnsurePresenceGuild(self)
     if self.pendingSpecBroadcast and self.ready and IsInGuild and IsInGuild() then self:SendLocalSpec(self.pendingSpecForce) end
     if #self.queue==0 or GetTime()<self.retryAt then return end
     if not IsInGuild or not IsInGuild() then return end
-    local index,priority=1,3
-    for i,entry in ipairs(self.queue) do
-        local value=entry.priority or 1
-        if value<priority then index,priority=i,value; if value==0 then break end end
+    local now=GetTime()
+    local snapshots={}
+    for _,entry in ipairs(self.queue) do
+        local job=entry.job
+        if job and job.snapshot and job.recordKey then snapshots[(entry.guild or '')..'\001'..job.recordKey]=true end
     end
-    -- A decision must never overtake the snapshot it refers to: a receiver may
-    -- have just reloaded and cannot apply the decision until it knows the group.
-    local selected=self.queue[index].job
-    if selected and selected.recordKey then
-        for i=1,index-1 do
-            local prior=self.queue[i].job
-            if prior and prior.snapshot and prior.recordKey==selected.recordKey then index=i; break end
+    local index,priority=nil,3
+    for i,entry in ipairs(self.queue) do
+        local job=entry.job
+        local blocked=job and not job.snapshot and job.recordKey and snapshots[(entry.guild or '')..'\001'..job.recordKey]
+        local value=entry.priority or 1
+        if not blocked and (not entry.nextTryAt or now>=entry.nextTryAt) and value<priority then
+            index,priority=i,value
         end
     end
+    if not index then return end
     local entry=self.queue[index]
     if entry.guild and (not GetGuildInfo or GetGuildInfo('player')~=entry.guild) then
-        finishEntry(self,index,false); self.stats.dropped=self.stats.dropped+1; return
+        dropEntryOrJob(self,index,entry,'guild changed',false); return
     end
     -- If a multipart transfer was interrupted long enough to approach the receiver
     -- assembly timeout, replay its complete set rather than leave orphaned fragments.
     local job=entry.job
     if job and job.startedAt and GetTime()-job.startedAt>=90 then
-        for i=#self.queue,1,-1 do if self.queue[i].job==job then table.remove(self.queue,i) end end
+        local errors={}
+        for i=#self.queue,1,-1 do
+            local old=self.queue[i]
+            if old.job==job then
+                errors[old.part]={old.errorAttempts,old.errorBackoff,old.nextTryAt}
+                table.remove(self.queue,i)
+            end
+        end
+        releaseReplayReservation(self,job)
         job.remaining=#job.messages; job.startedAt=nil
         for part,message in ipairs(job.messages) do
-            self.queue[#self.queue+1]={message=message,attempts=0,guild=entry.guild,job=job,part=part,priority=job.priority}
+            local state=errors[part]
+            self.queue[#self.queue+1]={message=message,attempts=0,guild=entry.guild,job=job,part=part,priority=job.priority,
+                errorAttempts=state and state[1],errorBackoff=state and state[2],nextTryAt=state and state[3]}
         end
         self.stats.restarted=self.stats.restarted+1
         return
@@ -311,10 +382,16 @@ function Communication:Pump()
     local chatInfo=C_ChatInfo
     if not chatInfo or type(chatInfo.SendAddonMessage)~='function' then deferEntry(self,entry,'API unavailable'); return end
     local ok,result=pcall(chatInfo.SendAddonMessage,self.PREFIX,entry.message,'GUILD')
-    if not ok then deferEntry(self,entry,tostring(result)); return end
+    if not ok then entryError(self,index,entry,tostring(result),now); return end
     local results=Enum and Enum.SendAddonMessageResult
     local success=result==nil or (results and results.Success~=nil and result==results.Success) or (not results and result==0)
-    if not success then deferEntry(self,entry,tostring(result)); return end
+    if not success then
+        local throttle=results and ((results.AddonMessageThrottle~=nil and result==results.AddonMessageThrottle)
+            or (results.ChannelThrottle~=nil and result==results.ChannelThrottle)
+            or (results.AddOnMessageLockdown~=nil and result==results.AddOnMessageLockdown))
+        if throttle then deferEntry(self,entry,tostring(result)) else entryError(self,index,entry,tostring(result),now) end
+        return
+    end
     finishEntry(self,index,true)
     self.backoff,self.retryAt,self.lastSendError=0,0,nil
     self.stats.sent=self.stats.sent+1
@@ -373,20 +450,58 @@ function Communication:CompareVersions(left, right)
     end
     return 0
 end
+Communication.UPDATE_URL = 'https://www.curseforge.com/wow/addons/old-kraken'
+function Communication:IsStableVersion(version)
+    local parts = VersionParts(version)
+    return parts ~= nil and parts[4] == 3
+end
+function Communication:GetNewestKnownVersion()
+    EnsurePresenceGuild(self)
+    local localVersion = self:GetLocalVersion()
+    if not VersionParts(localVersion) then return nil, localVersion end
+    local best = nil
+    for _, version in pairs(self.rosterVersions or {}) do
+        if self:IsStableVersion(version) and self:CompareVersions(version, localVersion) == 1 then
+            if not best or self:CompareVersions(version, best) == 1 then
+                best = version
+            end
+        end
+    end
+    if best then best = best:match('^([^+]+)') or best end
+    return best, localVersion
+end
+function Communication:CheckVersionNotification()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    if type(settings) ~= 'table' or settings.versionChatNotifications == false then return false end
+    if type(InCombatLockdown) == 'function' and InCombatLockdown() then return false end
+    local newest, localVersion = self:GetNewestKnownVersion()
+    if not newest then return false end
+    if settings.versionSessionNotified == newest then return false end
+    settings.versionSessionNotified = newest
+    Print(string.format(T('Доступна нова версія %s (у вас %s). Оновіть аддон на CurseForge (/okr).'), newest, tostring(localVersion)))
+    return true
+end
 local function PresenceKey(name)
     if Secret(name) or type(name) ~= 'string' or name == '' then return '' end
     local realm = GetRealmName and GetRealmName() or ''
     if not name:find('-', 1, true) then name = name .. '-' .. realm end
     return (name:gsub('%s+', ''))
 end
+local function IsSelfPresenceKey(key)
+    if key == '' then return false end
+    local fullKey, shortKey = PresenceKey(FullPlayerName()), PresenceKey(PlayerName())
+    return (fullKey ~= '' and key == fullKey) or (shortKey ~= '' and key == shortKey)
+end
 function Communication:HasRosterAddon(name)
     EnsurePresenceGuild(self)
-    return PresenceKey(name) == PresenceKey(PlayerName()) or self.rosterPresence[PresenceKey(name)] == true
+    local key = PresenceKey(name)
+    return IsSelfPresenceKey(key) or self.rosterPresence[key] == true
 end
 function Communication:GetRosterVersion(name)
     self:HasRosterAddon(name)
-    if PresenceKey(name) == PresenceKey(PlayerName()) then return self:GetLocalVersion() end
-    return self.rosterVersions[PresenceKey(name)]
+    local key = PresenceKey(name)
+    if IsSelfPresenceKey(key) then return self:GetLocalVersion() end
+    return self.rosterVersions[key]
 end
 function Communication:RequestRosterPresence()
     EnsurePresenceGuild(self)
@@ -402,6 +517,10 @@ function Communication:RecordRosterPresence(sender, version)
         self.rosterPresence[key] = true
         if version then self.rosterVersions[key] = version end
         if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+        if version then
+            if OldKraken.Fire then OldKraken:Fire('VERSION_STATUS_CHANGED') end
+            self:CheckVersionNotification()
+        end
     end
 end
 
@@ -471,9 +590,20 @@ local function RosterStorage()
     return roster
 end
 
+local function ResolveRealmScope()
+    if OldKraken.Database and type(OldKraken.Database.GetRealmScope) == 'function' then
+        return OldKraken.Database:GetRealmScope()
+    end
+    local realm = GetRealmName and GetRealmName()
+    if Secret(realm) then return nil end
+    if realm == '' then return 'Forever' end
+    if type(realm) ~= 'string' or realm == '' then return nil end
+    return realm
+end
+
 local function LocalSpecKey()
     local name = FullPlayerName()
-    local realm = GetRealmName and GetRealmName()
+    local realm = ResolveRealmScope()
     if Secret(realm) or type(realm) ~= 'string' or realm == '' or not name then return nil end
     return realm .. '\001' .. name
 end
@@ -596,7 +726,7 @@ end
 function Communication:RecordRosterSpec2(sender, seq, icon, points, name, payload)
     EnsurePresenceGuild(self)
     local key, roster = PresenceKey(sender), RosterStorage()
-    local realm = GetRealmName and GetRealmName()
+    local realm = ResolveRealmScope()
     if self.presenceGuild == '' or key == '' or not roster or Secret(realm) or type(realm) ~= 'string' or realm == '' then return false end
     local seqKey = realm .. '\001' .. self.presenceGuild .. '\001' .. key
     local sequences, now = roster.specSequences, GetServerTime()
@@ -635,8 +765,7 @@ function Communication:GetRosterSpec(name)
     EnsurePresenceGuild(self)
     local key = PresenceKey(name)
     if key == '' then return nil end
-    local fullKey, shortKey = PresenceKey(FullPlayerName()), PresenceKey(PlayerName())
-    if (fullKey ~= '' and key == fullKey) or (shortKey ~= '' and key == shortKey) then
+    if IsSelfPresenceKey(key) then
         local state, spec = self:GetLocalTreeSpec()
         if state ~= 'active' then return nil end
         spec.receivedAt = GetTime()
@@ -837,6 +966,8 @@ frame:RegisterEvent("CHAT_MSG_ADDON")
 frame:RegisterEvent("ADDON_LOADED")
 pcall(frame.RegisterEvent, frame, 'ACTIVE_TALENT_GROUP_CHANGED')
 pcall(frame.RegisterEvent, frame, 'PLAYER_SPECIALIZATION_CHANGED')
+pcall(frame.RegisterEvent, frame, 'PLAYER_ENTERING_WORLD')
+pcall(frame.RegisterEvent, frame, 'PLAYER_REGEN_ENABLED')
 
 local hookedTalentFrames = {}
 local function InstallTalentHooks()
@@ -885,6 +1016,14 @@ frame:SetScript("OnEvent", function(_, event, ...)
     elseif event == 'PLAYER_SPECIALIZATION_CHANGED' then
         local unit = ...
         if unit == 'player' then Communication:SendLocalSpec(false) end
+    elseif event == 'PLAYER_ENTERING_WORLD' then
+        local isInitialLogin, isReloadingUi = ...
+        if isInitialLogin == true and not isReloadingUi and OldKraken.DB and type(OldKraken.DB.settings) == 'table' then
+            OldKraken.DB.settings.versionSessionNotified = nil
+        end
+        Communication:CheckVersionNotification()
+    elseif event == 'PLAYER_REGEN_ENABLED' then
+        Communication:CheckVersionNotification()
     elseif event == "CHAT_MSG_ADDON" then
         Communication:OnAddonMessage(...)
     end

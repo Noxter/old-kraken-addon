@@ -67,5 +67,63 @@ guild='Other'; login()
 assert(cleared==1 and f.active and next(f.groups)==nil)
 guild='Guild'; login()
 assert(cleared==2 and f.groups['Hok Mon'..'\\001'..oldGroup.id] and f.pending[rejectedKey]=='reject')
+-- SyncPartyNow immediately populates party members and assigned roles for a newly created group.
+local origUnitName=UnitName
+function IsInGroup() return true end
+function IsInRaid() return false end
+function GetNumGroupMembers() return 2 end
+function UnitName(u)
+    if u=='party1' then return 'Outside','Healer' end
+    return origUnitName(u)
+end
+function UnitGroupRolesAssigned(u)
+    if u=='player' then return 'TANK' end
+    if u=='party1' then return 'HEALER' end
+    return 'NONE'
+end
+f:Cancel(oldGroup.id)
+local okSync, syncId = f:Create('SFK', 'dungeon', '', 5, 22, 30, 'dps', 'sfk')
+assert(okSync)
+f:SyncPartyNow()
+local syncedGroup = f.groups['Hok Mon' .. '\\001' .. syncId]
+assert(syncedGroup and #syncedGroup.members == 2 and syncedGroup.memberRoles['Outside Healer'] == 'healer')
+
+-- Idempotency: repeated calls to SyncPartyNow do not duplicate members or corrupt roles.
+f:SyncPartyNow()
+assert(#syncedGroup.members == 2 and syncedGroup.memberRoles['Outside Healer'] == 'healer')
+
+-- Party composition expansion: adding another member immediately syncs and preserves all roles.
+function GetNumGroupMembers() return 3 end
+local origUnitName2 = UnitName
+function UnitName(u)
+    if u == 'party2' then return 'Third', 'Member' end
+    return origUnitName2(u)
+end
+function UnitGroupRolesAssigned(u)
+    if u == 'player' then return 'TANK' end
+    if u == 'party1' then return 'HEALER' end
+    if u == 'party2' then return 'DAMAGER' end
+    return 'NONE'
+end
+f:SyncPartyNow()
+assert(#syncedGroup.members == 3)
+assert(syncedGroup.memberRoles['Outside Healer'] == 'healer')
+assert(syncedGroup.memberRoles['Third Member'] == 'dps')
+assert(syncedGroup.memberRoles['Hok Mon'] == 'tank')
+
+-- Inactive state: SyncPartyNow returns silently when integration is inactive.
+guild = nil; login()
+assert(not f.active)
+local noErrInactive = pcall(function() f:SyncPartyNow() end)
+assert(noErrInactive, 'SyncPartyNow must not fail when integration is inactive')
+guild = 'Guild'; login()
+assert(f.active)
+
+-- Solo player: SyncPartyNow does not disband or delete group when caller is solo.
+function IsInGroup() return false end
+f:SyncPartyNow()
+assert(f.groups['Hok Mon' .. '\\001' .. syncId], 'Solo SyncPartyNow must not delete group')
+
+UnitName=origUnitName
 ''')
 print('Integration checks passed')
