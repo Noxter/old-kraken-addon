@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.5-alpha.1 (Unreleased)
+## 0.5.5
 
 ### Guild Roster & Localization
 - Зафіксовано постійне відображення англійських назв класів (`Druid`–`Warrior`) за стабільним `classFile` у таблиці ростера, тултипі, dropdown-фільтрі та описі фільтра незалежно від локалі клієнта WoW і налаштування мови Old Kraken.
