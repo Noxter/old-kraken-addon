@@ -466,6 +466,7 @@ assert(current.recipeTombstones.Carol[103].name=='deleted')
 # notify once about the pending transfer, and keep all Workshop timers running.
 lua = make_client(realm='Evermoon', guild='Kraken')
 lua.execute('''
+OldKraken.UIStyle = nil
 messages={}; function OldKraken:Print(message) messages[#messages+1]=message end
 local id='Alice Tester'; local key=id..'\\001bad'
 OldKraken.DB.workshop.guilds={['\\001Kraken']={orderOwners={[id]={[key]={owner=id,id='bad'}}}}}
@@ -570,18 +571,17 @@ lua_forever.execute('''
 # Consent recorded by older versions for the ambiguous Forever key is not trusted.
 lua = make_client(realm='Forever', guild='Kraken')
 lua.execute("""
-    popupCount=0
-    function StaticPopup_Show(_,_,_,data) popupCount=popupCount+1; popupData=data; return {} end
     OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Legacy'}}}}
     OldKraken.DB.workshop.legacyMigrations={['\\001Kraken']={
         confirmedDestination='Forever\\001Kraken',inProgress={['Forever\\001Kraken']=true}}}
 """)
 trigger_connect(lua)
 lua.execute("""
-    assert(popupCount==1 and popupData.realm=='Forever', 'old ambiguous approval must not be reused')
+    local dlg=OldKrakenWorkshopMigrationFrame
+    assert(dlg and dlg:IsShown() and dlg.migrationData.realm=='Forever', 'old ambiguous approval must not be reused')
     local current=OldKraken.DB.workshop.guilds['Forever\\001Kraken']
     assert(not current.orderDrafts['Alice Tester'])
-    StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+    dlg.acceptButton.scripts.OnClick()
     assert(current.orderDrafts['Alice Tester'].item=='Legacy')
     assert(OldKraken.DB.workshop.legacyMigrations['\\001Kraken'].verifiedDestinations['Forever\\001Kraken'])
 """)
@@ -641,22 +641,22 @@ lua = make_client(realm='Evermoon', guild='Kraken')
 lua.execute('''
 messages={}; function OldKraken:Print(msg) messages[#messages+1]=msg end
 popupCount=0
-function StaticPopup_Show(name,guild,realm,data)
-    assert(name=='OLDKRAKEN_WORKSHOP_MIGRATION')
-    popupCount=popupCount+1; popupGuild=guild; popupRealm=realm; popupData=data
-    return {}
-end
+function StaticPopup_Show() popupCount=popupCount+1; return {} end
 OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
 ''')
 trigger_connect(lua)
 lua.execute('''
-assert(popupCount==1 and popupGuild=='Kraken' and popupRealm=='Evermoon')
+local dlg=OldKrakenWorkshopMigrationFrame
+assert(popupCount==0 and dlg and dlg:IsShown() and dlg.migrationData.guild=='Kraken' and dlg.migrationData.realm=='Evermoon')
 assert(not OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'])
+dlg.laterButton.scripts.OnClick()
+assert(not dlg:IsShown())
 ''')
 trigger_connect(lua)
 lua.execute('''
-assert(popupCount==1, 'one prompt per scope until the user decides')
-StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+local dlg=OldKrakenWorkshopMigrationFrame
+assert(not dlg:IsShown(), 'one prompt per scope until the user decides')
+dlg.acceptButton.scripts.OnClick()
 local g=OldKraken.DB.workshop.guilds
 assert(g['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
 assert(g['\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
@@ -665,21 +665,21 @@ assert(OldKraken.DB.workshop.legacyMigrations['\\001Kraken'].confirmedDestinatio
 lua.globals()._realm = 'Frostmourne'
 trigger_connect(lua)
 lua.execute('''
-assert(popupCount==2 and popupRealm=='Frostmourne')
+local dlg=OldKrakenWorkshopMigrationFrame
+assert(dlg:IsShown() and dlg.migrationData.realm=='Frostmourne')
 assert(not OldKraken.DB.workshop.guilds['Frostmourne\\001Kraken'].orderDrafts['Alice Tester'])
 ''')
 
 # A stale dialog cannot transfer into another realm after a scope change.
 lua = make_client(realm='Evermoon', guild='Kraken')
 lua.execute('''
-function StaticPopup_Show(_,_,_,data) popupData=data; return {} end
 messages={}; function OldKraken:Print(msg) messages[#messages+1]=msg end
 OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
 ''')
 trigger_connect(lua)
 lua.globals()._realm = 'Frostmourne'
 lua.execute('''
-StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
+OldKrakenWorkshopMigrationFrame.acceptButton.scripts.OnClick()
 assert(not OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'])
 assert(not OldKraken.DB.workshop.guilds['Frostmourne\\001Kraken'])
 assert(messages[#messages]:find('не перенесено',1,true))
@@ -688,21 +688,21 @@ assert(messages[#messages]:find('не перенесено',1,true))
 # A destination explicitly approved earlier resumes automatically.
 lua = make_client(realm='Evermoon', guild='Kraken')
 lua.execute('''
-popupCount=0; function StaticPopup_Show() popupCount=popupCount+1; return {} end
 OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
 OldKraken.DB.workshop.legacyMigrations={['\\001Kraken']={confirmedDestination='Evermoon\\001Kraken'}}
 ''')
 trigger_connect(lua)
 lua.execute('''
-assert(popupCount==0)
+assert(not OldKrakenWorkshopMigrationFrame)
 assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
 assert(OldKraken.DB.workshop.guilds['\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
 assert(OldKraken.DB.workshop.legacyMigrations['\\001Kraken'].status['Evermoon\\001Kraken']=='completed')
 ''')
 
-# A temporarily unavailable popup is retried without repeatedly printing notices.
+# A temporarily unavailable fallback popup is retried without repeatedly printing notices.
 lua = make_client(realm='Evermoon', guild='Kraken')
 lua.execute('''
+OldKraken.UIStyle = nil
 messages={}; function OldKraken:Print(msg) messages[#messages+1]=msg end
 popupCount=0; ready=false
 function StaticPopup_Show(_,_,_,data)
@@ -718,6 +718,28 @@ lua.execute('''
 assert(popupCount==2 and #messages==1)
 StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION.OnAccept(nil,popupData)
 assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
+''')
+
+# Custom UIStyle migration dialog avoids StaticPopup_Show in live UI.
+lua = make_client(realm='Evermoon', guild='Kraken')
+lua.execute('''
+    popupCount=0
+    function StaticPopup_Show() popupCount=popupCount+1; return {} end
+    OldKraken.UIStyle={
+        Window=function() end,
+        Font=function() end,
+        Button=function() end,
+    }
+    OldKraken.DB.workshop.guilds={['\\001Kraken']={orderDrafts={['Alice Tester']={item='Flask',quantity='5'}}}}
+''')
+trigger_connect(lua)
+lua.execute('''
+    assert(popupCount==0, 'must not call StaticPopup_Show when UIStyle is present')
+    local dlg=OldKrakenWorkshopMigrationFrame
+    assert(dlg and dlg:IsShown(), 'custom migration dialog must be shown')
+    dlg.acceptButton.scripts.OnClick()
+    assert(not dlg:IsShown())
+    assert(OldKraken.DB.workshop.guilds['Evermoon\\001Kraken'].orderDrafts['Alice Tester'].item=='Flask')
 ''')
 
 print('Workshop migration checks passed')

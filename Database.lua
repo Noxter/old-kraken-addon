@@ -840,36 +840,82 @@ local function ReportWorkshopMigration(status)
     end
 end
 
+local migrationFrame
+
+local function AcceptWorkshopMigration(data)
+    if type(data)~='table' then return end
+    migrationPopups[data.profile]=nil
+    local currentRealm=Database.GetRealmScope()
+    local currentGuild=type(GetGuildInfo)=='function' and GetGuildInfo('player') or nil
+    if not IsValidText(currentGuild,1,128) or currentRealm~=data.realm or currentGuild~=data.guild then
+        MigrationMessage('Світ або гільдія змінилися. Старі дані не перенесено.')
+        return
+    end
+    local ok,status=Database.ConfirmWorkshopMigration()
+    if ok then
+        ReportWorkshopMigration(status)
+    elseif status=='unavailable' then
+        MigrationMessage('Майстерня ще завантажується; перенесення продовжиться автоматично.')
+    else
+        MigrationMessage('Не вдалося перенести старі дані Майстерні; їх збережено без змін.')
+    end
+end
+
+local function ShowMigrationDialog(promptText,T,data)
+    if type(CreateFrame)~='function' or type(OldKraken.UIStyle)~='table' or type(OldKraken.UIStyle.Window)~='function' then
+        return false
+    end
+    if not migrationFrame then
+        local f=CreateFrame('Frame','OldKrakenWorkshopMigrationFrame',UIParent)
+        f:SetSize(440,176); f:SetPoint('TOP',UIParent,'TOP',0,-140); f:SetFrameStrata('DIALOG'); f:SetClampedToScreen(true)
+        f.TitleText=f:CreateFontString(nil,'OVERLAY','GameFontNormal')
+        f.TitleText:SetText('Old Kraken')
+        OldKraken.UIStyle.Window(f)
+        local body=f:CreateFontString(nil,'OVERLAY','GameFontHighlight')
+        if type(OldKraken.UIStyle.Font)=='function' then OldKraken.UIStyle.Font(body,13) end
+        body:SetPoint('TOPLEFT',f,'TOPLEFT',20,-44); body:SetPoint('TOPRIGHT',f,'TOPRIGHT',-20,-44)
+        body:SetJustifyH('CENTER'); body:SetWordWrap(true); f.body=body
+        local function makeButton(xOffset,variant)
+            local btn=CreateFrame('Button',nil,f,'UIPanelButtonTemplate')
+            if type(OldKraken.UIStyle.Button)=='function' then OldKraken.UIStyle.Button(btn,variant,{rounded=true,height=28}) end
+            btn:SetSize(136,28); btn:SetPoint('BOTTOM',f,'BOTTOM',xOffset,18)
+            return btn
+        end
+        local accept=makeButton(-76,'primary')
+        local later=makeButton(76,nil)
+        accept:SetScript('OnClick',function()
+            local payload=f.migrationData; f:Hide(); AcceptWorkshopMigration(payload)
+        end)
+        later:SetScript('OnClick',function() f:Hide() end)
+        f.acceptButton,f.laterButton=accept,later
+        migrationFrame=f
+    end
+    migrationFrame.migrationData=data
+    migrationFrame.body:SetText(promptText)
+    migrationFrame.acceptButton:SetText(T('Перенести'))
+    migrationFrame.laterButton:SetText(T('Пізніше'))
+    migrationFrame:Show()
+    return true
+end
+
 local function OfferWorkshopMigration(realm,guild,profile)
     if migrationPopups[profile] then return true end
-    if type(StaticPopupDialogs)~='table' or type(StaticPopup_Show)~='function' then return false end
     local now=type(GetTime)=='function' and GetTime() or 0
     if migrationPopupAttempts[profile] and now-migrationPopupAttempts[profile]<5 then return false end
-    migrationPopupAttempts[profile]=now
     local T=type(OldKraken.Translate)=='function' and OldKraken.Translate or function(text) return text end
+    local template=T('Знайдено старі дані Майстерні без назви світу. Чи належать вони гільдії «%s» у світі або області «%s»? Старі дані буде збережено.')
+    local data={realm=realm,guild=guild,profile=profile}
+    if ShowMigrationDialog(string.format(template,tostring(guild),tostring(realm)),T,data) then
+        migrationPopupAttempts[profile]=now; migrationPopups[profile]=true; return true
+    end
+    if type(StaticPopupDialogs)~='table' or type(StaticPopup_Show)~='function' then return false end
+    migrationPopupAttempts[profile]=now
     StaticPopupDialogs.OLDKRAKEN_WORKSHOP_MIGRATION={
-        text=T('Знайдено старі дані Майстерні без назви світу. Чи належать вони гільдії «%s» у світі або області «%s»? Старі дані буде збережено.'),
+        text=template,
         button1=T('Перенести'), button2=T('Пізніше'), timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
-        OnAccept=function(_,data)
-            if type(data)~='table' then return end
-            migrationPopups[data.profile]=nil
-            local currentRealm=Database.GetRealmScope()
-            local currentGuild=type(GetGuildInfo)=='function' and GetGuildInfo('player') or nil
-            if not IsValidText(currentGuild,1,128) or currentRealm~=data.realm or currentGuild~=data.guild then
-                MigrationMessage('Світ або гільдія змінилися. Старі дані не перенесено.')
-                return
-            end
-            local ok,status=Database.ConfirmWorkshopMigration()
-            if ok then
-                ReportWorkshopMigration(status)
-            elseif status=='unavailable' then
-                MigrationMessage('Майстерня ще завантажується; перенесення продовжиться автоматично.')
-            else
-                MigrationMessage('Не вдалося перенести старі дані Майстерні; їх збережено без змін.')
-            end
-        end,
+        OnAccept=function(_,accepted) AcceptWorkshopMigration(accepted) end,
     }
-    local ok,popup=pcall(StaticPopup_Show,'OLDKRAKEN_WORKSHOP_MIGRATION',guild,realm,{realm=realm,guild=guild,profile=profile})
+    local ok,popup=pcall(StaticPopup_Show,'OLDKRAKEN_WORKSHOP_MIGRATION',guild,realm,data)
     if ok and popup then migrationPopups[profile]=true; return true end
     return false
 end
