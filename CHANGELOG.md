@@ -7,6 +7,7 @@
 
 ### Guild Roster & Specs
 - Додано захист від перезапису власної спеціалізації в `Communication.lua` (`RefreshLocalTreeSpec` / `ReadTreeHeadersSpec`) під час огляду іншого гравця (`IsInspecting`, `GetInspectUnit`, `inspectUnit`, невідповідність `GetConfigID`).
+- Розширено праву колонку значень професій у профілі гравця (`GuildRoster.lua`, `prow.value` до `165 px`), щоб напис `Із ігрового ростера` не переносився на два рядки.
 
 ### Group Finder
 - Додано фільтрацію попап-сповіщень `GROUP_FINDER_NEW` (`GroupFinderUI.lua`) за перетином діапазону рівнів групи (`group.minLevel`–`group.maxLevel`) і каталожного діапазону активності з `ActivityCatalog.lua` (`dungeonLevels`) для категорій `dungeon` та `raid` (зі збереженням фільтрації лише за діапазоном групи для кастомних активностей і без зміни списку груп чи протоколу).
