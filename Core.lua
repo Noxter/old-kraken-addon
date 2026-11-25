@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.5.6"
+OldKraken.version = "0.5.7-alpha.1"
 local metadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
 if type(metadata)=='function' and type(ADDON_NAME)=='string' then
     local ok,version=pcall(metadata,ADDON_NAME,'Version')

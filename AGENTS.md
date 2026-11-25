@@ -3,7 +3,7 @@
 Інструкції для AI-агентів (OpenCode, Codex, Copilot, Antigravity, Gemini CLI, Claude Code) у цьому репозиторії.
 Файл **не дублює** `README.md` і `TESTING.md` — він фіксує те, що агент мусить знати, щоб не ламати аддон і не вигадувати API.
 
-> **Цей файл описує актуальний стан коду (`0.5.6` у `alpha`, `0.5.5` у `main`).** Обидві гілки містять повну структуру аддона (20 файлів у `alpha`), схема БД v3.
+> **Цей файл описує актуальний стан коду (`0.5.7-alpha.1` у `alpha`, `0.5.6` у `main`).** Обидві гілки містять повну структуру аддона (20 файлів), схема БД v3.
 >
 > **Посилання тут — на імена функцій, констант і розділів, а не на номери рядків.** Гілка `alpha` рухається швидко, тож номери рядків застарівають. Шукай за символом: `grep -rn "ReceiveGroup" --include="*.lua" .`
 
@@ -33,8 +33,8 @@
 
 | Шлях | Гілка / стан | Призначення |
 |---|---|---|
-| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка (`0.5.6-alpha.1`)** |
-| `~/Projects/old-kraken-addon/` | `main` | **релізна гілка (`0.5.5`)** |
+| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка (`0.5.7-alpha.1`)** |
+| `~/Projects/old-kraken-addon/` | `main` | **релізна гілка (`0.5.6`)** |
 | `~/Projects/copilot-worktrees/old-kraken-addon/copilot-prewarm-fluffy-winner` | detached worktree | службовий |
 
 **Перед початком роботи завжди:** `git status -sb` + `git log --oneline -1` у `old-kraken-alpha`. Не роби `git reset --hard`, `git checkout .`, `git stash` без підтвердження користувача.
@@ -85,7 +85,7 @@ ChatLayoutSwitcher.lua
 
 `## SavedVariables: OldKrakenDB` — один глобальний SavedVariables, `OldKraken.DB` — живий хендл.
 
-**`SCHEMA_VERSION = 3`** у `Database.lua` (у гілці — незакомічена зміна з 2 на 3).
+**`SCHEMA_VERSION = 3`** у `Database.lua`.
 
 Міграції **адитивні й послідовні** (`schemaVersion < N`), виконуються в порядку 1 → 2 → 3:
 

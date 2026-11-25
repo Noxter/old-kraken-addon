@@ -279,7 +279,7 @@ for test in tests/test_*.py; do python "$test" || exit 1; done
 
 | Воркфлоу | Тригер | Що робить |
 |---|---|---|
-| `validate-pr.yml` | PR + push у `main`/`alpha` (**`alpha` — незакомічена зміна**) | Python 3.12, `lupa==2.8`, перевірка існування файлів з TOC через `awk`, потім цикл по `tests/test_*.py` |
+| `validate-pr.yml` | PR + push у `main`/`alpha` | Python 3.12, `lupa==2.8`, перевірка існування файлів з TOC через `awk`, потім цикл по `tests/test_*.py` |
 | `package-alpha.yml` | push у `alpha` + manual | Збирає ZIP з TOC-файлів + `Media/OldKrakenKraken.tga`, `OldKrakenEmblem.tga`, `RoleSlot.tga`, `StatusOnline.tga`, `StatusOffline.tga` |
 | `package-release.yml` | релізний | Те саме для релізу |
 
