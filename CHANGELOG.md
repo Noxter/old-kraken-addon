@@ -2,6 +2,9 @@
 
 ## 0.5.6-alpha.1
 
+### Guild Roster & Specs
+- Додано захист від перезапису власної спеціалізації в `Communication.lua` (`RefreshLocalTreeSpec` / `ReadTreeHeadersSpec`) під час огляду іншого гравця (`IsInspecting`, `GetInspectUnit`, `inspectUnit`, невідповідність `GetConfigID`).
+
 ### Group Finder
 - Додано фільтрацію попап-сповіщень `GROUP_FINDER_NEW` (`GroupFinderUI.lua`) за перетином діапазону рівнів групи (`group.minLevel`–`group.maxLevel`) і каталожного діапазону активності з `ActivityCatalog.lua` (`dungeonLevels`) для категорій `dungeon` та `raid` (зі збереженням фільтрації лише за діапазоном групи для кастомних активностей і без зміни списку груп чи протоколу).
 

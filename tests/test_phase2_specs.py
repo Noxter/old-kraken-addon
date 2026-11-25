@@ -469,6 +469,33 @@ OldKraken.DB.roster.localSpecs[key]=123
 c:RefreshLocalTreeSpec(); assert(c:GetRosterSpec('Noxter').points=='10/7/3')
 """)
 
+    def test_state_12_inspect_does_not_overwrite_or_clear_local_spec(self):
+        self.lua.execute(r"""
+c:RefreshLocalTreeSpec()
+local origSpec = c:GetRosterSpec('Noxter')
+assert(origSpec and origSpec.name=='Marksmanship' and origSpec.points=='10/7/3')
+local savedHeaders = talentFrame.treeHeaders
+talentFrame.treeHeaders = {header('Balance',1,1), header('Feral',2,2), header('Restoration',3,3)}
+points = {0, 0, 20}
+talentFrame.IsInspecting = function() return true end
+c:RefreshLocalTreeSpec()
+assert(c:GetRosterSpec('Noxter').name=='Marksmanship' and c:GetRosterSpec('Noxter').points=='10/7/3')
+talentFrame.IsInspecting = nil
+talentFrame.GetInspectUnit = function() return 'target' end
+c:RefreshLocalTreeSpec()
+assert(c:GetRosterSpec('Noxter').name=='Marksmanship' and c:GetRosterSpec('Noxter').points=='10/7/3')
+talentFrame.GetInspectUnit = nil
+talentFrame.inspectUnit = 'target'
+c:RefreshLocalTreeSpec()
+assert(c:GetRosterSpec('Noxter').name=='Marksmanship' and c:GetRosterSpec('Noxter').points=='10/7/3')
+talentFrame.inspectUnit = nil
+talentFrame.GetConfigID = function() return 999 end
+c:RefreshLocalTreeSpec()
+assert(c:GetRosterSpec('Noxter').name=='Marksmanship' and c:GetRosterSpec('Noxter').points=='10/7/3')
+talentFrame.GetConfigID = nil
+talentFrame.treeHeaders = savedHeaders
+""")
+
 
 class RosterPhaseTwo(unittest.TestCase):
     def test_zone_sort_order(self):
