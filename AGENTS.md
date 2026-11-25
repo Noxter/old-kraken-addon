@@ -3,7 +3,7 @@
 Інструкції для AI-агентів (OpenCode, Codex, Copilot, Antigravity, Gemini CLI, Claude Code) у цьому репозиторії.
 Файл **не дублює** `README.md` і `TESTING.md` — він фіксує те, що агент мусить знати, щоб не ламати аддон і не вигадувати API.
 
-> **Цей файл описує актуальний стан коду (`0.5.6-alpha.1` у `alpha`, `0.5.5` у `main`).** Обидві гілки містять повну 19-файлову структуру аддона, схема БД v3.
+> **Цей файл описує актуальний стан коду (`0.5.6` у `alpha`, `0.5.5` у `main`).** Обидві гілки містять повну структуру аддона (20 файлів у `alpha`), схема БД v3.
 >
 > **Посилання тут — на імена функцій, констант і розділів, а не на номери рядків.** Гілка `alpha` рухається швидко, тож номери рядків застарівають. Шукай за символом: `grep -rn "ReceiveGroup" --include="*.lua" .`
 
@@ -23,7 +23,7 @@
 
 ### Розмір коду
 
-19 Lua-файлів, 17 723 рядки. Найбільші: `GroupFinderUI.lua` (2865), `WorkshopRecipes.lua` (1918), `GuildEvents.lua` (1677), `GuildRoster.lua` (1590), `WorkshopOrders.lua` (1401), `Core.lua` (1307).
+20 Lua-файлів. Найбільші: `GroupFinderUI.lua` (2865), `WorkshopRecipes.lua` (1918), `GuildEvents.lua` (1677), `GuildRoster.lua` (1590), `WorkshopOrders.lua` (1401), `Core.lua` (1307).
 
 ---
 
@@ -52,6 +52,7 @@ GroupFinder.lua       GroupFinderIntegration.lua   GroupFinderChat.lua
 GroupFinderUI.lua     GroupFinderAPI.lua           GuildEvents.lua
 Workshop.lua          WorkshopRecipes.lua          WorkshopSync.lua
 WorkshopOrders.lua    WorkshopDeliveries.lua       Minimap.lua
+ChatLayoutSwitcher.lua
 ```
 
 Наслідки, які не можна порушувати:
