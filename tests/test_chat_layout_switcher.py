@@ -59,6 +59,9 @@ def test_en_to_uk_and_uk_to_en():
         assert(S:Convert('руддщ цщкдв') == 'hello world')
         assert(S:Convert('Руддщ!') == 'Hello!')
         assert(S:Convert('.п руддщ') == '/g hello')
+        assert(S:Convert('') == '')
+        assert(S:Convert('ghbdsn ₴ — 🐉') == 'привіт ₴ — 🐉')
+        assert(S:Convert('руддщ ₴ — 🐉') == 'hello ₴ — 🐉')
         """
     )
 
