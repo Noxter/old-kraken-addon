@@ -38,6 +38,36 @@ local initialScanStatus = 'Відкрийте свої професії; шук�
 local render, matches
 local function usable(v,t) return not (type(issecretvalue)=='function' and issecretvalue(v)) and type(v)==t end
 local function integer(n,lo,hi) return usable(n,'number') and n==n and n%1==0 and n>=lo and n<=hi end
+local ignoredProfessionsFallback={[185]=true,[129]=true,[356]=true,[186]=true,[182]=true,[393]=true}
+local function isIgnoredProfession(prof)
+    if not prof then return false end
+    local workshop=OldKraken.Workshop
+    if workshop and (type(workshop.IsSecondaryProfession)=='function' or type(workshop.IsGatheringProfession)=='function') then
+        return (type(workshop.IsSecondaryProfession)=='function' and workshop:IsSecondaryProfession(prof))
+            or (type(workshop.IsGatheringProfession)=='function' and workshop:IsGatheringProfession(prof))
+    end
+    return ignoredProfessionsFallback[prof]==true
+end
+local function resolveRecipeProfession(id)
+    local prof
+    if type(C_TradeSkillUI)=='table' then
+        if type(C_TradeSkillUI.GetProfessionInfoByRecipeID)=='function' then
+            local ok,data=pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID,id)
+            if ok and usable(data,'table') then
+                if integer(data.parentProfessionID,1,1000000) and professionNames[data.parentProfessionID] then prof=data.parentProfessionID
+                elseif integer(data.professionID,1,1000000) and professionNames[data.professionID] then prof=data.professionID end
+            end
+        end
+        if not prof and type(C_TradeSkillUI.GetTradeSkillLineForRecipe)=='function' then
+            local ok,line=pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe,id)
+            if ok and integer(line,1,1000000) and professionNames[line] then prof=line end
+        end
+    end
+    if not prof and recipeCatalog and type(recipeCatalog[id])=='table' and professionNames[recipeCatalog[id].profession] then
+        prof=recipeCatalog[id].profession
+    end
+    return prof
+end
 local function safeText(s,lo,hi) return usable(s,'string') and #s>=lo and #s<=hi and not s:find('[%z\1-\31\127]') end
 local function lower(text)
     text=text:lower():gsub('\208[\144-\175]',function(pair)
@@ -247,7 +277,9 @@ local function recordLearned(r,deferRefresh)
     end
     indexRevision=indexRevision+1; recipeChanged=true
     if pendingLearned[r.recipe] then
-        if #sendQueue<100 then
+        if isIgnoredProfession(r.profession) then
+            pendingLearned[r.recipe],learnAttempts[r.recipe],learnWarned[r.recipe]=nil,nil,nil
+        elseif #sendQueue<100 then
             pendingLearned[r.recipe]=nil; learnAttempts[r.recipe]=nil; learnWarned[r.recipe]=nil
             local payload=codec._pack({r.recipe,r.item,r.profession,r.seen,r.name,r.product})
             sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
@@ -287,22 +319,8 @@ local function scanLearned(id)
     if type(api.GetRecipeInfo)~='function' then return false end
     local ok,info=pcall(api.GetRecipeInfo,id)
     if not ok or not usable(info,'table') or not usable(info.learned,'boolean') or not info.learned or not safeText(info.name,1,120) then return false end
-    local profession
-    if type(api.GetProfessionInfoByRecipeID)=='function' then
-        local success,data=pcall(api.GetProfessionInfoByRecipeID,id)
-        if success and usable(data,'table') then
-            if integer(data.parentProfessionID,1,1000000) and professionNames[data.parentProfessionID] then profession=data.parentProfessionID
-            elseif integer(data.professionID,1,1000000) and professionNames[data.professionID] then profession=data.professionID end
-        end
-    end
-    if not profession and type(api.GetTradeSkillLineForRecipe)=='function' then
-        local success,line=pcall(api.GetTradeSkillLineForRecipe,id)
-        if success and integer(line,1,1000000) and professionNames[line] then profession=line end
-    end
-    if not profession and recipeCatalog and validRecord(recipeCatalog[id]) and professionNames[recipeCatalog[id].profession] then
-        profession=recipeCatalog[id].profession
-    end
-    if not profession or not playerHasProfession(profession) then return false end
+    local profession=resolveRecipeProfession(id)
+    if not profession or isIgnoredProfession(profession) or not playerHasProfession(profession) then return false end
     local item,product=outputInfo(api,id)
     return recordLearned({recipe=id,item=item,profession=profession,seen=GetServerTime(),name=info.name,product=product})
 end
@@ -611,9 +629,13 @@ events:SetScript('OnEvent',function(_,event,recipeID)
     if event=='PLAYER_LOGIN' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect()
     elseif event=='NEW_RECIPE_LEARNED' then
         connect()
-        if active and integer(recipeID,1,100000000) and (pendingLearned[recipeID] or count(pendingLearned)<1000) then
-            pendingLearned[recipeID]=true; learnAttempts[recipeID]=0; learnWarned[recipeID]=nil
-            if tradeOpen then scanPending=true end
+        if active and integer(recipeID,1,100000000) then
+            if isIgnoredProfession(resolveRecipeProfession(recipeID)) then
+                pendingLearned[recipeID],learnAttempts[recipeID],learnWarned[recipeID]=nil,nil,nil
+            elseif pendingLearned[recipeID] or count(pendingLearned)<1000 then
+                pendingLearned[recipeID]=true; learnAttempts[recipeID]=0; learnWarned[recipeID]=nil
+                if tradeOpen then scanPending=true end
+            end
         end
     elseif event=='SPELLS_CHANGED' or event=='LEARNED_SPELL_IN_SKILL_LINE' then catalogCursor=nil; catalogPending=true; if tradeOpen then scanPending=true end
     elseif event=='TRADE_SKILL_CLOSE' then tradeOpen=false; scanPending=false; forgetChecks={}; lastScanProfession=nil
@@ -639,36 +661,19 @@ local function pendingRecipeName(id)
     return nil
 end
 local function pendingRecipeProfession(id)
-    local prof
-    if type(C_TradeSkillUI)=='table' then
-        if type(C_TradeSkillUI.GetProfessionInfoByRecipeID)=='function' then
-            local ok,data=pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID,id)
-            if ok and usable(data,'table') then
-                if integer(data.parentProfessionID,1,1000000) and professionNames[data.parentProfessionID] then prof=data.parentProfessionID
-                elseif integer(data.professionID,1,1000000) and professionNames[data.professionID] then prof=data.professionID end
-            end
-        end
-        if not prof and type(C_TradeSkillUI.GetTradeSkillLineForRecipe)=='function' then
-            local ok,line=pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe,id)
-            if ok and integer(line,1,1000000) and professionNames[line] then prof=line end
-        end
-    end
-    if not prof and recipeCatalog and type(recipeCatalog[id])=='table' and professionNames[recipeCatalog[id].profession] then
-        prof=recipeCatalog[id].profession
-    end
-    if prof and professionNames[prof] and playerHasProfession(prof) then return T(professionNames[prof]) end
+    local prof=resolveRecipeProfession(id)
+    if prof and professionNames[prof] and not isIgnoredProfession(prof) and playerHasProfession(prof) then return T(professionNames[prof]) end
     return nil
 end
 local function playerCraftingProfessionsText()
     if type(GetProfessions)~='function' or type(GetProfessionInfo)~='function' then return nil end
     local ok,a,b,c,d,e,f=pcall(GetProfessions); if not ok then return nil end
-    local gathering={[182]=true,[393]=true,[356]=true}
     local indexes={a,b,c,d,e,f}
     local list,seen={},{}
     for i=1,6 do
         if integer(indexes[i],1,100000) then
             local success,_,_,_,_,_,_,skillLine=pcall(GetProfessionInfo,indexes[i])
-            if success and integer(skillLine,1,1000000) and professionNames[skillLine] and not gathering[skillLine] and not seen[skillLine] then
+            if success and integer(skillLine,1,1000000) and professionNames[skillLine] and not isIgnoredProfession(skillLine) and not seen[skillLine] then
                 seen[skillLine]=true; list[#list+1]=T(professionNames[skillLine])
             end
         end
@@ -750,29 +755,37 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     end
     table.sort(pendingIds)
     for _,id in ipairs(pendingIds) do
-        local stored=people[identity] and people[identity][id]
-        if validRecord(stored) then
-            learnAttempts[id]=0; learnWarned[id]=nil
-            if #sendQueue<100 then
-                pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
-                local payload=codec._pack({stored.recipe,stored.item,stored.profession,stored.seen,stored.name,stored.product})
-                sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
-            end
-        elseif (learnAttempts[id] or 0)<10 then
-            local ok,done=pcall(scanLearned,id)
-            if ok and done then
-                learnAttempts[id]=0; learnWarned[id]=nil
-            else
-                learnAttempts[id]=(learnAttempts[id] or 0)+1
-                if learnAttempts[id]==10 and not learnWarned[id] then
-                    learnWarned[id]=true
-                    newlyTimedOut[#newlyTimedOut+1]=id
+        if isIgnoredProfession(resolveRecipeProfession(id)) then
+            pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
+        else
+            local stored=people[identity] and people[identity][id]
+            if validRecord(stored) then
+                if isIgnoredProfession(stored.profession) then
+                    pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
+                else
+                    learnAttempts[id]=0; learnWarned[id]=nil
+                    if #sendQueue<100 then
+                        pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
+                        local payload=codec._pack({stored.recipe,stored.item,stored.profession,stored.seen,stored.name,stored.product})
+                        sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
+                    end
                 end
+            elseif (learnAttempts[id] or 0)<10 then
+                local ok,done=pcall(scanLearned,id)
+                if ok and done then
+                    learnAttempts[id]=0; learnWarned[id]=nil
+                else
+                    learnAttempts[id]=(learnAttempts[id] or 0)+1
+                    if learnAttempts[id]==10 and not learnWarned[id] then
+                        learnWarned[id]=true
+                        newlyTimedOut[#newlyTimedOut+1]=id
+                    end
+                end
+                checked=checked+1; if checked>=50 then break end
             end
-            checked=checked+1; if checked>=50 then break end
         end
     end
-    if #newlyTimedOut>0 then chatError(formatPendingNotice(newlyTimedOut)) end
+    if #newlyTimedOut>0 then chatInfo(formatPendingNotice(newlyTimedOut)) end
     while #sendQueue>0 and sendQueue[1].expires<GetTime() do table.remove(sendQueue,1) end
     if #sendQueue>0 and #comm.queue<=8 and comm:SendProtocol(sendQueue[1].kind or 'WRRESULT',sendQueue[1].payload) then table.remove(sendQueue,1) end
     if recipeChanged then recipeChanged=false; OldKraken:Fire('WORKSHOP_RECIPES_CHANGED') end
@@ -1106,15 +1119,24 @@ render=function()
             updateTypeFilterText()
         end
     end
-    frame.onlineOnly:SetShown(mastersView and true or false)
-    if mastersView then
-        if frame.onlineOnly.SetActive then
-            frame.onlineOnly:SetActive(mastersOnline)
-            if frame.onlineOnly.SetDotColor then frame.onlineOnly:SetDotColor(mastersOnline and 'success' or 'neutral') end
-            frame.onlineOnly:SetText(mastersOnline and T('Лише онлайн: так') or T('Лише онлайн: ні'))
+    local showOnlineOnly=not selectRecipe and not viewOwner
+    if frame.onlineOnly then
+        frame.onlineOnly:ClearAllPoints()
+        if frame.embedded then
+            frame.onlineOnly:SetPoint('TOPLEFT',frame,'TOPLEFT',showTypeFilter and 654 or 462,-61)
         else
+            frame.onlineOnly:SetPoint('TOPLEFT',frame,'TOPLEFT',showTypeFilter and 638 or 455,-74)
+        end
+        frame.onlineOnly:SetShown(showOnlineOnly)
+        if showOnlineOnly then
+            if frame.onlineOnly.SetActive then
+                frame.onlineOnly:SetActive(mastersOnline)
+                if frame.onlineOnly.SetDotColor then frame.onlineOnly:SetDotColor(mastersOnline and 'success' or 'neutral') end
+            end
             frame.onlineOnly:SetText(mastersOnline and T('Лише онлайн: так') or T('Лише онлайн: ні'))
         end
+    end
+    if mastersView then
         local masters={}
         local workshop=OldKraken.Workshop
         if workshop then
@@ -1193,6 +1215,7 @@ render=function()
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
             and (not showTypeFilter or matchesRecipeType(classifyRecipe(entry.record),selectedType))
+            and (selectRecipe or viewOwner or not mastersOnline or entry.owner==identity or online[entry.owner]==true)
             and matchesFilter(entry.record,filter) then
             if byRecipe then
                 local id=entry.record.recipe; local old=grouped[id]
@@ -1238,6 +1261,13 @@ render=function()
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(displayRecipeName(r))
         local masters=Recipes:FindMasters(r.item,r.recipe,r.profession)
+        if not selectRecipe and not viewOwner and mastersOnline then
+            local onlineMasters={}
+            for _,m in ipairs(masters) do
+                if m.name==identity or online[m.name]==true then onlineMasters[#onlineMasters+1]=m end
+            end
+            masters=onlineMasters
+        end
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
         if viewOwner~=nil then
             selectedRecipeMaster=viewOwner~=identity and viewOwner or nil
@@ -1329,6 +1359,9 @@ render=function()
                 frame.detailTitle:SetText(T('Нічого не знайдено'))
                 frame.detailInfo:SetText(T('За поточним пошуком або фільтром типу рецептів не знайдено.'))
             end
+        elseif #list==0 and not selectRecipe and mastersOnline then
+            frame.detailTitle:SetText(T('Нічого не знайдено'))
+            frame.detailInfo:SetText(T('Серед майстрів онлайн рецептів не знайдено. Вимкніть фільтр «Лише онлайн», щоб побачити всі збережені рецепти.'))
         else
             frame.detailTitle:SetText(T('Оберіть рецепт')); frame.detailInfo:SetText(T('Перегляньте збережені рецепти або знайдіть предмет.'))
         end
@@ -1350,7 +1383,7 @@ local function switchTab(nextTab)
     tab=nextTab
     viewOwner,selectedEntry,selectedMaster=saved.owner,saved.selected,saved.master
     selectedRecipeMaster=nil
-    offset,mastersOnline=saved.offset or 0,saved.online==true
+    offset=saved.offset or 0
     if selectedEntry then
         local stored=people[selectedEntry.owner] and people[selectedEntry.owner][selectedEntry.record.recipe]
         selectedEntry=validRecord(stored) and {owner=selectedEntry.owner,record=stored} or nil
@@ -1431,9 +1464,9 @@ local function createWindow(parent)
     if OldKraken.UIStyle.Chip then
         f.onlineOnly = OldKraken.UIStyle.Chip(f, T('Лише онлайн: ні'), {dot = 'success', width = 170, height = 34, rounded = true})
         f.onlineOnly:SetPoint('TOPLEFT', f, 'TOPLEFT', 455, -74)
-        f.onlineOnly:SetScript('OnClick', function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end)
+        f.onlineOnly:SetScript('OnClick', function() mastersOnline=not mastersOnline; selectedEntry=nil; selectedRecipeMaster=nil; selectedMaster=nil; offset=0; render() end)
     else
-        f.onlineOnly=button(f,T('Лише онлайн: ні'),455,-74,160,function() mastersOnline=not mastersOnline; selectedMaster=nil; offset=0; render() end,nil,{rounded=true,height=34})
+        f.onlineOnly=button(f,T('Лише онлайн: ні'),455,-74,160,function() mastersOnline=not mastersOnline; selectedEntry=nil; selectedRecipeMaster=nil; selectedMaster=nil; offset=0; render() end,nil,{rounded=true,height=34})
     end
     f.pickProfession=CreateFrame('Frame','OldKrakenRecipePickerProfession',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f.pickProfession,{rounded=true})
     f.pickProfession:SetPoint('TOPLEFT',f,'TOPLEFT',439,-71); UIDropDownMenu_SetWidth(f.pickProfession,160)
@@ -1778,7 +1811,7 @@ function Recipes:Show(forceNavigation)
         self:CancelPicker()
         OldKraken.Workshop:Navigate('recipes',forceNavigation)
     elseif not frame then frame=createWindow() end
-    professionContext,temporaryProfessionContext,selectedMaster,tab,viewOwner,selectRecipe,selectedType=nil,false,nil,'recipes',nil,nil,'all'
+    professionContext,temporaryProfessionContext,selectedMaster,tab,viewOwner,selectRecipe,mastersOnline,selectedType=nil,false,nil,'recipes',nil,nil,false,'all'
     restoringView=true; frame.query:SetText(''); restoringView=false
     addCached('')
     frame:Show(); render()

@@ -742,12 +742,12 @@ local function CreateRosterWindow(parent)
             prow.icon:SetPoint('LEFT', prow, 'LEFT', 0, 0)
             prow.text = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
             prow.text:SetPoint('LEFT', prow.icon, 'RIGHT', 8, 0)
-            prow.text:SetWidth(240)
+            prow.text:SetWidth(195)
             prow.text:SetJustifyH('LEFT')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.text, 13) end
             prow.value = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
             prow.value:SetPoint('RIGHT', prow, 'RIGHT', -2, 0)
-            prow.value:SetWidth(118)
+            prow.value:SetWidth(165)
             prow.value:SetJustifyH('RIGHT')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.value, 13) end
             if colors.mutedText then prow.value:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end

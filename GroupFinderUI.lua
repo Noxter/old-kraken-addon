@@ -41,12 +41,20 @@ local function UpdateReannounceButton(control)
     end
 end
 local dungeonOptions = catalog.dungeon
-local dungeonLabels, dungeonLevels = {}, {}
-for _, options in ipairs({catalog.dungeon, catalog.raid, catalog.legacy and catalog.legacy.dungeon, catalog.legacy and catalog.legacy.raid}) do
-    if options then
-        for _, entry in ipairs(options) do
-            dungeonLabels[entry.value] = entry.label
-            if entry.min and entry.max then dungeonLevels[entry.value] = entry end
+local dungeonLabels, dungeonLevels, dungeonCategories = {}, {}, {}
+for category, list in pairs({
+    dungeon = {catalog.dungeon, catalog.legacy and catalog.legacy.dungeon},
+    raid = {catalog.raid, catalog.legacy and catalog.legacy.raid},
+}) do
+    for _, options in ipairs(list) do
+        if options then
+            for _, entry in ipairs(options) do
+                dungeonLabels[entry.value] = entry.label
+                if entry.min and entry.max then
+                    dungeonLevels[entry.value] = entry
+                    dungeonCategories[entry.value] = category
+                end
+            end
         end
     end
 end
@@ -230,10 +238,13 @@ refreshPeople = function()
             rosterCount = count
             for i = 1, count do
                 pcall(function()
-                    local name, _, _, level, _, _, _, _, isOnline, _, class = GetGuildRosterInfo(i)
+                    local name, _, _, level, _, zone, _, _, isOnline, _, class = GetGuildRosterInfo(i)
                     if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(level) or issecretvalue(class)) then return end
                     if type(name) == 'string' and name ~= '' then
                         local rec = {level=tonumber(level), class=class}
+                        if type(zone) == 'string' and zone ~= '' and not (type(issecretvalue) == 'function' and issecretvalue(zone)) then
+                            rec.zone = zone
+                        end
                         if not (type(issecretvalue) == 'function' and issecretvalue(isOnline)) and type(isOnline) == 'boolean' then
                             rec.online = isOnline
                         end
@@ -278,6 +289,7 @@ refreshPeople = function()
                 rec.class = class or rec.class
                 rec.level = tonumber(level) or rec.level
                 rec.online = online
+                rec.zone = rec.zone or (prev and prev.zone)
                 nextPeople[name] = rec
                 if key then nextPeopleIndex[key] = rec end
             end)
@@ -286,6 +298,21 @@ refreshPeople = function()
     people = nextPeople
 end
 
+local CLASS_NAMES = {
+    DRUID = 'Друїд', HUNTER = 'Мисливець', MAGE = 'Маг', PALADIN = 'Паладин',
+    PRIEST = 'Жрець', ROGUE = 'Розбійник', SHAMAN = 'Шаман', WARLOCK = 'Чорнокнижник', WARRIOR = 'Воїн',
+}
+local function memberClassLabel(classToken)
+    if type(classToken) ~= 'string' or classToken == '' then return nil end
+    local name = (type(LOCALIZED_CLASS_NAMES_MALE) == 'table' and LOCALIZED_CLASS_NAMES_MALE[classToken])
+        or (CLASS_NAMES[classToken] and T(CLASS_NAMES[classToken]))
+        or classToken
+    local c = type(RAID_CLASS_COLORS) == 'table' and RAID_CLASS_COLORS[classToken]
+    if c and c.r and c.g and c.b then
+        return string.format('|cff%02x%02x%02x%s|r', math.floor(c.r * 255), math.floor(c.g * 255), math.floor(c.b * 255), name)
+    end
+    return name
+end
 local function playerLabel(name)
     local info = ownerRecord(name)
     local classColor = info and type(info.class) == 'string' and RAID_CLASS_COLORS and RAID_CLASS_COLORS[info.class]
@@ -2224,9 +2251,15 @@ local function createWindow(parent)
     return f
 end
 
-function Finder:Show()
+function Finder:Show(requestedTab)
     if not self.active and type(self.Connect) == 'function' then self:Connect() end
     if not self.active then chatError(T('Old Kraken: пошук груп не ініціалізовано.')) return end
+    if requestedTab == 'all' or requestedTab == 'mine' or requestedTab == 'applications' or requestedTab == 'create' then
+        tab = requestedTab
+        selected = nil
+        offset = 0
+        requestOffset = 0
+    end
     refreshPeople()
     if OldKraken.UIHub then
         OldKraken.UIHub:ShowPage('groups')
@@ -2377,6 +2410,7 @@ local function paintAlertRoster(group)
             control:RegisterForDrag('LeftButton')
             control:SetScript('OnDragStart',function() local fn=groupAlert:GetScript('OnDragStart'); if fn then fn(groupAlert) end end)
             control:SetScript('OnDragStop',function() local fn=groupAlert:GetScript('OnDragStop'); if fn then fn(groupAlert) end end)
+            if control.SetMotionScriptsWhileDisabled then control:SetMotionScriptsWhileDisabled(true) end
             control:SetScript('OnEnter',function(self)
                 if GameTooltip then GameTooltip:SetOwner(self,'ANCHOR_TOP'); GameTooltip:SetText(self.tooltipText); GameTooltip:Show() end
             end)
@@ -2401,10 +2435,26 @@ local function paintAlertRoster(group)
                 control.label:SetText(member and ('|cffffd36b'..member..'|r') or roleLabel(slot.role))
                 control.vacancy:SetShown(not member)
                 control.label:SetTextColor(member and 1 or 0.85,member and 1 or 0.88,member and 1 or 0.93)
-                control.tooltipText=(member or T('Вільне місце'))..'\n'..roleLabel(displayedRole)..' · '..state
-                local specText = member and memberSpecText(member)
-                if specText then control.tooltipText=control.tooltipText..T('\nСпеціалізація: ')..specText end
-                if not member then control.tooltipText=control.tooltipText..(Finder:CanPerformRole(Finder.identity,displayedRole) and T('\nЛівий клік — подати заявку на цю роль.') or T('\nЦя роль недоступна вашому класу.')) end
+                if member then
+                    local info = ownerRecord(member)
+                    local header = member
+                    local classColor = info and type(info.class) == 'string' and RAID_CLASS_COLORS and RAID_CLASS_COLORS[info.class]
+                    if classColor and classColor.r and classColor.g and classColor.b then
+                        header = string.format('|cff%02x%02x%02x%s|r', math.floor(classColor.r * 255), math.floor(classColor.g * 255), math.floor(classColor.b * 255), member)
+                    end
+                    control.tooltipText = header .. '\n' .. roleLabel(displayedRole) .. ' · ' .. state
+                    local meta = {}
+                    local classText = info and memberClassLabel(info.class)
+                    if classText then meta[#meta + 1] = classText end
+                    if info and info.level and info.level > 0 then meta[#meta + 1] = T('Рівень: ') .. info.level end
+                    if #meta > 0 then control.tooltipText = control.tooltipText .. '\n' .. table.concat(meta, ' · ') end
+                    local specText = memberSpecText(member)
+                    if specText then control.tooltipText = control.tooltipText .. T('\nСпеціалізація: ') .. specText end
+                    if info and info.zone then control.tooltipText = control.tooltipText .. T('\nЗона: ') .. info.zone end
+                else
+                    control.tooltipText = T('Вільне місце') .. '\n' .. roleLabel(displayedRole) .. ' · ' .. state
+                        .. (Finder:CanPerformRole(Finder.identity, displayedRole) and T('\nЛівий клік — подати заявку на цю роль.') or T('\nЦя роль недоступна вашому класу.'))
+                end
             end
         end
     end
@@ -2764,9 +2814,13 @@ OldKraken:On('WORKSHOP_ALERT_SETTING', function() Finder:SyncAlertVisibility('wo
 
 OldKraken:On('GROUP_FINDER_NEW', function(group)
     if not groupAlertsEnabled() then return end
-    if group.minLevel and group.maxLevel then
+    local activityRange = (group.category == 'dungeon' or group.category == 'raid') and type(group.dungeon) == 'string' and group.dungeon ~= '' and dungeonCategories[group.dungeon] == group.category and dungeonLevels[group.dungeon] or nil
+    local effectiveMin = group.minLevel and activityRange and math.max(group.minLevel, activityRange.min) or group.minLevel or (activityRange and activityRange.min)
+    local effectiveMax = group.maxLevel and activityRange and math.min(group.maxLevel, activityRange.max) or group.maxLevel or (activityRange and activityRange.max)
+    if effectiveMin and effectiveMax then
+        if effectiveMin > effectiveMax then return end
         local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
-        if not level or level < group.minLevel or level > group.maxLevel then return end
+        if not level or level < 1 or level < effectiveMin or level > effectiveMax then return end
     end
     refreshPeople()
     local free = math.max(0, group.maxSize - #group.members)

@@ -259,9 +259,9 @@ cd ~/Projects/old-kraken-alpha
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-- **60 файлів** `tests/test_*.py`.
+- **63 файли** `tests/test_*.py`.
 - Рантайм: `lupa==2.8`, `from lupa.lua51 import LuaRuntime` — **Lua 5.1**.
-- **`.venv` не потрібен**: системний Python 3.14.5 має `lupa 2.8`; `lua`/`lua5.1`/`luac` у системі **немає**.
+- **`.venv` не потрібен**: `lupa 2.8` встановлено в user-site `~/.local/lib/python3.14/site-packages/`; `lua`/`lua5.1`/`luac` у системі **немає**. Якщо агент запускає тести в ізольованій пісочниці, `~/.local` може бути недоступним (`ModuleNotFoundError: No module named 'lupa'`) — у такому разі цикл тестів треба запускати поза пісочницею (`BypassSandbox: true`).
 - **Немає pytest/unittest/conftest/Makefile/requirements** — це прості скрипти з Lua-`assert` усередині `lua.execute('''…''')`, успіх = `print('PASS: …')`.
 - Тести **не парсять TOC** — вантажать `*.lua` вручну в потрібному порядку. Тому **нових файлів у TOC недостатньо** — якщо файл має тестуватися, додай його в порядок завантаження у відповідному тесті.
 - Перевірка синтаксису без `luac`: `lua.execute('assert(loadstring(...))', src)` — `tests/test_roster_invite.py` проганяє так **усі** `*.lua`.

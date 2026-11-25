@@ -638,9 +638,27 @@ function Communication:GetLocalTraitSignature()
     return {cfgID = cfgID, treeID = treeID, spent = spent, distSig = tostring(treeID) .. '|' .. table.concat(parts, ',')}
 end
 
-local function ReadTreeHeadersSpec()
+local function isInspectingTalentsFrame(tf, expectedCfgID)
+    if type(tf.IsInspecting) == 'function' then
+        local ok, inspecting = pcall(tf.IsInspecting, tf)
+        if ok and inspecting then return true end
+    end
+    if type(tf.GetInspectUnit) == 'function' then
+        local ok, unit = pcall(tf.GetInspectUnit, tf)
+        if ok and unit ~= nil then return true end
+    end
+    if not Secret(tf.inspectUnit) and tf.inspectUnit ~= nil then return true end
+    if expectedCfgID and type(tf.GetConfigID) == 'function' then
+        local ok, cfgID = pcall(tf.GetConfigID, tf)
+        if ok and Integer(cfgID, 1) and cfgID ~= expectedCfgID then return true end
+    end
+    return false
+end
+
+local function ReadTreeHeadersSpec(expectedCfgID)
     local tf = PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame
-    if Secret(tf) or type(tf) ~= 'table' or Secret(tf.treeHeaders) or type(tf.treeHeaders) ~= 'table' or #tf.treeHeaders ~= 3 then return nil, 'unknown' end
+    if Secret(tf) or type(tf) ~= 'table' or isInspectingTalentsFrame(tf, expectedCfgID)
+        or Secret(tf.treeHeaders) or type(tf.treeHeaders) ~= 'table' or #tf.treeHeaders ~= 3 then return nil, 'unknown' end
     local headers, values = tf.treeHeaders, {}
     for i = 1, 3 do
         local h = headers[i]
@@ -688,6 +706,8 @@ function Communication:RefreshLocalTreeSpec()
     local sig = self:GetLocalTraitSignature()
     local roster, key = RosterStorage(), LocalSpecKey()
     if not sig or not roster or not key then return end
+    local tf = PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame
+    if not Secret(tf) and type(tf) == 'table' and isInspectingTalentsFrame(tf, sig.cfgID) then return end
     local previous = roster.localSpecs[key]
     if sig.spent == 0 then
         roster.localSpecs[key] = nil
@@ -697,7 +717,7 @@ function Communication:RefreshLocalTreeSpec()
         end
         return
     end
-    local spec, headerState = ReadTreeHeadersSpec()
+    local spec, headerState = ReadTreeHeadersSpec(sig.cfgID)
     if headerState ~= 'active' or not spec or spec.total ~= sig.spent then
         roster.localSpecs[key] = nil
         if previous ~= nil and OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end

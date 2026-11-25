@@ -77,7 +77,7 @@ local function registerLinkHook()
         linkHooked = pcall(hooksecurefunc, 'SetItemRef', function(link)
             if link == 'oldkraken:groups' and OldKraken and OldKraken.GroupFinder
                 and type(OldKraken.GroupFinder.Show) == 'function' then
-                OldKraken.GroupFinder:Show()
+                OldKraken.GroupFinder:Show('all')
             end
         end)
     end

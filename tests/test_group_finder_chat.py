@@ -11,7 +11,8 @@ def client(registration):
     lua.execute('''
     registered=0
     shown=0
-    OldKraken={GroupFinder={Show=function() shown=shown+1 end}}
+    shownTab=nil
+    OldKraken={GroupFinder={Show=function(_, targetTab) shown=shown+1; shownTab=targetTab end}}
     function SetItemRef() end
     function hooksecurefunc(name, fn)
         assert(name=='SetItemRef'); linkHook=fn
@@ -50,7 +51,7 @@ for registration in (
     end
     local _, sfkFormatted = filter(nil,'CHAT_MSG_GUILD',examples[1],'Alice','Ukrainian',nil,7)
     assert(sfkFormatted == '|cffe0b052LFG Фортеця Темного Ікла (SFK)|r|cff9aa4b2 · |r|cff9aa4b2lvl 22–30|r|cff9aa4b2 · |r|cfff3ebd3потрібні: Танк, Лікар|r |cff2ec4b6|Holdkraken:groups|h[Відкрити групи]|h|r')
-    linkHook('oldkraken:groups'); assert(shown==1)
+    linkHook('oldkraken:groups'); assert(shown==1 and shownTab=='all')
     linkHook('item:12345'); assert(shown==1)
     local unrelated={
         'Привіт, гільдіє!',

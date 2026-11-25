@@ -259,7 +259,32 @@ def test_order_item_localization():
         OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-noitem')
         assert(f.details.text:find('Enchant Chest - Greater Stats', 1, true))
         assert(not f.details.text:find('Чары', 1, true))
+
+        -- Enchanting/spell-only recipes have no output itemID; GetRecipeInfo, GetRecipeSchematic.name, C_Spell.GetSpellName, and GetSpellInfo must resolve them.
+        C_TradeSkillUI = {
+            GetRecipeOutputItemData = function(id) return {} end,
+            GetRecipeInfo = function(id) if id == 2002 then return {name = 'Enchant Chest - Greater Stats'} end end,
+        }
+        OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-noitem')
+        assert(f.details.text:find('Enchant Chest - Greater Stats', 1, true))
+
+        C_TradeSkillUI = {
+            GetRecipeSchematic = function(id, isRecraft) if id == 2002 then return {name = 'Enchant Bracer - Minor Health'} end end,
+        }
+        OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-noitem')
+        assert(f.details.text:find('Enchant Bracer - Minor Health', 1, true))
+
         C_TradeSkillUI = nil
+        C_Spell = { GetSpellName = function(id) if id == 2002 then return 'Enchant Weapon - Crusader' end end }
+        OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-noitem')
+        assert(f.details.text:find('Enchant Weapon - Crusader', 1, true))
+        C_Spell = nil
+
+        local prevGetSpellInfo = GetSpellInfo
+        GetSpellInfo = function(id) if id == 2002 then return 'Enchant Boots - Minor Speed' end end
+        OldKraken.WorkshopOrders:Show('Alice Mon\\001ord-noitem')
+        assert(f.details.text:find('Enchant Boots - Minor Speed', 1, true))
+        GetSpellInfo = prevGetSpellInfo
 
         -- 6. Status change notice and StaticPopup_Show use localized display name.
         local p = codec._pack({'Alice Mon', 'ord-1', 2, now, now + 86400, 171, 'Зелье лечения', 1, 0, 'customer', 'Коментар користувача', 'assigned', 'Bob Mon', 0, 0, 118, 2001, 0, 2, 0})

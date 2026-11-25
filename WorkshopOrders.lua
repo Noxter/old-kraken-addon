@@ -55,24 +55,43 @@ local function orderItemName(id)
     return nil
 end
 local function recipeOutputItemName(recipeID)
-    if not int(recipeID,1,100000000) or type(C_TradeSkillUI)~='table' then return nil end
-    if type(C_TradeSkillUI.GetRecipeOutputItemData)=='function' then
-        local ok,data=pcall(C_TradeSkillUI.GetRecipeOutputItemData,recipeID)
-        if ok and type(data)=='table' then
-            if int(data.itemID,1,100000000) then
-                return orderItemName(data.itemID) or T('Завантаження назви…')
-            end
-            if type(data.hyperlink)=='string' then
-                local linked=data.hyperlink:match('%[([^%]]+)%]')
-                if textOK(linked,1,160) then return linked end
+    if not int(recipeID,1,100000000) then return nil end
+    if type(C_TradeSkillUI)=='table' then
+        if type(C_TradeSkillUI.GetRecipeOutputItemData)=='function' then
+            local ok,data=pcall(C_TradeSkillUI.GetRecipeOutputItemData,recipeID)
+            if ok and type(data)=='table' then
+                if int(data.itemID,1,100000000) then
+                    return orderItemName(data.itemID) or T('Завантаження назви…')
+                end
+                if type(data.hyperlink)=='string' then
+                    local linked=data.hyperlink:match('%[([^%]]+)%]')
+                    if textOK(linked,1,160) then return linked end
+                end
             end
         end
+        local schematicName
+        if type(C_TradeSkillUI.GetRecipeSchematic)=='function' then
+            local ok,data=pcall(C_TradeSkillUI.GetRecipeSchematic,recipeID,false)
+            if ok and type(data)=='table' then
+                if int(data.outputItemID,1,100000000) then
+                    return orderItemName(data.outputItemID) or T('Завантаження назви…')
+                end
+                if textOK(data.name,1,160) then schematicName=data.name end
+            end
+        end
+        if type(C_TradeSkillUI.GetRecipeInfo)=='function' then
+            local ok,info=pcall(C_TradeSkillUI.GetRecipeInfo,recipeID)
+            if ok and type(info)=='table' and textOK(info.name,1,160) then return info.name end
+        end
+        if schematicName then return schematicName end
     end
-    if type(C_TradeSkillUI.GetRecipeSchematic)=='function' then
-        local ok,data=pcall(C_TradeSkillUI.GetRecipeSchematic,recipeID,false)
-        if ok and type(data)=='table' and int(data.outputItemID,1,100000000) then
-            return orderItemName(data.outputItemID) or T('Завантаження назви…')
-        end
+    if type(C_Spell)=='table' and type(C_Spell.GetSpellName)=='function' then
+        local ok,value=pcall(C_Spell.GetSpellName,recipeID)
+        if ok and textOK(value,1,160) then return value end
+    end
+    if type(GetSpellInfo)=='function' then
+        local ok,value=pcall(GetSpellInfo,recipeID)
+        if ok and textOK(value,1,160) then return value end
     end
     return nil
 end
@@ -759,7 +778,7 @@ restoreDraft=function()
     local recipe=draft.recipe
     chosenRecipe=type(recipe)=='table' and int(recipe.item,0,100000000) and int(recipe.recipe,1,100000000)
         and {item=recipe.item,recipe=recipe.recipe,owner=nameOK(recipe.owner) and recipe.owner or nil} or nil
-    local chosenText=chosenRecipe and (orderItemName(chosenRecipe.item) or (item~='' and item) or recipePlaceholder()) or recipePlaceholder()
+    local chosenText=chosenRecipe and (orderItemName(chosenRecipe.item) or recipeOutputItemName(chosenRecipe.recipe) or (item~='' and item) or recipePlaceholder()) or recipePlaceholder()
     form.item:SetText(chosenText)
     UIDropDownMenu_SetText(window.professionMenu,professionNames[profession] or T('Оберіть професію'))
     UIDropDownMenu_SetText(window.materialsMenu,materialNames[materials])
@@ -1245,7 +1264,7 @@ local function createWindow(parent)
         OldKraken.WorkshopRecipes:Choose(function(r,owner)
             if not nameOK(owner) or owner==identity or not professionNames[r.profession] then return end
             profession=r.profession; UIDropDownMenu_SetText(professionMenu,professionNames[profession])
-            local label=orderItemName(r.item) or (r.product~='' and r.product or r.name)
+            local label=orderItemName(r.item) or recipeOutputItemName(r.recipe) or (r.product~='' and r.product or r.name)
             form.item:SetText(label); chosenRecipe={item=r.item,recipe=r.recipe,owner=owner}
             if type(form.UpdateItemIcon)=='function' then form.UpdateItemIcon() end
             saveDraft()
@@ -1343,7 +1362,7 @@ function Orders:ShowRecipe(r,owner)
     if form~=window and not self:OpenCreateForm() then return end
     profession=r.profession
     UIDropDownMenu_SetText(window.professionMenu,professionNames[profession])
-    form.item:SetText(r.product~='' and r.product or r.name)
+    form.item:SetText(orderItemName(r.item) or recipeOutputItemName(r.recipe) or (r.product~='' and r.product or r.name))
     chosenRecipe={item=r.item,recipe=r.recipe,owner=owner}
     if type(form.UpdateItemIcon)=='function' then form.UpdateItemIcon() end
     saveDraft()

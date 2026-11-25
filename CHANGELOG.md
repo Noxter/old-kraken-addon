@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.6
+
+### Chat
+- Додано перемикач розкладки `ChatLayoutSwitcher.lua` (QWERTY ↔ українська ЙЦУКЕН у полі вводу чату за гарячою клавішею `Ctrl+L` з автовизначенням напрямку та збереженням WoW-лінків, текстур, іконок рейду і slash-команд).
+
+### Guild Roster & Specs
+- Додано захист від перезапису власної спеціалізації в `Communication.lua` (`RefreshLocalTreeSpec` / `ReadTreeHeadersSpec`) під час огляду іншого гравця (`IsInspecting`, `GetInspectUnit`, `inspectUnit`, невідповідність `GetConfigID`).
+- Розширено праву колонку значень професій у профілі гравця (`GuildRoster.lua`, `prow.value` до `165 px`), щоб напис `Із ігрового ростера` не переносився на два рядки.
+
+### Group Finder
+- Додано фільтрацію попап-сповіщень `GROUP_FINDER_NEW` (`GroupFinderUI.lua`) за перетином діапазону рівнів групи (`group.minLevel`–`group.maxLevel`) і каталожного діапазону активності з `ActivityCatalog.lua` (`dungeonLevels`) для категорій `dungeon` та `raid` (зі збереженням фільтрації лише за діапазоном групи для кастомних активностей і без зміни списку груп чи протоколу).
+- Збагачено тултіпи сповіщень `GroupFinderUI.lua` та оновлено клік по посиланню у гільдійському чаті (`GroupFinderChat.lua`), щоб відкривати список усіх груп.
+
+### Guild Events
+- Виправлено відображення іконки ролі лікаря (`healer`) у списку заявок та учасників події (`largeRoleIcon` у `GuildEvents.lua`): `gsub` тепер замінює лише перше `:16:16:` (розмір іконки), не псуючи `:64:16:16:32:` (розміри та координати атласу текстури).
+
+### Workshop & Database
+- У `WorkshopRecipes.lua` додано ігнорування другорядних (`185`, `129`, `356`) та збиральних (`186`, `182`, `393`) професій у `NEW_RECIPE_LEARNED`, `pendingLearned` (включно з очищенням раніше накопичених записів), `scanLearned` і `playerCraftingProfessionsText`, а чат-нагадування про непідтягнутий рецепт основної крафтової професії переведено з `chatError` на `chatInfo`.
+- У `WorkshopRecipes.lua` та `Locale.lua` додано фільтр «Лише онлайн» у списку рецептів.
+- У `Database.lua` діалог підтвердження міграції майстерні (`ConfirmWorkshopMigration`) переведено на `UIStyle.Window` зі стратою `DIALOG`.
+- У `WorkshopOrders.lua` виправлено відображення локалізованих назв замовлень без вихідного `itemID` (зокрема зачарування, `itemID == 0, recipeID > 0`) через `C_TradeSkillUI.GetRecipeInfo`, `GetRecipeSchematic.name`, `C_Spell.GetSpellName` та `GetSpellInfo`.
+
 ## 0.5.5
 
 ### Guild Roster & Localization
