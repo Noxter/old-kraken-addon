@@ -1100,9 +1100,7 @@ local function CreateRow(index, parent)
                 if self.relayed then GameTooltip:AddLine(T('Отримано через гільдію'),1,1,1) end
                 if type(self.updated)=='number' and type(GetServerTime)=='function' and GetServerTime()-self.updated>604800 then GameTooltip:AddLine(T('Дані застарілі'),1,0.7,0.25) end
             end
-            if not isGathering(self.professionID) then
-                GameTooltip:AddLine(T('Натисніть, щоб переглянути збережені рецепти.'),0.6,0.9,1,true)
-            end
+            GameTooltip:AddLine(T('Натисніть, щоб переглянути збережені рецепти.'),0.6,0.9,1,true)
             GameTooltip:Show()
         end)
         icon:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)

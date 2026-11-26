@@ -190,6 +190,20 @@ lua.execute('''
     end
     assert(aliceRow ~= nil and #aliceRow.professions == 2)
     assert(emptyProfRow ~= nil and emptyProfRow.cells[6]:IsShown() and emptyProfRow.cells[6].text == '—')
+    -- Hovering profession icons renders tooltip without nil-function errors
+    local tooltipLines, tooltipShown = {}, false
+    GameTooltip = {
+        SetOwner = function() tooltipLines = {}; tooltipShown = false end,
+        SetText = function(_, txt) tooltipLines[#tooltipLines + 1] = txt end,
+        AddLine = function(_, txt) tooltipLines[#tooltipLines + 1] = txt end,
+        Show = function() tooltipShown = true end,
+        Hide = function() tooltipShown = false end,
+    }
+    aliceRow.professions[1].scripts.OnEnter(aliceRow.professions[1])
+    assert(tooltipShown and #tooltipLines >= 2)
+    aliceRow.professions[2].scripts.OnEnter(aliceRow.professions[2])
+    assert(tooltipShown and #tooltipLines >= 2)
+    GameTooltip = nil
     -- Left-click on cellHover[1] opens profile
     aliceRow.cellHovers[1].scripts.OnClick(aliceRow.cellHovers[1], 'LeftButton')
     assert(rf.profilePanel:IsShown() and rf.profilePanel.member.name == 'Alice Tester')
