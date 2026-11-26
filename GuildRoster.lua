@@ -636,7 +636,7 @@ local function CreateRosterWindow(parent)
     local previousScroll = scroll:GetScript('OnVerticalScroll')
     scroll:SetScript('OnVerticalScroll', function(self, offset)
         if previousScroll then previousScroll(self, offset) end
-        if not drawing then Roster:RenderVisible() end
+        if not drawing then Roster:RenderVisible(true) end
     end)
     local previousResize = scroll:GetScript('OnSizeChanged')
     scroll:SetScript('OnSizeChanged', function(self, width, height)
@@ -1168,6 +1168,8 @@ local function UpdateSummary()
     end
 end
 
+local lastVisibleFirst, lastVisibleCount, lastVisibleTotal
+
 local function runRender(self)
     if not GetSettings() then
         return
@@ -1195,6 +1197,7 @@ local function runRender(self)
     UpdateSortHeaders()
 
     if selectedProfileName then
+        lastVisibleFirst, lastVisibleCount, lastVisibleTotal = nil, nil, nil
         local found
         for _, member in ipairs(rosterData) do
             if member.name == selectedProfileName then
@@ -1219,7 +1222,7 @@ function Roster:Render()
     if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.render', debugprofilestop() - t0) end
 end
 
-function Roster:RenderVisible()
+function Roster:RenderVisible(scrollOnly)
     if not rosterFrame or drawing then return end
     local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     drawing = true
@@ -1227,18 +1230,25 @@ function Roster:RenderVisible()
     local scroll = rosterFrame.scrollFrame
     local viewport = tonumber((scroll:GetHeight())) or 440
     if viewport <= 0 then viewport = 440 end
-    local fullHeight = #filteredData * ROW_HEIGHT
+    local total = #filteredData
+    local fullHeight = total * ROW_HEIGHT
     content:SetHeight(math.max(1, fullHeight))
     local scrollBar = _G.OldKrakenRosterScrollFrameScrollBar
     if type(scrollBar) == 'table' and scrollBar.SetShown then
         scrollBar:SetShown(fullHeight > viewport)
     end
-    if rosterFrame.emptyText then rosterFrame.emptyText:SetShown(#filteredData == 0) end
-    if rosterFrame.emptyReset then rosterFrame.emptyReset:SetShown(#filteredData == 0) end
-    local offset = math.max(0, math.min(tonumber((scroll:GetVerticalScroll())) or 0, math.max(0, #filteredData * ROW_HEIGHT - viewport)))
+    if rosterFrame.emptyText then rosterFrame.emptyText:SetShown(total == 0) end
+    if rosterFrame.emptyReset then rosterFrame.emptyReset:SetShown(total == 0) end
+    local offset = math.max(0, math.min(tonumber((scroll:GetVerticalScroll())) or 0, math.max(0, total * ROW_HEIGHT - viewport)))
     if offset ~= (tonumber((scroll:GetVerticalScroll())) or 0) then scroll:SetVerticalScroll(offset) end
     local first = math.floor(offset / ROW_HEIGHT) + 1
-    local count = math.max(0, math.min(math.ceil(viewport / ROW_HEIGHT) + 1, #filteredData - first + 1))
+    local count = math.max(0, math.min(math.ceil(viewport / ROW_HEIGHT) + 1, total - first + 1))
+    if scrollOnly and first == lastVisibleFirst and count == lastVisibleCount and total == lastVisibleTotal then
+        drawing = false
+        if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.visible', debugprofilestop() - t0, 0) end
+        return
+    end
+    lastVisibleFirst, lastVisibleCount, lastVisibleTotal = first, count, total
     local comm = OldKraken.Communication
     local localVersion = comm and comm.GetLocalVersion and comm:GetLocalVersion()
     for index = 1, count do

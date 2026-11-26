@@ -65,6 +65,35 @@ assert(perfLog['roster.filter'].calls == 2 and perfLog['roster.filter'].items ==
 assert(perfLog['roster.sort'].calls == 2 and perfLog['roster.sort'].items == 501)
 assert(perfLog['roster.visible'].calls == 2 and perfLog['roster.visible'].items == fullVisibleCount + 1)
 assert(perfLog['roster.render'].calls == 2)
+-- Sub-row scroll via OnVerticalScroll skips redundant row updates; crossing row boundary or resizing redraws
+local prevGFirst, prevGCount, prevGTotal = _G.lastVisibleFirst, _G.lastVisibleCount, _G.lastVisibleTotal
+_G.lastVisibleFirst, _G.lastVisibleCount, _G.lastVisibleTotal = 'sentinel', 'sentinel', 'sentinel'
+OldKraken.DB.settings.roster.search = ''
+roster:Render()
+local visCallsBefore = perfLog['roster.visible'].calls
+local visItemsBefore = perfLog['roster.visible'].items
+scroll.offset = 5
+scroll.scripts.OnVerticalScroll(scroll, 5)
+scroll.offset = 10
+scroll.scripts.OnVerticalScroll(scroll, 10)
+assert(perfLog['roster.visible'].calls == visCallsBefore + 2 and perfLog['roster.visible'].items == visItemsBefore, 'sub-row scroll must skip row repopulation')
+scroll:SetVerticalScroll(40)
+assert(perfLog['roster.visible'].calls == visCallsBefore + 3 and perfLog['roster.visible'].items > visItemsBefore, 'crossing row boundary must redraw rows')
+local itemsAfterScroll = perfLog['roster.visible'].items
+scroll.scripts.OnSizeChanged(scroll, 860, 440)
+assert(perfLog['roster.visible'].items > itemsAfterScroll, 'OnSizeChanged must force redraw')
+-- Opening and closing profile invalidates visible cache without touching globals
+local firstRow = visible()[1]
+firstRow.cellHovers[1].scripts.OnClick(firstRow.cellHovers[1], 'LeftButton')
+assert(OldKrakenRosterFrame.profilePanel:IsShown())
+roster:Render()
+local itemsWithProfile = perfLog['roster.visible'].items
+OldKrakenRosterFrame.profilePanel.backButton.scripts.OnClick(OldKrakenRosterFrame.profilePanel.backButton)
+assert(not OldKrakenRosterFrame.profilePanel:IsShown())
+assert(perfLog['roster.visible'].items > itemsWithProfile, 'closing profile must redraw visible rows')
+scroll:SetVerticalScroll(0)
+assert(_G.lastVisibleFirst == 'sentinel' and _G.lastVisibleCount == 'sentinel' and _G.lastVisibleTotal == 'sentinel', 'visible cache must stay local')
+_G.lastVisibleFirst, _G.lastVisibleCount, _G.lastVisibleTotal = prevGFirst, prevGCount, prevGTotal
 OldKraken.perfEnabled = origPerfEnabled
 debugprofilestop = origDebugProfilestop
 OldKraken.PerfRecord = origPerfRecord
