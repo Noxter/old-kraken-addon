@@ -279,43 +279,45 @@ local function SortMembers(a, b)
         return a.isOnline
     end
 
-    local key = settings.sort
+    local key, asc = settings.sort, settings.ascending
     local left, right
 
     if key == "name" then
-        left = string.lower(a.name or "")
-        right = string.lower(b.name or "")
+        left = a.nameLower or string.lower(a.name or "")
+        right = b.nameLower or string.lower(b.name or "")
     elseif key == "class" then
         left = a.class or a.classFile or ""
         right = b.class or b.classFile or ""
     elseif key == "rank" then
-        left = tonumber(a.rankIndex) or 0
-        right = tonumber(b.rankIndex) or 0
+        left = a.rankIndex or 0
+        right = b.rankIndex or 0
     elseif key == "zone" then
         if not a.isOnline then
             local aa, bb = a.lastOnline, b.lastOnline
             if (aa ~= nil) ~= (bb ~= nil) then return aa ~= nil end
             if aa and bb then
-                for _, unit in ipairs({'years', 'months', 'days', 'hours'}) do
-                    if aa[unit] ~= bb[unit] then
-                        if settings.ascending then return aa[unit] < bb[unit] end
-                        return aa[unit] > bb[unit]
-                    end
+                local av, bv = aa.years, bb.years
+                if av == bv then av, bv = aa.months, bb.months end
+                if av == bv then av, bv = aa.days, bb.days end
+                if av == bv then av, bv = aa.hours, bb.hours end
+                if av ~= bv then
+                    if asc then return av < bv end
+                    return av > bv
                 end
             end
         end
-        left = string.lower(a.zone or "")
-        right = string.lower(b.zone or "")
+        left = a.zoneLower or string.lower(a.zone or "")
+        right = b.zoneLower or string.lower(b.zone or "")
     else
-        left = tonumber(a.level) or 0
-        right = tonumber(b.level) or 0
+        left = a.level or 0
+        right = b.level or 0
     end
 
     if left == right then
-        return string.lower(a.name or "") < string.lower(b.name or "")
+        return (a.nameLower or string.lower(a.name or "")) < (b.nameLower or string.lower(b.name or ""))
     end
 
-    if settings.ascending then
+    if asc then
         return left < right
     end
     return left > right
@@ -1405,12 +1407,14 @@ function Roster:Load()
             end
             rosterData[#rosterData + 1] = {
                 name = name,
+                nameLower = string.lower(name),
                 rank = rankName,
                 rankIndex = tonumber(rankIndex) or 0,
                 level = tonumber(level) or 0,
                 class = className or classFileName,
                 classFile = classFileName,
                 zone = zone,
+                zoneLower = string.lower(zone or ""),
                 isOnline = isOnline == true,
                 lastOnline = lastOnline,
             }
