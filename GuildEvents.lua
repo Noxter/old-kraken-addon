@@ -1598,7 +1598,7 @@ local function createWindow(parent)
                     or (C_ChatInfo and type(C_ChatInfo.SendChatMessage) == 'function' and C_ChatInfo.SendChatMessage)
                 local maxSize = tonumber(f.size:GetText())
                 local sizePart = (maxSize and maxSize > 0) and (' (' .. maxSize .. T(' місць)')) or ''
-                local msg = (T('[Old Kraken] Новий івент: ') .. eventTitle .. ' · ' .. date('%d.%m %H:%M', when) .. sizePart .. T(' — запис у вкладці «Івенти» (/okr).')):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
+                local msg = (T('[Old Kraken] Івент: ') .. eventTitle .. ' · ' .. date('%d.%m %H:%M', when) .. sizePart .. ' — /okr'):gsub('|c%x%x%x%x%x%x%x%x', ''):gsub('|r', '')
                 if sendChat then
                     local sent, err = pcall(sendChat, msg, 'GUILD')
                     if not sent then chatError(T('|cffff5555Old Kraken|r: не вдалося надіслати анонс у гільд-чат: ') .. tostring(err)) end
