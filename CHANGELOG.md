@@ -2,6 +2,26 @@
 
 ## 0.5.7-alpha.1
 
+### Performance & Diagnostics
+- Додано вбудований діагностичний профайлер `/okr perf [on|off|reset|report]` (`Core.lua`, `Locale.lua`, інструментація ключових обробників із нульовим оверхедом при вимкненому режимі та інтеграцією `C_AddOnProfiler`).
+- Прибрано постійні idle `OnUpdate` цикли у `GuildRoster.lua` (`eventFrame`) та `GuildEvents.lua` (`raidInviteFrame`): фрейми приховані за замовчуванням і показуються лише на час активного оновлення чи черги рейд-запрошень.
+- Замір у реальному клієнті WoW Forever `1.60.1 (70938)` (~3,6 хв активної гри з `0.5.7-alpha.1` проти бази `0.5.6`): поточний CPU знизився з `6.49%` до `0.13%` (~50×), Average CPU — з `6.91%` до `1.30%` (~5.3×), кількість тіків `>5ms` — з `20809` до `50` (~416×), `>10ms` — з `16134` до `22` (~733×), `comm.recv` — без жодного виклику `>5ms` (`max=1.88ms`), `wk.wrget` — з `2019` до `5` викликів. Два зафіксовані піки `>50ms` належать одноразовому початковому завантаженню аддона до ввімкнення профайлера, а не фоновій роботі.
+
+### Communication
+- Замінено per-byte замикання в `Encode`/`Decode` (`Communication.lua`) на попередньо обчислені 256-елементні таблиці `HEX_ENC` / `HEX_DEC`.
+- Додано O(1) лічильники `assemblyCount` та `completedCount`, ранній вихід у `Prune(now)` і ранню валідацію довжини/формату кадру та `completed[key]` до `Decode()`.
+- Додано механізм `Communication.part1Filters` (із прибиранням позачергових `assemblies` і записом у `completed[key]`, щоб решта фрагментів `2..N` чужих `WRPAGE`/`WRGET`/`WRBATCH`/`WRRESULT` відкидалися до `Decode()`).
+- Додано гільдійський кеш `seenSenders` (скидається при зміні чи виході з гільдії в `EnsurePresenceGuild`; `OKP^HERE^<ver>` оновлює версію в обхід кешу), а також гард на `pendingSpecBroadcast` і ліниве виділення `snapshots` у `Pump()`.
+
+### Group Finder
+- Відокремлено `partyPeople`/`partyPeopleIndex` від гільдійського `people` (`GroupFinderUI.lua`): подія `GROUP_ROSTER_UPDATE` за завантаженого ростера оновлює лише склад групи без повторного повного скану `GetGuildRosterInfo`.
+- Збережено `peopleIndex` після повного скану, додано мемоізацію `ownerKeyCache` (ліміт 2048), прибрано per-iteration анонімні `pcall`-замикання та зайвий прохід по `party1..4` поза групою.
+
+### Workshop
+- Оптимізовано `WorkshopSync.lua`: O(N) інкрементальний чанкінг у `handleWRGET`, weak-key кеш `validatedSnapshots`, `ExportSnapshotMeta()` для `WRIDX` без повного копіювання списку, придушення дубльованих relay `WRIDX` після відповіді власника або двох різних релейників із `rev >= ourRev`, збільшено інтервал `WRQ` до `600` с.
+- Реалізовано multi-provider failover у `incoming[owner]` (`WorkshopSync.lua`): до 8 резервних провайдерів (`backups`/`failed`), детермінований вибір (`pickBackup`), розділення `lastProgress` (активність/replay) та `lastNewProgress` + `MAX_STALL_ATTEMPTS = 2` (дублікати replay не відкладають перемикання за наявності резерву) і контрольний `WRQ` через `60` с при вичерпанні всіх резервів.
+- У `WorkshopRecipes.lua` додано `SPELLS_CHANGED` тротлінг (`60` с) та пропуск `pendingIds` за порожнього `pendingLearned`; у `Workshop.lua` на `GUILD_ROSTER_UPDATE` без зміни `active`/`profile`/`identity` виконується `scheduleRender()` замість повного `changed()`.
+
 ## 0.5.6
 
 ### Chat

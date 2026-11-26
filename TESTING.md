@@ -120,7 +120,7 @@ done
 
 ## Автоматизоване покриття
 
-Автоматизований набір запускається локально командою вище на Lua 5.1 runtime (`lupa 2.8`). Станом на 25 листопада 2026 він містить 63 тестові файли; останній локальний запуск на `alpha` завершився успішно (`63/63` файлів, включно з `test_realm_scope.py`, `test_workshop_migration.py`, `test_version_awareness.py`, `test_group_finder_chat.py`, `test_group_finder_activation.py`, `test_inline_player_profile.py`, `test_blackrock_spire_wings.py`, `test_group_alert_level_range.py`, `test_workshop_pending_learned.py`, `test_workshop_orders_localization_and_picker.py`, `test_chat_layout_switcher.py`):
+Автоматизований набір запускається локально командою вище на Lua 5.1 runtime (`lupa 2.8`). Станом на 26 листопада 2026 він містить 64 тестові файли; останній локальний запуск на `alpha` завершився успішно (`64/64` тестових файлів, включно з `test_realm_scope.py`, `test_workshop_migration.py`, `test_version_awareness.py`, `test_group_finder_chat.py`, `test_group_finder_activation.py`, `test_inline_player_profile.py`, `test_blackrock_spire_wings.py`, `test_group_alert_level_range.py`, `test_workshop_pending_learned.py`, `test_workshop_orders_localization_and_picker.py`, `test_chat_layout_switcher.py`, `test_perf_diagnostics.py`):
 
 | Область | Що перевіряється автоматично |
 |---|---|
@@ -139,7 +139,7 @@ done
 
 Це функціональне покриття критичних контрактів, а не вимірювання 100% line/branch coverage. Якщо змінюється формат протоколу, схема SavedVariables або публічна поведінка модуля, відповідний тест слід оновити разом із кодом.
 
-Станом на 25 листопада 2026 усі `63/63` файлів локально проходили на релізі `0.5.6` (`main`, `lupa 2.8` / Lua 5.1); цикл `0.5.7-alpha.1` відкрито на `alpha`. Це локальна перевірка з моками API, а не заміна ручного тестування в WoW — живі сценарії з цього документа залишаються обов'язковою перевіркою після публікації.
+Станом на 26 листопада 2026 усі `64/64` тестові файли локально проходять на гілці `alpha` (`0.5.7-alpha.1`, `lupa 2.8` / Lua 5.1); реліз `0.5.6` на `main` проходив на попередніх `63/63` файлах. Для діагностики CPU у грі доступний вбудований профайлер `/okr perf [on|off|reset|report]`. Це локальна перевірка з моками API, а не заміна ручного тестування в WoW — живі сценарії з цього документа залишаються обов'язковою перевіркою після публікації.
 
 ## Guild Events: перевірка авторитетності relay
 

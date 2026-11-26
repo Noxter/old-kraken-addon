@@ -564,6 +564,18 @@ comm:RegisterHandler('WRQUERY',function(sender,_,payload)
         sendQueue[#sendQueue+1]={payload=msg,expires=now+120}
     end
 end)
+local function targetMatchesSelf(part1)
+    if not active or not identity then return true end
+    local first,last,sz=part1:find('(%d+):',1)
+    if first~=1 or not sz or #sz>4 then return true end
+    sz=tonumber(sz)
+    if not sz or last+sz>#part1 then return true end
+    return part1:sub(last+1,last+sz)==identity
+end
+if type(comm.part1Filters)=='table' then
+    comm.part1Filters.WRBATCH=targetMatchesSelf
+    comm.part1Filters.WRRESULT=targetMatchesSelf
+end
 comm:RegisterHandler('WRBATCH',function(sender,_,payload)
     if not active or not activeQuery or GetTime()>activeQuery.untilTime or not safeText(sender,1,128) or sender==identity then return end
     local f=codec._unpackFields(payload,98)
@@ -623,6 +635,7 @@ comm:RegisterHandler('WRFORGET',function(sender,_,payload)
     if validRecord(r) and storeTombstone(sender,r,false,true) then changed(); indexRevision=indexRevision+1; recipeChanged=true end
 end)
 
+local lastSpellsCatalogScan=-60
 local events=CreateFrame('Frame')
 for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE','TRADE_SKILL_SHOW','TRADE_SKILL_LIST_UPDATE','TRADE_SKILL_DATA_SOURCE_CHANGED','TRADE_SKILL_CLOSE','NEW_RECIPE_LEARNED','SPELLS_CHANGED','SKILL_LINES_CHANGED','LEARNED_SPELL_IN_SKILL_LINE'}) do pcall(events.RegisterEvent,events,event) end
 events:SetScript('OnEvent',function(_,event,recipeID)
@@ -637,7 +650,13 @@ events:SetScript('OnEvent',function(_,event,recipeID)
                 if tradeOpen then scanPending=true end
             end
         end
-    elseif event=='SPELLS_CHANGED' or event=='LEARNED_SPELL_IN_SKILL_LINE' then catalogCursor=nil; catalogPending=true; if tradeOpen then scanPending=true end
+    elseif event=='LEARNED_SPELL_IN_SKILL_LINE' then
+        catalogCursor=nil; catalogPending=true; lastSpellsCatalogScan=GetTime()
+        if tradeOpen then scanPending=true end
+    elseif event=='SPELLS_CHANGED' then
+        local now=GetTime()
+        if now-lastSpellsCatalogScan>=60 then catalogCursor=nil; catalogPending=true; lastSpellsCatalogScan=now end
+        if tradeOpen then scanPending=true end
     elseif event=='TRADE_SKILL_CLOSE' then tradeOpen=false; scanPending=false; forgetChecks={}; lastScanProfession=nil
     elseif event=='TRADE_SKILL_SHOW' then tradeOpen=true; scanPending=true; learnAttempts={}
     elseif tradeOpen then scanPending=true end
@@ -715,7 +734,7 @@ local function formatPendingNotice(ids)
     end
     return string.format(T('Old Kraken: ваш новий рецепт%s очікує даних гри. Відкрийте вікно своєї професії, щоб завершити оновлення.'),recipePart)
 end
-if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
+local function runRecipeTick()
     connect(); if not active then return end
     if scanPending then
         scanPending=false
@@ -747,48 +766,55 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
             end
         else catalogPending=false end
     end
-    local newlyTimedOut,checked={},0
-    local pendingIds={}
-    for id in pairs(pendingLearned) do
-        if integer(id,1,100000000) then pendingIds[#pendingIds+1]=id
-        else pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil end
-    end
-    table.sort(pendingIds)
-    for _,id in ipairs(pendingIds) do
-        if isIgnoredProfession(resolveRecipeProfession(id)) then
-            pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
-        else
-            local stored=people[identity] and people[identity][id]
-            if validRecord(stored) then
-                if isIgnoredProfession(stored.profession) then
-                    pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
-                else
-                    learnAttempts[id]=0; learnWarned[id]=nil
-                    if #sendQueue<100 then
+    if next(pendingLearned)~=nil then
+        local newlyTimedOut,checked={},0
+        local pendingIds={}
+        for id in pairs(pendingLearned) do
+            if integer(id,1,100000000) then pendingIds[#pendingIds+1]=id
+            else pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil end
+        end
+        table.sort(pendingIds)
+        for _,id in ipairs(pendingIds) do
+            if isIgnoredProfession(resolveRecipeProfession(id)) then
+                pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
+            else
+                local stored=people[identity] and people[identity][id]
+                if validRecord(stored) then
+                    if isIgnoredProfession(stored.profession) then
                         pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
-                        local payload=codec._pack({stored.recipe,stored.item,stored.profession,stored.seen,stored.name,stored.product})
-                        sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
+                    else
+                        learnAttempts[id]=0; learnWarned[id]=nil
+                        if #sendQueue<100 then
+                            pendingLearned[id],learnAttempts[id],learnWarned[id]=nil,nil,nil
+                            local payload=codec._pack({stored.recipe,stored.item,stored.profession,stored.seen,stored.name,stored.product})
+                            sendQueue[#sendQueue+1]={kind='WRLEARN',payload=payload,expires=GetTime()+120}
+                        end
                     end
-                end
-            elseif (learnAttempts[id] or 0)<10 then
-                local ok,done=pcall(scanLearned,id)
-                if ok and done then
-                    learnAttempts[id]=0; learnWarned[id]=nil
-                else
-                    learnAttempts[id]=(learnAttempts[id] or 0)+1
-                    if learnAttempts[id]==10 and not learnWarned[id] then
-                        learnWarned[id]=true
-                        newlyTimedOut[#newlyTimedOut+1]=id
+                elseif (learnAttempts[id] or 0)<10 then
+                    local ok,done=pcall(scanLearned,id)
+                    if ok and done then
+                        learnAttempts[id]=0; learnWarned[id]=nil
+                    else
+                        learnAttempts[id]=(learnAttempts[id] or 0)+1
+                        if learnAttempts[id]==10 and not learnWarned[id] then
+                            learnWarned[id]=true
+                            newlyTimedOut[#newlyTimedOut+1]=id
+                        end
                     end
+                    checked=checked+1; if checked>=50 then break end
                 end
-                checked=checked+1; if checked>=50 then break end
             end
         end
+        if #newlyTimedOut>0 then chatInfo(formatPendingNotice(newlyTimedOut)) end
     end
-    if #newlyTimedOut>0 then chatInfo(formatPendingNotice(newlyTimedOut)) end
     while #sendQueue>0 and sendQueue[1].expires<GetTime() do table.remove(sendQueue,1) end
     if #sendQueue>0 and #comm.queue<=8 and comm:SendProtocol(sendQueue[1].kind or 'WRRESULT',sendQueue[1].payload) then table.remove(sendQueue,1) end
     if recipeChanged then recipeChanged=false; OldKraken:Fire('WORKSHOP_RECIPES_CHANGED') end
+end
+if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    runRecipeTick()
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes', debugprofilestop() - t0) end
 end) end
 
 local function button(parent,label,x,y,width,callback,variant,options)
@@ -1815,6 +1841,17 @@ function Recipes:Show(forceNavigation)
     restoringView=true; frame.query:SetText(''); restoringView=false
     addCached('')
     frame:Show(); render()
+end
+function Recipes:ExportSnapshotMeta()
+    if not active or not scope or type(people[identity])~='table' then return nil end
+    local total=0
+    for _,r in pairs(people[identity]) do
+        if validRecord(r) then total=total+1; if total>5000 then return nil end end
+    end
+    for _,r in pairs(scope.recipeTombstones[identity] or {}) do
+        if validRecord(r) then total=total+1; if total>5000 then return nil end end
+    end
+    return scope.recipeVersions[identity],total
 end
 function Recipes:ExportSnapshot()
     if not active or not scope or type(people[identity])~='table' then return nil end

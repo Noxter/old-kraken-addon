@@ -662,7 +662,7 @@ local function connect()
     if C_GuildInfo and type(C_GuildInfo.GuildRoster) == 'function' then pcall(C_GuildInfo.GuildRoster) end
     if not tickerStarted and C_Timer and C_Timer.NewTicker then
         tickerStarted = true
-        C_Timer.NewTicker(3, function()
+        local function runIntegrationTick()
             if not active then return end
             local currentGuild = GetGuildInfo and GetGuildInfo('player')
             local currentName = UnitName and UnitName('player')
@@ -716,6 +716,11 @@ local function connect()
 
             finder:SyncStep()
             if finder:Prune() then saveOwned() end
+        end
+        C_Timer.NewTicker(3, function()
+            local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+            runIntegrationTick()
+            if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('gf.ticker', debugprofilestop() - t0) end
         end)
     end
     return true

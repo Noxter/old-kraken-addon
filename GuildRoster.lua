@@ -1181,7 +1181,7 @@ local function UpdateSummary()
     end
 end
 
-function Roster:Render()
+local function runRender(self)
     if not GetSettings() then
         return
     end
@@ -1219,6 +1219,12 @@ function Roster:Render()
     end
 
     self:RenderVisible()
+end
+
+function Roster:Render()
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    runRender(self)
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.render', debugprofilestop() - t0) end
 end
 
 function Roster:RenderVisible()
@@ -1373,6 +1379,7 @@ end
 local function Pack(...) return {n = select('#', ...), ...} end
 
 function Roster:Load()
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     pendingLoad, pendingRender = false, false
     if OldKraken.Workshop then OldKraken.Workshop:RefreshNativeProfessions() end
     local total = GetNumGuildMembers()
@@ -1418,6 +1425,7 @@ function Roster:Load()
     end
 
     self:Render()
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.load', debugprofilestop() - t0) end
     return #rosterData
 end
 
@@ -1472,18 +1480,28 @@ end
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
+if type(eventFrame.Hide) == 'function' then eventFrame:Hide() end
 function Roster:ScheduleRefresh(reload)
     pendingLoad = pendingLoad or reload == true
     pendingRender = true
+    if rosterFrame and rosterFrame:IsShown() and type(eventFrame.Show) == 'function' then eventFrame:Show() end
 end
 eventFrame:SetScript('OnUpdate', function(_, elapsed)
-    if not pendingRender then refreshElapsed = 0; return end
+    if not pendingRender then
+        refreshElapsed = 0
+        if type(eventFrame.Hide) == 'function' then eventFrame:Hide() end
+        return
+    end
     refreshElapsed = refreshElapsed + elapsed
     if refreshElapsed < 0.15 then return end
     refreshElapsed = 0
-    if not rosterFrame or not rosterFrame:IsShown() then return end
+    if not rosterFrame or not rosterFrame:IsShown() then
+        if type(eventFrame.Hide) == 'function' then eventFrame:Hide() end
+        return
+    end
     local reload = pendingLoad
     pendingLoad, pendingRender = false, false
+    if type(eventFrame.Hide) == 'function' then eventFrame:Hide() end
     if reload then Roster:Load() else Roster:Render() end
 end)
 eventFrame:SetScript('OnEvent', function() Roster:ScheduleRefresh(true) end)
@@ -1502,6 +1520,10 @@ SlashCmdList["OLDKRAKEN"] = function(message)
     end
 
     if OldKraken.GroupFinderAPI and OldKraken.GroupFinderAPI:HandleCommand(command) then
+        return
+    end
+
+    if OldKraken.HandlePerfCommand and OldKraken:HandlePerfCommand(command) then
         return
     end
 

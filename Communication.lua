@@ -12,6 +12,7 @@ Communication.lastSpecReply, Communication.lastBroadcastSpecID = nil, nil
 Communication.pendingSpecBroadcast, Communication.pendingSpecForce = false, false
 Communication.lastTestID = nil
 Communication.handlers = {}
+Communication.part1Filters = {}
 Communication.stats = { sent = 0, retried = 0, dropped = 0, received = 0, invalid = 0 }
 local MAX_QUEUE = 4096
 local ACTION_RESERVE = 256
@@ -32,13 +33,15 @@ local CACHE_LIMIT = 4096
 local CACHE_TTL = 120
 local messageSequence = 0
 local sessionID = tostring(GetServerTime()) .. "-" .. tostring(math.random(100000, 999999))
-local assemblies, completed = {}, {}
+local assemblies, completed, seenSenders = {}, {}, {}
+local assemblyCount, completedCount = 0, 0
 local nextPrune=0
 
 local function EnsurePresenceGuild(self)
     local guild = GetGuildInfo and GetGuildInfo('player') or ''
     if self.presenceGuild ~= guild or guild == '' then
         self.rosterPresence, self.rosterVersions, self.rosterSpecs = {}, {}, {}
+        seenSenders = {}
         self.presenceGuild = guild
         self.lastPresenceQuery, self.lastSpecReply, self.lastBroadcastSpecID, self.lastBroadcastSpecPayload = nil, nil, nil, nil
         self.pendingSpecBroadcast, self.pendingSpecForce = false, false
@@ -60,22 +63,37 @@ end
 local function Prune(now)
     if now<nextPrune then return end
     nextPrune=now+1
+    if assemblyCount == 0 and completedCount == 0 then return end
     for k, v in pairs(assemblies) do
-        if now - v.time > CACHE_TTL then assemblies[k] = nil end
+        if now - v.time > CACHE_TTL then
+            assemblies[k] = nil
+            assemblyCount = math.max(0, assemblyCount - 1)
+        end
     end
     for k, v in pairs(completed) do
-        if now - v.time > CACHE_TTL then completed[k] = nil end
+        if now - v.time > CACHE_TTL then
+            completed[k] = nil
+            completedCount = math.max(0, completedCount - 1)
+        end
     end
 end
 
 -- GF1 payloads are hexadecimal bytes. This preserves UTF-8 and reserves delimiters.
+local HEX_ENC, HEX_DEC = {}, {}
+for i = 0, 255 do
+    local ch = string.char(i)
+    local hex = string.format("%02X", i)
+    HEX_ENC[ch] = hex
+    HEX_DEC[hex] = ch
+end
+
 local function Encode(payload)
-    return (payload:gsub(".", function(c) return string.format("%02X", string.byte(c)) end))
+    return (payload:gsub(".", HEX_ENC))
 end
 
 local function Decode(payload)
     if #payload % 2 ~= 0 or payload:find("[^0-9A-F]") then return nil end
-    return (payload:gsub("%x%x", function(pair) return string.char(tonumber(pair, 16)) end))
+    return (payload:gsub("%x%x", HEX_DEC))
 end
 
 local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = true,
@@ -184,10 +202,16 @@ function Communication:ClearProtocolState()
         end
     end
     for key, item in pairs(assemblies) do
-        if GROUP_FINDER_KINDS[item.kind] then assemblies[key] = nil end
+        if GROUP_FINDER_KINDS[item.kind] then
+            assemblies[key] = nil
+            assemblyCount = math.max(0, assemblyCount - 1)
+        end
     end
     for key, item in pairs(completed) do
-        if GROUP_FINDER_KINDS[item.kind] then completed[key] = nil end
+        if GROUP_FINDER_KINDS[item.kind] then
+            completed[key] = nil
+            completedCount = math.max(0, completedCount - 1)
+        end
     end
     if #self.queue==0 then self.retryAt,self.backoff=0,0 end
 end
@@ -332,21 +356,27 @@ local function entryError(self,index,entry,reason,now)
         entry.nextTryAt=now+entry.errorBackoff+math.random()
     end
 end
-function Communication:Pump()
+local function runPump(self)
     EnsurePresenceGuild(self)
-    if self.pendingSpecBroadcast and self.ready and IsInGuild and IsInGuild() then self:SendLocalSpec(self.pendingSpecForce) end
+    if self.pendingSpecBroadcast and self.ready and IsInGuild and IsInGuild()
+        and #self.queue<=8 and (not self.lastSpecReply or GetTime()-self.lastSpecReply>=10) then
+        self:SendLocalSpec(self.pendingSpecForce)
+    end
     if #self.queue==0 or GetTime()<self.retryAt then return end
     if not IsInGuild or not IsInGuild() then return end
     local now=GetTime()
-    local snapshots={}
+    local snapshots
     for _,entry in ipairs(self.queue) do
         local job=entry.job
-        if job and job.snapshot and job.recordKey then snapshots[(entry.guild or '')..'\001'..job.recordKey]=true end
+        if job and job.snapshot and job.recordKey then
+            snapshots=snapshots or {}
+            snapshots[(entry.guild or '')..'\001'..job.recordKey]=true
+        end
     end
     local index,priority=nil,3
     for i,entry in ipairs(self.queue) do
         local job=entry.job
-        local blocked=job and not job.snapshot and job.recordKey and snapshots[(entry.guild or '')..'\001'..job.recordKey]
+        local blocked=snapshots and job and not job.snapshot and job.recordKey and snapshots[(entry.guild or '')..'\001'..job.recordKey]
         local value=entry.priority or 1
         if not blocked and (not entry.nextTryAt or now>=entry.nextTryAt) and value<priority then
             index,priority=i,value
@@ -395,6 +425,11 @@ function Communication:Pump()
     finishEntry(self,index,true)
     self.backoff,self.retryAt,self.lastSendError=0,0,nil
     self.stats.sent=self.stats.sent+1
+end
+function Communication:Pump()
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    runPump(self)
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('comm.pump', debugprofilestop() - t0) end
 end
 
 function Communication:SendTest()
@@ -838,11 +873,20 @@ function Communication:SendLocalSpec(forceOnQuery)
     return false
 end
 
-function Communication:OnAddonMessage(prefix, message, channel, sender)
-    if not IsOurMessagePrefix(prefix) or channel ~= "GUILD" or type(message) ~= "string" then
-        return
+local function recordCompleted(key, now, kind)
+    if completedCount >= CACHE_LIMIT then
+        local oldestKey, oldestTime
+        for k, v in pairs(completed) do if not oldestTime or v.time < oldestTime then oldestKey, oldestTime = k, v.time end end
+        if oldestKey ~= nil then
+            completed[oldestKey] = nil
+            completedCount = math.max(0, completedCount - 1)
+        end
     end
+    if not completed[key] then completedCount = completedCount + 1 end
+    completed[key] = { time = now, kind = kind }
+end
 
+local function receiveAddonMessage(self, message, sender)
     if type(sender) ~= "string" or sender == "" or #sender > 128 then
         return
     end
@@ -853,7 +897,11 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
         return
     end
 
-    self:RecordRosterPresence(sender)
+    EnsurePresenceGuild(self)
+    if not seenSenders[sender] then
+        self:RecordRosterPresence(sender)
+        if self.presenceGuild ~= '' then seenSenders[sender] = true end
+    end
     if message == 'OKP^QUERY' then
         self:SendLocalSpec(true)
         local now = GetTime()
@@ -892,11 +940,11 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     if message:sub(1, 4) == "GF2^" then
         local kind, id, part, count, encoded = message:match("^GF2%^([A-Z]+)%^(%d+%-%d+%-%d+)%^(%d+)%^(%d+)%^([0-9A-F]*)$")
         part, count = tonumber(part), tonumber(count)
-        local payload = encoded and Decode(encoded)
+        local encLen = encoded and #encoded or -1
         if not kind or not VALID_TYPES[kind] or #id > 32 or not part or not count
             or count < 1 or count > MAX_PARTS or part < 1 or part > count
-            or not payload or #payload > PART_BYTES
-            or (part < count and #payload ~= PART_BYTES) then
+            or encLen < 0 or encLen % 2 ~= 0 or encLen > PART_BYTES * 2
+            or (part < count and encLen ~= PART_BYTES * 2) then
             self.stats.invalid = self.stats.invalid + 1
             return
         end
@@ -904,29 +952,47 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
         Prune(now)
         local key = sender .. "\001" .. id
         if completed[key] then return end
+        local payload = Decode(encoded)
+        if not payload then
+            self.stats.invalid = self.stats.invalid + 1
+            return
+        end
+        if part == 1 then
+            local filter = self.part1Filters and self.part1Filters[kind]
+            if type(filter) == 'function' and filter(payload, sender) == false then
+                if assemblies[key] then
+                    assemblies[key] = nil
+                    assemblyCount = math.max(0, assemblyCount - 1)
+                end
+                recordCompleted(key, now, kind)
+                return
+            end
+        end
         local item = assemblies[key]
         if not item then
-            if Count(assemblies) >= MAX_ASSEMBLIES then self.stats.invalid = self.stats.invalid + 1; return end
+            if assemblyCount >= MAX_ASSEMBLIES then self.stats.invalid = self.stats.invalid + 1; return end
             item = { kind = kind, count = count, time = now, parts = {}, received = 0 }
             assemblies[key] = item
+            assemblyCount = assemblyCount + 1
         elseif item.kind ~= kind or item.count ~= count then
             assemblies[key] = nil
+            assemblyCount = math.max(0, assemblyCount - 1)
             self.stats.invalid = self.stats.invalid + 1
             return
         end
         if item.parts[part] then
-            if item.parts[part] ~= payload then assemblies[key] = nil; self.stats.invalid = self.stats.invalid + 1 end
+            if item.parts[part] ~= payload then
+                assemblies[key] = nil
+                assemblyCount = math.max(0, assemblyCount - 1)
+                self.stats.invalid = self.stats.invalid + 1
+            end
             return
         end
         item.parts[part] = payload
         item.received = item.received + 1
         if item.received ~= count then return end
         assemblies[key] = nil
-        if Count(completed) >= CACHE_LIMIT then
-            local oldestKey, oldestTime
-            for k, v in pairs(completed) do if not oldestTime or v.time < oldestTime then oldestKey, oldestTime = k, v.time end end
-            completed[oldestKey] = nil
-        end
+        assemblyCount = math.max(0, assemblyCount - 1)
         payload = table.concat(item.parts)
         local handler = self.handlers[kind]
         if handler then
@@ -937,7 +1003,7 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
                 return
             end
         end
-        completed[key] = { time = now, kind = kind }
+        recordCompleted(key, now, kind)
         self.stats.received = self.stats.received + 1
         return
     end
@@ -954,6 +1020,15 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     elseif kind == "ACK" and target == me and id == self.lastTestID then
         Print(T("Отримано ACK від ") .. sender .. T(". Двосторонній обмін працює."))
     end
+end
+
+function Communication:OnAddonMessage(prefix, message, channel, sender)
+    if not IsOurMessagePrefix(prefix) or channel ~= "GUILD" or type(message) ~= "string" then
+        return
+    end
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    receiveAddonMessage(self, message, sender)
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('comm.recv', debugprofilestop() - t0) end
 end
 
 function Communication:HandleCommand(command)

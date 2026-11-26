@@ -666,7 +666,7 @@ local function pumpRelay(scheduled,entries,kind,validation,encodeEntry)
         end
     end
 end
-if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
+local function runOrdersTick()
     connect(); if not active then return end
     local pendingTallies=type(scope.migrationPendingTallies)=='table' and scope.migrationPendingTallies[identity]
     if type(pendingTallies)=='table' and OldKraken.Database and type(OldKraken.Database.IsValidWorkshopTally)=='function' then
@@ -730,6 +730,11 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
     end
     pumpRelay(resultDirty,scope.orderResults,'WORESULT','result',resultPayload)
     pumpRelay(resultRelayDirty,scope.orderResultRelays,'WORESR','result',resultPayload)
+end
+if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    runOrdersTick()
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.orders', debugprofilestop() - t0) end
 end) end
 
 local function button(parent,label,x,y,width,callback,variant,options)

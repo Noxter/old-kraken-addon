@@ -115,19 +115,27 @@ local applicationBadges = {
 
 local OFFLINE_APPLICATION_TTL = 300
 local people, guildRosterLoaded, ownerOfflineSince, offlinePruneTimerPending = {}, false, {}, false
+local peopleDirty = false
 local refreshPeople
 -- The model receives the owner in the identity form ("Name Surname"), while the
 -- guild roster is keyed by another representation ("Name-Realm"), so a direct
 -- lookup misses and the owner looks offline. Compare normalised parts instead.
 -- No realm on either side is not a match: two characters may share a name on
 -- different realms, and a false match could prune a live application.
+local ownerKeyCache, ownerKeyCount = {}, 0
 local function ownerKey(name)
     if type(name) ~= 'string' then return nil end
+    local cached = ownerKeyCache[name]
+    if cached ~= nil then return cached or nil end
     local character, realm = name:match('^([^-%s]+)[%-%s](.+)$')
-    if not character or character == '' or not realm or realm == '' then return nil end
-    return character .. '\1' .. realm:gsub('%-', ' ')
+    local res = (character and character ~= '' and realm and realm ~= '') and (character .. '\1' .. realm:gsub('%-', ' ')) or false
+    if ownerKeyCount >= 2048 then ownerKeyCache, ownerKeyCount = {}, 0 end
+    ownerKeyCache[name] = res
+    ownerKeyCount = ownerKeyCount + 1
+    return res or nil
 end
 local indexedPeople, peopleIndex
+local partyPeople, partyPeopleIndex = {}, {}
 local function ownerRecords()
     if indexedPeople == people then return peopleIndex end
     indexedPeople, peopleIndex = people, {}
@@ -139,9 +147,12 @@ local function ownerRecords()
 end
 local function ownerRecord(owner)
     if type(owner) ~= 'string' or owner == '' then return nil end
-    local rec = people[owner]
+    local rec = partyPeople[owner]
     if rec then return rec end
     local key = ownerKey(owner)
+    if key and partyPeopleIndex[key] then return partyPeopleIndex[key] end
+    rec = people[owner]
+    if rec then return rec end
     if not key then return nil end
     return ownerRecords()[key]
 end
@@ -229,73 +240,99 @@ local function pruneOfflineApplications()
     end
     if changed then Finder:Changed() end
 end
-refreshPeople = function()
-    local nextPeople, rosterCount = {}, 0
-    local nextPeopleIndex = {}
-    if type(GetNumGuildMembers) == 'function' and type(GetGuildRosterInfo) == 'function' then
-        local ok, count = pcall(GetNumGuildMembers)
-        if ok and type(count) == 'number' then
-            rosterCount = count
-            for i = 1, count do
-                pcall(function()
-                    local name, _, _, level, _, zone, _, _, isOnline, _, class = GetGuildRosterInfo(i)
-                    if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(level) or issecretvalue(class)) then return end
-                    if type(name) == 'string' and name ~= '' then
-                        local rec = {level=tonumber(level), class=class}
-                        if type(zone) == 'string' and zone ~= '' and not (type(issecretvalue) == 'function' and issecretvalue(zone)) then
-                            rec.zone = zone
+local function runRefreshPeople(partyOnly)
+    local hasSecret = type(issecretvalue) == 'function'
+    if not (partyOnly and guildRosterLoaded) then
+        local nextPeople, nextPeopleIndex = {}, {}
+        local rosterCount = 0
+        if type(GetNumGuildMembers) == 'function' and type(GetGuildRosterInfo) == 'function' then
+            local ok, count = pcall(GetNumGuildMembers)
+            if ok and type(count) == 'number' then
+                rosterCount = count
+                for i = 1, count do
+                    local got, name, _, _, level, _, zone, _, _, isOnline, _, class = pcall(GetGuildRosterInfo, i)
+                    if got and (not hasSecret or (not issecretvalue(name) and not issecretvalue(level) and not issecretvalue(class))) then
+                        if type(name) == 'string' and name ~= '' then
+                            local rec = {level=tonumber(level), class=class}
+                            if type(zone) == 'string' and zone ~= '' and (not hasSecret or not issecretvalue(zone)) then
+                                rec.zone = zone
+                            end
+                            if (not hasSecret or not issecretvalue(isOnline)) and type(isOnline) == 'boolean' then
+                                rec.online = isOnline
+                            end
+                            nextPeople[name] = rec
+                            local key = ownerKey(name)
+                            if key then nextPeopleIndex[key] = rec end
                         end
-                        if not (type(issecretvalue) == 'function' and issecretvalue(isOnline)) and type(isOnline) == 'boolean' then
-                            rec.online = isOnline
-                        end
-                        nextPeople[name] = rec
-                        local key = ownerKey(name)
-                        if key then nextPeopleIndex[key] = rec end
                     end
-                end)
+                end
             end
         end
+        guildRosterLoaded = rosterCount > 0
+        peopleDirty = false
+        people = nextPeople
+        indexedPeople, peopleIndex = nextPeople, nextPeopleIndex
     end
-    guildRosterLoaded = rosterCount > 0
+    local nextPartyPeople, nextPartyIndex = {}, {}
     if type(UnitName) == 'function' and type(UnitClass) == 'function' and type(UnitLevel) == 'function' then
+        local basePeople = people
+        local baseIndex = (indexedPeople == people and peopleIndex) or ownerRecords()
         local units = {'player'}
         local raid = false
         if type(IsInRaid) == 'function' then
             local ok, value = pcall(IsInRaid)
-            if ok and not (type(issecretvalue) == 'function' and issecretvalue(value)) then raid = value and true or false end
+            if ok and (not hasSecret or not issecretvalue(value)) then raid = value and true or false end
         end
-        for i = 1, raid and 40 or 4 do units[#units + 1] = (raid and 'raid' or 'party') .. i end
+        local inParty = true
+        if not raid and type(IsInGroup) == 'function' then
+            local ok, value = pcall(IsInGroup)
+            if ok and (not hasSecret or not issecretvalue(value)) then inParty = value and true or false end
+        end
+        if raid then
+            for i = 1, 40 do units[#units + 1] = 'raid' .. i end
+        elseif inParty then
+            for i = 1, 4 do units[#units + 1] = 'party' .. i end
+        end
         for _, unit in ipairs(units) do
-            pcall(function()
-                local name, surname = UnitName(unit)
-                local _, class = UnitClass(unit)
-                local level = UnitLevel(unit)
-                if type(issecretvalue) == 'function' and (issecretvalue(name) or issecretvalue(surname) or issecretvalue(class) or issecretvalue(level)) then return end
-                if type(name) ~= 'string' or name == '' then return end
+            local okN, name, surname = pcall(UnitName, unit)
+            local okC, _, class = pcall(UnitClass, unit)
+            local okL, level = pcall(UnitLevel, unit)
+            if okN and okC and okL
+                and (not hasSecret or (not issecretvalue(name) and not issecretvalue(surname) and not issecretvalue(class) and not issecretvalue(level)))
+                and type(name) == 'string' and name ~= '' then
                 if type(surname) == 'string' and surname ~= '' then name = name .. ' ' .. surname end
                 local key = ownerKey(name)
-                local prev = nextPeople[name] or (key and nextPeopleIndex[key])
+                local prev = basePeople[name] or (key and baseIndex[key])
                 local isConnected
                 if type(UnitIsConnected) == 'function' then
                     local ok, connected = pcall(UnitIsConnected, unit)
-                    if ok and not (type(issecretvalue) == 'function' and issecretvalue(connected)) and type(connected) == 'boolean' then
+                    if ok and (not hasSecret or not issecretvalue(connected)) and type(connected) == 'boolean' then
                         isConnected = connected
                     end
                 end
                 local online = prev and prev.online
                 if isConnected == true then online = true
                 elseif isConnected == false and online ~= true then online = false end
-                local rec = prev or {}
-                rec.class = class or rec.class
-                rec.level = tonumber(level) or rec.level
-                rec.online = online
-                rec.zone = rec.zone or (prev and prev.zone)
-                nextPeople[name] = rec
-                if key then nextPeopleIndex[key] = rec end
-            end)
+                local rec = {
+                    class = class or (prev and prev.class),
+                    level = tonumber(level) or (prev and prev.level),
+                    online = online,
+                    zone = prev and prev.zone,
+                }
+                nextPartyPeople[name] = rec
+                if key then nextPartyIndex[key] = rec end
+            end
         end
     end
-    people = nextPeople
+    partyPeople, partyPeopleIndex = nextPartyPeople, nextPartyIndex
+end
+local function refreshPeopleMode(partyOnly)
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    runRefreshPeople(partyOnly)
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('gf.people', debugprofilestop() - t0) end
+end
+refreshPeople = function()
+    refreshPeopleMode(false)
 end
 
 local CLASS_NAMES = {
@@ -2286,7 +2323,7 @@ if OldKraken.UIHub then
         return window
     end)
 end
-local peopleDirty=false
+peopleDirty=false
 local scheduleRefreshPending=false
 local offlineTrackingRefreshPending=false
 local function scheduleRefresh()
@@ -2294,7 +2331,7 @@ local function scheduleRefresh()
     if not ((window and window:IsShown()) or (requestsWindow and requestsWindow:IsShown())) then return end
     local function flush()
         scheduleRefreshPending=false
-        if (window and window:IsShown()) or (requestsWindow and requestsWindow:IsShown()) then if peopleDirty then refreshPeople(); peopleDirty=false end; refresh(); refreshRequests() end
+        if (window and window:IsShown()) or (requestsWindow and requestsWindow:IsShown()) then if peopleDirty then refreshPeople(false); peopleDirty=false end; refresh(); refreshRequests() end
     end
     if C_Timer and C_Timer.After then scheduleRefreshPending=true; C_Timer.After(0.15,flush) else flush() end
 end
@@ -2304,7 +2341,7 @@ OldKraken:On('GROUP_FINDER_CHANGED', function(group)
     if group and group.owner ~= Finder.identity and not (window and window:IsShown()) and not offlineTrackingRefreshPending then
         local function updateOfflineTracking()
             offlineTrackingRefreshPending = false
-            refreshPeople()
+            if not guildRosterLoaded or peopleDirty then refreshPeople(false) end
             pruneOfflineApplications()
         end
         if C_Timer and type(C_Timer.After) == 'function' then
@@ -2317,12 +2354,21 @@ end)
 local peopleEvents = CreateFrame('Frame')
 peopleEvents:RegisterEvent('GUILD_ROSTER_UPDATE')
 peopleEvents:RegisterEvent('GROUP_ROSTER_UPDATE')
-peopleEvents:SetScript('OnEvent', function()
-    peopleDirty = true
-    -- Keep the offline window continuous even while the group page is hidden.
-    if next(Finder.groups or {}) or next(Finder.pending or {}) then
-        refreshPeople()
-        pruneOfflineApplications()
+peopleEvents:SetScript('OnEvent', function(_, event)
+    if event == 'GROUP_ROSTER_UPDATE' and guildRosterLoaded then
+        if next(Finder.groups or {}) or next(Finder.pending or {}) then
+            refreshPeopleMode(true)
+            pruneOfflineApplications()
+        else
+            peopleDirty = true
+        end
+    else
+        peopleDirty = true
+        -- Keep the offline window continuous even while the group page is hidden.
+        if next(Finder.groups or {}) or next(Finder.pending or {}) then
+            refreshPeopleMode(false)
+            pruneOfflineApplications()
+        end
     end
     scheduleRefresh()
 end)
