@@ -9,12 +9,12 @@ end
 local Orders={}
 OldKraken.WorkshopOrders=Orders
 local comm,codec=OldKraken.Communication,OldKraken.GroupFinder
-local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування',[185]='Кулінарія',[129]='Перша допомога',[186]='Гірництво'}
-local professionIDs={171,164,165,197,202,333,185,129,186}
+local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування'}
+local professionIDs={171,164,165,197,202,333}
 local materialNames={customer='Замовника',crafter='Майстра',mixed='Спільні'}
 local statusNames={open='Шукає майстра',assigned='У роботі',delivered='Передано',done='Виконано',cancelled='Скасовано',deleted='Видалено'}
 local deadlineNames={[3600]='1 година',[21600]='6 годин',[86400]='Доба',[604800]='Тиждень'}
-local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]=136243,[333]=136244,[185]=133971,[129]=135966,[186]=136248}
+local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]=136243,[333]=136244}
 local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.35,0.88,0.53},cancelled={1,0.42,0.38},expired={1,0.58,0.25}}
 local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}

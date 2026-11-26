@@ -95,10 +95,49 @@ end
 assert(scanned==500)
 OldKraken.Workshop:RefreshNativeProfessions(); assert(scanned==500 and #timers==0)
 assert(OldKraken.Workshop:GetMemberProfessions('Member 500')[1].id==171)
--- Verify crafting -> gathering -> secondary sorting in GetMemberProfessions
+-- Verify legacy gathering/secondary IDs are filtered out while preserving crafting professions in WKPROF
 handlers.WKPROF('Mixed Guy','GUILD',OldKraken.GroupFinder._pack({1700000000,4,185,300,300,182,225,300,333,250,300,171,300,300}))
 local sortedProfs = OldKraken.Workshop:GetMemberProfessions('Mixed Guy')
-assert(#sortedProfs == 4 and sortedProfs[1].id == 171 and sortedProfs[2].id == 333 and sortedProfs[3].id == 182 and sortedProfs[4].id == 185)
+assert(#sortedProfs == 2 and sortedProfs[1].id == 171 and sortedProfs[2].id == 333)
+-- Verify all 6 legacy IDs individually and mixed with crafting
+for _, legacyID in ipairs({186, 182, 393, 185, 129, 356}) do
+    local who = 'Legacy ' .. legacyID
+    handlers.WKPROF(who,'GUILD',OldKraken.GroupFinder._pack({1700000001,2,legacyID,300,300,164,250,300}))
+    local p = OldKraken.Workshop:GetMemberProfessions(who)
+    assert(#p == 1 and p[1].id == 164)
+end
+-- Legacy-only WKPROF must not hide native crafting professions
+handlers.WKPROF('Member 500','GUILD',OldKraken.GroupFinder._pack({1700000002,2,185,300,300,186,300,300}))
+local nativeFallback = OldKraken.Workshop:GetMemberProfessions('Member 500')
+assert(#nativeFallback == 1 and nativeFallback[1].id == 171 and nativeFallback[1].native == true)
+assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].records['Member 500'].legacyFiltered == true)
+local masters171 = OldKraken.Workshop:GetProfessionMasters(171)
+local found500 = false
+for _, m in ipairs(masters171) do if m.name == 'Member 500' and m.native then found500 = true end end
+assert(found500)
+-- Authentic empty WKPROF (n=0) still overrides native professions
+handlers.WKPROF('Member 499','GUILD',OldKraken.GroupFinder._pack({1700000003,0}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Member 499') == 0)
+-- Invalid WKPROF payloads (unknown ID, duplicate ID, invalid rank/maximum) are rejected completely
+handlers.WKPROF('Bad Unknown','GUILD',OldKraken.GroupFinder._pack({1700000004,2,999999,300,300,171,300,300}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Unknown') == 0)
+handlers.WKPROF('Bad Dup','GUILD',OldKraken.GroupFinder._pack({1700000004,2,171,300,300,171,300,300}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Dup') == 0)
+handlers.WKPROF('Bad Rank','GUILD',OldKraken.GroupFinder._pack({1700000004,1,171,0,300}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Rank') == 0)
+handlers.WKPROF('Bad Max','GUILD',OldKraken.GroupFinder._pack({1700000004,1,171,300,10000}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Max') == 0)
+-- Pre-existing SavedVariables records with legacy IDs still yield crafting professions safely
+local wsRecords = OldKraken.DB.workshop.guilds['Realm\\001Guild'].records
+wsRecords['Saved Mixed'] = {timestamp=1700000005, list={{id=185,rank=300,maximum=300},{id=186,rank=300,maximum=300},{id=202,rank=290,maximum=300}}}
+local savedMixed = OldKraken.Workshop:GetMemberProfessions('Saved Mixed')
+assert(#savedMixed == 1 and savedMixed[1].id == 202 and savedMixed[1].rank == 290)
+wsRecords['Member 498'] = {timestamp=1700000006, list={{id=185,rank=300,maximum=300},{id=186,rank=300,maximum=300}}}
+local savedLegacyOnly = OldKraken.Workshop:GetMemberProfessions('Member 498')
+assert(#savedLegacyOnly == 1 and savedLegacyOnly[1].id == 171 and savedLegacyOnly[1].native == true)
+local found498 = false
+for _, m in ipairs(OldKraken.Workshop:GetProfessionMasters(171)) do if m.name == 'Member 498' and m.native then found498 = true end end
+assert(found498)
 ''')
 for name in ['StatusOnline','StatusOffline']:
     asset=ROOT/'Media'/f'{name}.tga'

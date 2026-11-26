@@ -9,7 +9,7 @@ end
 local Recipes={}
 OldKraken.WorkshopRecipes=Recipes
 local comm,codec=OldKraken.Communication,OldKraken.GroupFinder
-local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування',[185]='Кулінарія',[129]='Перша допомога',[186]='Гірництво',[182]='Травництво',[393]='Свіжування',[356]='Риболовля'}
+local professionNames={[171]='Алхімія',[164]='Ковальство',[165]='Шкірництво',[197]='Кравецтво',[202]='Інженерія',[333]='Зачарування'}
 local active,identity,profile,scope,people=false,nil,nil,nil,{}
 local pendingLearned,learnAttempts,learnWarned={},{},{}
 local recipeCatalog,catalogCursor,catalogPending,catalogSize=nil,nil,false,0
@@ -38,15 +38,12 @@ local initialScanStatus = 'Відкрийте свої професії; шук�
 local render, matches
 local function usable(v,t) return not (type(issecretvalue)=='function' and issecretvalue(v)) and type(v)==t end
 local function integer(n,lo,hi) return usable(n,'number') and n==n and n%1==0 and n>=lo and n<=hi end
-local ignoredProfessionsFallback={[185]=true,[129]=true,[356]=true,[186]=true,[182]=true,[393]=true}
+local ignoredProfessions={[185]=true,[129]=true,[356]=true,[186]=true,[182]=true,[393]=true}
 local function isIgnoredProfession(prof)
-    if not prof then return false end
-    local workshop=OldKraken.Workshop
-    if workshop and (type(workshop.IsSecondaryProfession)=='function' or type(workshop.IsGatheringProfession)=='function') then
-        return (type(workshop.IsSecondaryProfession)=='function' and workshop:IsSecondaryProfession(prof))
-            or (type(workshop.IsGatheringProfession)=='function' and workshop:IsGatheringProfession(prof))
-    end
-    return ignoredProfessionsFallback[prof]==true
+    return prof~=nil and ignoredProfessions[prof]==true
+end
+local function knownProfessionID(prof)
+    return prof~=nil and (professionNames[prof]~=nil or ignoredProfessions[prof]==true)
 end
 local function resolveRecipeProfession(id)
     local prof
@@ -54,16 +51,16 @@ local function resolveRecipeProfession(id)
         if type(C_TradeSkillUI.GetProfessionInfoByRecipeID)=='function' then
             local ok,data=pcall(C_TradeSkillUI.GetProfessionInfoByRecipeID,id)
             if ok and usable(data,'table') then
-                if integer(data.parentProfessionID,1,1000000) and professionNames[data.parentProfessionID] then prof=data.parentProfessionID
-                elseif integer(data.professionID,1,1000000) and professionNames[data.professionID] then prof=data.professionID end
+                if integer(data.parentProfessionID,1,1000000) and knownProfessionID(data.parentProfessionID) then prof=data.parentProfessionID
+                elseif integer(data.professionID,1,1000000) and knownProfessionID(data.professionID) then prof=data.professionID end
             end
         end
         if not prof and type(C_TradeSkillUI.GetTradeSkillLineForRecipe)=='function' then
             local ok,line=pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe,id)
-            if ok and integer(line,1,1000000) and professionNames[line] then prof=line end
+            if ok and integer(line,1,1000000) and knownProfessionID(line) then prof=line end
         end
     end
-    if not prof and recipeCatalog and type(recipeCatalog[id])=='table' and professionNames[recipeCatalog[id].profession] then
+    if not prof and recipeCatalog and type(recipeCatalog[id])=='table' and knownProfessionID(recipeCatalog[id].profession) then
         prof=recipeCatalog[id].profession
     end
     return prof
@@ -964,13 +961,11 @@ local function ensureAvailableTypes()
     end
     local job={rev=indexRevision,itemRev=itemDataRevision,key=contextKey}
     typeScanJob=job
-    local present,workshop={},OldKraken.Workshop
+    local present={}
     local targetOwner,targetProf,targetSelect,targetPicker=viewOwner,professionContext,selectRecipe,pickerProfession
     scanCachedRecords(function(owner,r)
         if not targetOwner or owner==targetOwner then
-            local isSecondary=workshop and workshop.IsSecondaryProfession and workshop:IsSecondaryProfession(r and r.profession)
             if validRecord(r) and (not targetProf or r.profession==targetProf)
-                and (targetProf or targetOwner or not isSecondary)
                 and (not targetSelect or ((targetPicker==0 or r.profession==targetPicker) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession)))
                 and not isBindOnPickup(r) then
                 local cat=classifyRecipe(r)
@@ -1167,9 +1162,7 @@ render=function()
         local workshop=OldKraken.Workshop
         if workshop then
             for id in pairs(professionNames) do
-                local isGathering=workshop.IsGatheringProfession and workshop:IsGatheringProfession(id)
-                local isSecondary=workshop.IsSecondaryProfession and workshop:IsSecondaryProfession(id)
-                if (not professionContext and not isGathering and not isSecondary) or professionContext==id then
+                if not professionContext or professionContext==id then
                     for _,entry in ipairs(workshop:GetProfessionMasters(id)) do entry.profession=id; masters[#masters+1]=entry end
                 end
             end
@@ -1233,11 +1226,8 @@ render=function()
     end
     local list,grouped,groupCounts={},{},{}
     local byRecipe=not selectRecipe and not viewOwner and not (filter and (filter:find('^item:') or filter:find('^recipe:')))
-    local workshop=OldKraken.Workshop
     for _,entry in pairs(resultSet) do
-        local isSecondary=workshop and workshop.IsSecondaryProfession and workshop:IsSecondaryProfession(entry.record and entry.record.profession)
         if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
-            and (professionContext or viewOwner or not isSecondary)
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
             and (not showTypeFilter or matchesRecipeType(classifyRecipe(entry.record),selectedType))

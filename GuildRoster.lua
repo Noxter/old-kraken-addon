@@ -572,8 +572,8 @@ local function CreateRosterWindow(parent)
     CreateColumnHeader(frame, T("РАНГ"), "rank", 240, 70)
     CreateColumnHeader(frame, T("РІВ."), "level", 320, 44)
     CreateColumnHeader(frame, T("КЛАС"), "class", 374, 80)
-    CreateColumnHeader(frame, T("ЛОКАЦІЯ"), "zone", 464, 160)
-    CreateColumnHeader(frame, T("ПРОФЕСІЇ"), nil, 634, 110)
+    CreateColumnHeader(frame, T("ЛОКАЦІЯ"), "zone", 464, 200)
+    CreateColumnHeader(frame, T("ПРОФЕСІЇ"), nil, 674, 70)
     frame.addonHeader = CreateColumnHeader(frame, T("АДДОН"), nil, 754, 130)
 
     local headerDivider = frame:CreateTexture(nil, "ARTWORK")
@@ -663,9 +663,9 @@ local function CreateRosterWindow(parent)
 
         if OldKraken.UIStyle.Panel then
             OldKraken.UIStyle.Panel(panel, 14, -50, 872, 108)
-            OldKraken.UIStyle.Panel(panel, 14, -172, 426, 194)
-            OldKraken.UIStyle.Panel(panel, 460, -172, 426, 194)
-            OldKraken.UIStyle.Panel(panel, 14, -380, 872, 74)
+            OldKraken.UIStyle.Panel(panel, 14, -172, 426, 138)
+            OldKraken.UIStyle.Panel(panel, 460, -172, 426, 138)
+            OldKraken.UIStyle.Panel(panel, 14, -324, 872, 74)
         end
 
         local nameText = panel:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
@@ -733,26 +733,31 @@ local function CreateRosterWindow(parent)
         panel.profEmpty = profEmpty
 
         panel.profRows = {}
-        for i = 1, 5 do
+        local rowHoverCol = colors.actionBlue or {0.24, 0.38, 0.75, 0.24}
+        for i = 1, 2 do
             local prow = CreateFrame('Button', nil, panel)
-            prow:SetSize(390, 26)
-            prow:SetPoint('TOPLEFT', panel, 'TOPLEFT', 478, -216 - (i - 1) * 28)
+            prow:SetSize(390, 32)
+            prow:SetPoint('TOPLEFT', panel, 'TOPLEFT', 478, -218 - (i - 1) * 38)
+            local phighlight = prow:CreateTexture(nil, 'HIGHLIGHT')
+            phighlight:SetAllPoints(prow)
+            phighlight:SetColorTexture(rowHoverCol[1], rowHoverCol[2], rowHoverCol[3], 0.16)
+            prow:SetHighlightTexture(phighlight)
             prow.icon = prow:CreateTexture(nil, 'ARTWORK')
-            prow.icon:SetSize(20, 20)
-            prow.icon:SetPoint('LEFT', prow, 'LEFT', 0, 0)
+            prow.icon:SetSize(24, 24)
+            prow.icon:SetPoint('LEFT', prow, 'LEFT', 2, 0)
             prow.text = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-            prow.text:SetPoint('LEFT', prow.icon, 'RIGHT', 8, 0)
-            prow.text:SetWidth(195)
+            prow.text:SetPoint('LEFT', prow.icon, 'RIGHT', 10, 0)
+            prow.text:SetWidth(190)
             prow.text:SetJustifyH('LEFT')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.text, 13) end
             prow.value = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-            prow.value:SetPoint('RIGHT', prow, 'RIGHT', -2, 0)
-            prow.value:SetWidth(165)
+            prow.value:SetPoint('RIGHT', prow, 'RIGHT', -4, 0)
+            prow.value:SetWidth(160)
             prow.value:SetJustifyH('RIGHT')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.value, 13) end
             if colors.mutedText then prow.value:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
             prow:SetScript('OnClick', function(self)
-                if self.memberName and self.professionID and not self.isGathering and OldKraken.WorkshopRecipes then
+                if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
                     local targetMember = panel.member
                     OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName, self.professionID, function()
                         Roster:Show()
@@ -768,7 +773,7 @@ local function CreateRosterWindow(parent)
             local b = CreateFrame('Button', nil, panel, 'UIPanelButtonTemplate')
             OldKraken.UIStyle.Button(b, variant, {rounded = true})
             b:SetSize(width, 34)
-            b:SetPoint('TOPLEFT', panel, 'TOPLEFT', x, -400)
+            b:SetPoint('TOPLEFT', panel, 'TOPLEFT', x, -344)
             b:SetText(label)
             b:SetScript('OnClick', onClick)
             return b
@@ -928,21 +933,13 @@ RenderMemberProfile = function(member)
         panel.profEmpty:Show()
     else
         panel.profEmpty:Hide()
-        local isGathering = function(id)
-            return OldKraken.Workshop and OldKraken.Workshop.IsGatheringProfession and OldKraken.Workshop:IsGatheringProfession(id)
-        end
-        local isSecondary = function(id)
-            return OldKraken.Workshop and OldKraken.Workshop.IsSecondaryProfession and OldKraken.Workshop:IsSecondaryProfession(id)
-        end
-        for i = 1, math.min(5, #professions) do
+        for i = 1, math.min(2, #professions) do
             local p = professions[i]
             local prow = panel.profRows[i]
             local pname, picon = OldKraken.Workshop:ProfessionInfo(p.id)
-            local nonCraft = isGathering(p.id) or isSecondary(p.id)
-            if not nonCraft and not firstCraftID then firstCraftID = p.id end
+            if not firstCraftID then firstCraftID = p.id end
             prow.memberName = member.name
             prow.professionID = p.id
-            prow.isGathering = nonCraft
             prow.icon:SetTexture(picon or 134400)
             local detail = p.native and T('Із ігрового ростера') or (p.rank and (tostring(p.rank) .. '/' .. tostring(p.maximum or '?')) or '')
             prow.text:SetText(pname)
@@ -962,11 +959,11 @@ RenderMemberProfile = function(member)
     if type(panel.orderButton.SetShown) == 'function' then panel.orderButton:SetShown(not selfMember) end
     if type(panel.recipesButton.ClearAllPoints) == 'function' then
         panel.recipesButton:ClearAllPoints()
-        panel.recipesButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 32 or 350, -400)
+        panel.recipesButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 32 or 350, -344)
     end
     if type(panel.copyButton.ClearAllPoints) == 'function' then
         panel.copyButton:ClearAllPoints()
-        panel.copyButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 222 or 730, -400)
+        panel.copyButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 222 or 730, -344)
     end
 end
 
@@ -1034,8 +1031,8 @@ local function CreateRow(index, parent)
         { x = 240, width = 70 },
         { x = 320, width = 44 },
         { x = 374, width = 80 },
-        { x = 464, width = 160 },
-        { x = 634, width = 110 },
+        { x = 464, width = 200 },
+        { x = 674, width = 70 },
         { x = 766, width = 104 },
     }
 
@@ -1083,16 +1080,13 @@ local function CreateRow(index, parent)
         row.cellHovers[cellIndex] = hover
     end
 
-    local function isGathering(id)
-        return OldKraken.Workshop and OldKraken.Workshop.IsGatheringProfession and OldKraken.Workshop:IsGatheringProfession(id)
-    end
     row.professions = {}
-    for i=1,5 do
+    for i=1,2 do
         local icon=CreateFrame('Button',nil,row)
-        icon:SetSize(18,18); icon:SetPoint('LEFT',row,'LEFT',634+(i-1)*22,0)
+        icon:SetSize(20,20); icon:SetPoint('LEFT',row,'LEFT',674+(i-1)*24,0)
         icon.texture=icon:CreateTexture(nil,'ARTWORK'); icon.texture:SetAllPoints(icon)
         icon:SetScript('OnClick',function(self)
-            if self.memberName and self.professionID and not isGathering(self.professionID) and OldKraken.WorkshopRecipes then
+            if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
                 OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName,self.professionID)
             end
         end)
@@ -1320,7 +1314,6 @@ function Roster:RenderVisible()
         local zoneText = SafeText(member.zone)
         local locationText = offlineText and (T('Офлайн') .. ' · ' .. offlineText) or zoneText
         cells[5]:SetText(locationText)
-        cells[6]:Hide()
         row.onlineDot:SetTexture(member.isOnline and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
@@ -1337,12 +1330,6 @@ function Roster:RenderVisible()
             cells[4]:SetTextColor(1, 1, 1)
         end
 
-        if member.isOnline then
-            cells[6]:SetTextColor(0.25, 1, 0.25)
-        else
-            cells[6]:SetTextColor(0.55, 0.55, 0.55)
-        end
-
         row:Show()
         if row.versionBadge then
             if version then
@@ -1352,6 +1339,14 @@ function Roster:RenderVisible()
             end
         end
         local professions=OldKraken.Workshop and OldKraken.Workshop:GetMemberProfessions(member.name) or {}
+        if #professions==0 then
+            local muted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+            cells[6]:SetText('—')
+            if muted then cells[6]:SetTextColor(muted[1], muted[2], muted[3]) else cells[6]:SetTextColor(0.55, 0.55, 0.55) end
+            cells[6]:Show()
+        else
+            cells[6]:Hide()
+        end
         for i,icon in ipairs(row.professions) do
             local profession=professions[i]
             if profession then
