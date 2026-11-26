@@ -326,10 +326,15 @@ local function runRefreshPeople(partyOnly)
     end
     partyPeople, partyPeopleIndex = nextPartyPeople, nextPartyIndex
 end
+local lastFullPeopleAt, lastPartyPeopleAt, peopleRefreshSeq = -60, -60, 0
 local function refreshPeopleMode(partyOnly)
     local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     runRefreshPeople(partyOnly)
-    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('gf.people', debugprofilestop() - t0) end
+    peopleRefreshSeq = peopleRefreshSeq + 1
+    local now = type(GetTime) == 'function' and GetTime() or 0
+    local isParty = partyOnly and guildRosterLoaded
+    if isParty then lastPartyPeopleAt = now else lastFullPeopleAt = now; lastPartyPeopleAt = now end
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord(isParty and 'gf.people.party' or 'gf.people.full', debugprofilestop() - t0) end
 end
 refreshPeople = function()
     refreshPeopleMode(false)
@@ -2354,9 +2359,30 @@ end)
 local peopleEvents = CreateFrame('Frame')
 peopleEvents:RegisterEvent('GUILD_ROSTER_UPDATE')
 peopleEvents:RegisterEvent('GROUP_ROSTER_UPDATE')
+local pendingFullPeopleTimer, pendingPartyPeopleTimer = false, false
+local PEOPLE_THROTTLE_SECONDS = 2.0
+local PARTY_THROTTLE_SECONDS = 0.5
 peopleEvents:SetScript('OnEvent', function(_, event)
+    local hasTimer = C_Timer and type(C_Timer.After) == 'function'
+    local now = type(GetTime) == 'function' and GetTime() or 0
     if event == 'GROUP_ROSTER_UPDATE' and guildRosterLoaded then
         if next(Finder.groups or {}) or next(Finder.pending or {}) then
+            if hasTimer and (now - lastPartyPeopleAt) < PARTY_THROTTLE_SECONDS then
+                if not pendingPartyPeopleTimer then
+                    pendingPartyPeopleTimer = true
+                    local scheduledSeq = peopleRefreshSeq
+                    local delay = math.max(0.05, PARTY_THROTTLE_SECONDS - (now - lastPartyPeopleAt))
+                    C_Timer.After(delay, function()
+                        pendingPartyPeopleTimer = false
+                        if peopleRefreshSeq == scheduledSeq then
+                            refreshPeopleMode(true)
+                            pruneOfflineApplications()
+                            scheduleRefresh()
+                        end
+                    end)
+                end
+                return
+            end
             refreshPeopleMode(true)
             pruneOfflineApplications()
         else
@@ -2366,6 +2392,21 @@ peopleEvents:SetScript('OnEvent', function(_, event)
         peopleDirty = true
         -- Keep the offline window continuous even while the group page is hidden.
         if next(Finder.groups or {}) or next(Finder.pending or {}) then
+            if guildRosterLoaded and hasTimer and (now - lastFullPeopleAt) < PEOPLE_THROTTLE_SECONDS then
+                if not pendingFullPeopleTimer then
+                    pendingFullPeopleTimer = true
+                    local delay = math.max(0.1, PEOPLE_THROTTLE_SECONDS - (now - lastFullPeopleAt))
+                    C_Timer.After(delay, function()
+                        pendingFullPeopleTimer = false
+                        if peopleDirty then
+                            refreshPeopleMode(false)
+                            pruneOfflineApplications()
+                        end
+                        scheduleRefresh()
+                    end)
+                end
+                return
+            end
             refreshPeopleMode(false)
             pruneOfflineApplications()
         end

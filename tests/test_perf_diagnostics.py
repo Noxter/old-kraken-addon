@@ -548,6 +548,71 @@ def test_group_finder_people_party_only_and_index_reuse():
         peopleFrame.scripts.OnEvent(peopleFrame, 'GUILD_ROSTER_UPDATE')
         assert(rosterScans == afterShow + 1)
         assert(not finder:IsGroupHiddenByOfflineOwner(key, finder.groups[key]), 'leaving guild must clear confirmed offline guild state')
+
+        -- 5. Rapid burst of GUILD_ROSTER_UPDATE / GROUP_ROSTER_UPDATE with C_Timer.After coalesces scans without losing final leave state
+        local origAfter = C_Timer and C_Timer.After
+        local queuedTimers = {}
+        C_Timer = C_Timer or {}
+        C_Timer.After = function(delay, fn) queuedTimers[#queuedTimers + 1] = {delay = delay, fn = fn} end
+        guildCount = 1
+        local burstNow = savedNow + 700
+        GetTime = function() return burstNow end
+        peopleFrame.scripts.OnEvent(peopleFrame, 'GUILD_ROSTER_UPDATE')
+        local baseScans = rosterScans
+        for _ = 1, 10 do
+            burstNow = burstNow + 0.05
+            peopleFrame.scripts.OnEvent(peopleFrame, 'GUILD_ROSTER_UPDATE')
+        end
+        assert(rosterScans == baseScans, 'rapid GUILD_ROSTER_UPDATE burst must coalesce')
+        local batch = queuedTimers; queuedTimers = {}
+        for _, item in ipairs(batch) do item.fn() end
+        assert(rosterScans == baseScans + 1, 'deferred GUILD_ROSTER_UPDATE must run once after burst')
+
+        inGroup = true
+        partyUnits = { party1 = {'Remote', 'Realm'} }
+        burstNow = burstNow + 5
+        peopleFrame.scripts.OnEvent(peopleFrame, 'GROUP_ROSTER_UPDATE')
+        assert(not finder:IsGroupHiddenByOfflineOwner(key, finder.groups[key]))
+        inGroup = false
+        partyUnits = {}
+        for _ = 1, 10 do
+            burstNow = burstNow + 0.02
+            peopleFrame.scripts.OnEvent(peopleFrame, 'GROUP_ROSTER_UPDATE')
+        end
+        burstNow = burstNow + 1
+        local batch2 = queuedTimers; queuedTimers = {}
+        for _, item in ipairs(batch2) do item.fn() end
+        GetTime = function() return savedNow + 1050 end
+        assert(finder:IsGroupHiddenByOfflineOwner(key, finder.groups[key]), 'final party leave in burst must be applied by deferred timer')
+
+        -- 6. Overlapping party + full timers: if full runs first, stale party timer skips redundant scan
+        local perfCounts = {}
+        local origPerfEnabled = OldKraken.perfEnabled
+        local origDebugProfilestop = debugprofilestop
+        local origPerfRecord = OldKraken.PerfRecord
+        OldKraken.perfEnabled = true
+        debugprofilestop = function() return 0 end
+        OldKraken.PerfRecord = function(_, label) perfCounts[label] = (perfCounts[label] or 0) + 1 end
+        burstNow = savedNow + 1060
+        GetTime = function() return burstNow end
+        peopleFrame.scripts.OnEvent(peopleFrame, 'GUILD_ROSTER_UPDATE')
+        queuedTimers = {}
+        local fullBefore = perfCounts['gf.people.full'] or 0
+        local partyBefore = perfCounts['gf.people.party'] or 0
+        burstNow = burstNow + 0.1
+        peopleFrame.scripts.OnEvent(peopleFrame, 'GROUP_ROSTER_UPDATE') -- queues party timer
+        peopleFrame.scripts.OnEvent(peopleFrame, 'GUILD_ROSTER_UPDATE') -- queues full timer
+        assert(#queuedTimers == 2, 'expected 2 timers, got ' .. tostring(#queuedTimers))
+        local partyTimerFn, fullTimerFn = queuedTimers[1].fn, queuedTimers[2].fn
+        queuedTimers = {}
+        fullTimerFn()
+        assert((perfCounts['gf.people.full'] or 0) == fullBefore + 1, 'full timer must record gf.people.full')
+        partyTimerFn()
+        assert((perfCounts['gf.people.party'] or 0) == partyBefore, 'stale party timer must skip after newer full scan')
+        OldKraken.perfEnabled = origPerfEnabled
+        debugprofilestop = origDebugProfilestop
+        OldKraken.PerfRecord = origPerfRecord
+        C_Timer.After = origAfter
         '''
     )
 

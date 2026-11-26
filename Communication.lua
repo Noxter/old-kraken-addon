@@ -66,7 +66,7 @@ end
 
 local function Prune(now)
     if now<nextPrune then return end
-    nextPrune=now+1
+    nextPrune=now+5
     if assemblyCount == 0 and completedCount == 0 then return end
     for k, v in pairs(assemblies) do
         if now - v.time > CACHE_TTL then
@@ -123,7 +123,7 @@ local function messageTrafficKind(message)
     return 'OTHER'
 end
 
-local function recordTraffic(self, kind, field, delta)
+local function trafficBucket(self, kind)
     if not self.traffic then self.traffic = newTrafficState() end
     local byKind = self.traffic.byKind
     local b = byKind[kind]
@@ -136,6 +136,11 @@ local function recordTraffic(self, kind, field, delta)
         }
         byKind[kind] = b
     end
+    return b
+end
+
+local function recordTraffic(self, kind, field, delta)
+    local b = trafficBucket(self, kind)
     b[field] = b[field] + (delta or 1)
 end
 
@@ -941,17 +946,25 @@ local function recordCompleted(key, now, kind, filtered)
 end
 
 local function receiveAddonMessage(self, message, sender)
-    local rxKind = messageTrafficKind(message)
-    local rxBytes = #message
     if type(sender) ~= "string" or sender == "" or #sender > 128 then
         return
     end
+    local rxBytes = #message
+    local isGF2 = message:sub(1, 4) == "GF2^"
+    local kind, id, part, count, encoded, rxKind
+    if isGF2 then
+        kind, id, part, count, encoded = message:match("^GF2%^([A-Z]+)%^(%d+%-%d+%-%d+)%^(%d+)%^(%d+)%^([0-9A-F]*)$")
+        rxKind = (kind and VALID_TYPES[kind]) and kind or 'INVALID'
+    else
+        rxKind = messageTrafficKind(message)
+    end
 
-    recordTraffic(self, rxKind, 'rxFrags', 1)
-    recordTraffic(self, rxKind, 'rxBytes', rxBytes)
+    local tb = trafficBucket(self, rxKind)
+    tb.rxFrags = tb.rxFrags + 1
+    tb.rxBytes = tb.rxBytes + rxBytes
 
-    if #message > 240 then
-        recordTraffic(self, rxKind, 'rxDropped', 1)
+    if rxBytes > 240 then
+        tb.rxDropped = tb.rxDropped + 1
         if message:sub(1, 10) == 'OKP^SPEC2^' then return end
         self.stats.invalid = self.stats.invalid + 1
         return
@@ -962,7 +975,7 @@ local function receiveAddonMessage(self, message, sender)
         self:RecordRosterPresence(sender)
         if self.presenceGuild ~= '' then seenSenders[sender] = true end
     end
-    if message == 'OKP^QUERY' then
+    if not isGF2 and message == 'OKP^QUERY' then
         recordTraffic(self, rxKind, 'rxLogical', 1)
         self:SendLocalSpec(true)
         local now = GetTime()
@@ -1021,8 +1034,7 @@ local function receiveAddonMessage(self, message, sender)
         return
     end
 
-    if message:sub(1, 4) == "GF2^" then
-        local kind, id, part, count, encoded = message:match("^GF2%^([A-Z]+)%^(%d+%-%d+%-%d+)%^(%d+)%^(%d+)%^([0-9A-F]*)$")
+    if isGF2 then
         part, count = tonumber(part), tonumber(count)
         local encLen = encoded and #encoded or -1
         if not kind or not VALID_TYPES[kind] or #id > 32 or not part or not count
