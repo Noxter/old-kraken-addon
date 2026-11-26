@@ -222,10 +222,11 @@ SLASH_OLDKRAKEN1 = "/okr"        SLASH_OLDKRAKEN2 = "/oldkraken"
 
 Порядок диспетчеризації:
 
-1. `OldKraken.Communication:HandleCommand(command)` — `comm status`, `comm test`. Повертає `true` → вихід.
+1. `OldKraken.Communication:HandleCommand(command)` — `comm status`, `comm test`, `comm traffic [reset]`. Повертає `true` → вихід.
 2. `OldKraken.GroupFinderAPI:HandleCommand(command)` — лише `group api`.
-3. Локальні підкоманди: `recipes`, `orders`, `workshop`|`craft`, `events`|`calendar`, `alerts group|request|event|workshop`, `group status`, `group sync`, `group`|`groups`.
-4. Фолбеки: `refresh` → `Roster:RequestUpdate()`; **будь-яка невідома команда → відкриває ростер**.
+3. `OldKraken:HandlePerfCommand(command)` — `perf [on|off|reset|report]`.
+4. Локальні підкоманди: `recipes`, `orders`, `workshop`|`craft`, `events`|`calendar`, `alerts group|request|event|workshop`, `group status`, `group sync`, `group`|`groups`.
+5. Фолбеки: `refresh` → `Roster:RequestUpdate()`; **будь-яка невідома команда → відкриває ростер**.
 
 **Немає help-виводу.** Невідома команда тихо відкриває ростер. Якщо додаєш підкоманду — вписуй її **перед** фолбеком `else` і пам'ятай, що `Communication` перевіряється першим (не називай підкоманду `comm …`, якщо не хочеш перехоплення).
 

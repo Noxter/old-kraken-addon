@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.7-alpha.1
+## 0.5.7
 
 ### Performance & Diagnostics
 - Додано вбудований діагностичний профайлер `/okr perf [on|off|reset|report]` (`Core.lua`, `Locale.lua`, інструментація ключових обробників із мінімальним overhead при вимкненому режимі без вимірювання часу та запису метрик, а також інтеграцією `C_AddOnProfiler`).
