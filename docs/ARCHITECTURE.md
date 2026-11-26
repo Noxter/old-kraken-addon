@@ -196,9 +196,9 @@
 - Пулінг рядків: 500 членів → ≤ 21 рядок; події ростера коалесцуються; скан професій — чанки по 25.
 - Це ж файл-хост команд `/okr` (див. §11).
 
-### Minimap (`Minimap.lua`, 217 рядків)
+### Minimap (`Minimap.lua`, 300 рядків)
 
-Кнопка аддона на мінікарті; кут зберігається в `DB.settings.minimapAngle`.
+Кнопка аддона на мінікарті: за наявності `LibStub`, `LibDataBroker-1.1` і `LibDBIcon-1.0` (через `OptionalDeps` у `OldKraken.toc`) реєструється як LDB `launcher` у `DB.settings.minimap` (з міграцією `minimapAngle -> minimap.minimapPos` і відкладеним прикріпленням `groupIndicator` після `Show()` через `ensureLibDBIconButton()`). Якщо бібліотек немає або `Register` завершується помилкою, створюється власна кнопка-фолбек (`DB.settings.minimapAngle`).
 
 ### ActivityCatalog (`ActivityCatalog.lua`, 120 рядків)
 

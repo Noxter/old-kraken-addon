@@ -1,22 +1,56 @@
 local T = OldKraken.Translate or function(text) return text end
--- Minimap shortcut; its angle is stored in the addon's existing settings.
+-- Minimap shortcut; uses LibDataBroker-1.1 + LibDBIcon-1.0 when available, with a standalone button fallback.
+local LDB_NAME = 'OldKraken'
 local button
+local libDBIcon
+local initialized = false
 local communitiesButton
 local matchingGroups = 0
 local roles = {'tank', 'healer', 'dps'}
 
-local function updateMinimapVisibility()
-    if not button then return end
-    local settings = OldKraken.DB and OldKraken.DB.settings
-    if type(settings) == 'table' and settings.showMinimapButton == false then
-        button:Hide()
-    else
-        button:Show()
+local function attachGroupIndicator(targetButton)
+    if not targetButton or rawget(targetButton, 'groupIndicator') or type(targetButton.CreateTexture) ~= 'function' then return end
+    local indicator = targetButton:CreateTexture(nil, 'OVERLAY', nil, 2)
+    indicator:SetTexture('Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga')
+    indicator:SetSize(12, 12)
+    indicator:SetPoint('BOTTOMRIGHT', targetButton, 'BOTTOMRIGHT', -1, 1)
+    indicator:Hide()
+    targetButton.groupIndicator = indicator
+end
+
+local function ensureLibDBIconButton()
+    if not libDBIcon or type(libDBIcon.GetMinimapButton) ~= 'function' then return end
+    if not button then button = libDBIcon:GetMinimapButton(LDB_NAME) end
+    if button then
+        attachGroupIndicator(button)
+        local indicator = rawget(button, 'groupIndicator')
+        if indicator then
+            if matchingGroups > 0 then indicator:Show() else indicator:Hide() end
+        end
     end
 end
 
-local function updateGroupIndicator()
+local function updateMinimapVisibility()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    local show = type(settings) ~= 'table' or settings.showMinimapButton ~= false
+    if libDBIcon then
+        if type(settings) == 'table' and type(settings.minimap) == 'table' then
+            settings.minimap.hide = not show
+        end
+        if show then
+            if type(libDBIcon.Show) == 'function' then libDBIcon:Show(LDB_NAME) end
+            ensureLibDBIconButton()
+        else
+            if type(libDBIcon.Hide) == 'function' then libDBIcon:Hide(LDB_NAME) end
+        end
+        return
+    end
     if not button then return end
+    if show then button:Show() else button:Hide() end
+end
+
+local function updateGroupIndicator()
+    if not initialized then return end
     local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     local finder = OldKraken.GroupFinder
     local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
@@ -43,8 +77,27 @@ local function updateGroupIndicator()
         end
     end
     matchingGroups = count
-    if count > 0 then button.groupIndicator:Show() else button.groupIndicator:Hide() end
+    ensureLibDBIconButton()
+    local indicator = button and rawget(button, 'groupIndicator')
+    if indicator then
+        if count > 0 then indicator:Show() else indicator:Hide() end
+    end
     if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('minimap.ind', debugprofilestop() - t0) end
+end
+
+local function onMinimapClick(_, mouseButton)
+    local target = mouseButton == 'RightButton' and OldKraken.GroupFinder or OldKraken.GuildRoster
+    if target and type(target.Toggle) == 'function' then target:Toggle() end
+end
+
+local function populateTooltip(tooltip)
+    if not tooltip then return end
+    local gold = OldKraken.UIStyle.Colors.brandGold
+    tooltip:SetText(OldKraken.GetGuildDisplayName and OldKraken.GetGuildDisplayName() or 'Old Kraken', gold[1], gold[2], gold[3])
+    if matchingGroups > 0 then tooltip:AddLine(T('Підходящих груп за рівнем і роллю: ') .. matchingGroups, 0.41, 0.86, 0.55) end
+    tooltip:AddLine(T('Ліва кнопка: відкрити / закрити Old Kraken'), 1, 1, 1)
+    tooltip:AddLine(T('Права кнопка: відкрити / закрити групи'), 1, 1, 1)
+    tooltip:AddLine(T('Перетягніть, щоб перемістити'), 0.75, 0.75, 0.75)
 end
 
 local function place(angle)
@@ -69,8 +122,37 @@ local function updatePosition(self)
     place(angle)
 end
 
-OldKraken:On('INITIALIZED', function(db)
-    if button or not Minimap or type(db.settings) ~= 'table' then return end
+local function registerLibDBIcon(db)
+    local libStub = LibStub
+    if type(libStub) ~= 'table' and type(libStub) ~= 'function' then return false end
+    local okBroker, broker = pcall(libStub, 'LibDataBroker-1.1', true)
+    local okIcon, libIcon = pcall(libStub, 'LibDBIcon-1.0', true)
+    if not (okBroker and broker and okIcon and libIcon) then return false end
+    if type(broker.NewDataObject) ~= 'function' or type(libIcon.Register) ~= 'function' then return false end
+
+    if type(db.settings.minimap) ~= 'table' then db.settings.minimap = {} end
+    if db.settings.minimap.minimapPos == nil and type(db.settings.minimapAngle) == 'number' then
+        db.settings.minimap.minimapPos = db.settings.minimapAngle
+    end
+    db.settings.minimap.hide = db.settings.showMinimapButton == false
+
+    local okObj, launcher = pcall(broker.NewDataObject, broker, LDB_NAME, {
+        type = 'launcher',
+        text = 'Old Kraken',
+        icon = OldKraken.UIStyle.EmblemPath(),
+        OnClick = onMinimapClick,
+        OnTooltipShow = populateTooltip,
+    })
+    if not okObj or not launcher then return false end
+    local okReg = pcall(libIcon.Register, libIcon, LDB_NAME, launcher, db.settings.minimap)
+    if not okReg then return false end
+    libDBIcon = libIcon
+    ensureLibDBIconButton()
+    return true
+end
+
+local function createOwnButton(db)
+    if not Minimap then return end
     local angle = tonumber(db.settings.minimapAngle)
     if not angle or angle ~= angle or angle < 0 or angle >= 360 then angle = 225 end
     button = CreateFrame('Button', 'OldKrakenMinimapButton', Minimap)
@@ -82,42 +164,41 @@ OldKraken:On('INITIALIZED', function(db)
     button:EnableMouse(true)
     local background = button:CreateTexture(nil, 'BACKGROUND')
     background:SetTexture('Interface\\Minimap\\UI-Minimap-Background')
-    background:SetPoint('CENTER'); background:SetSize(24, 24)
+    background:SetPoint('CENTER', button, 'CENTER', 0, 1)
+    background:SetSize(22, 22)
     background:SetVertexColor(unpack(OldKraken.UIStyle.Colors.window))
     button.background = background
     local icon = button:CreateTexture(nil, 'ARTWORK')
-    icon:SetPoint('CENTER', button, 'CENTER', 0, 0)
-    icon:SetSize(28, 28)
+    icon:SetPoint('CENTER', button, 'CENTER', 0, 1)
+    icon:SetSize(18, 18)
     icon:SetTexture(OldKraken.UIStyle.EmblemPath())
     button.icon = icon
     local border = button:CreateTexture(nil, 'OVERLAY')
     border:SetTexture('Interface\\Minimap\\MiniMap-TrackingBorder')
-    border:SetSize(54, 54); border:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
+    border:SetSize(52, 52)
+    border:SetPoint('TOPLEFT', button, 'TOPLEFT', 0, 0)
     button.border = border
-    local indicator = button:CreateTexture(nil, 'OVERLAY', nil, 2)
-    indicator:SetTexture('Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga')
-    indicator:SetSize(12, 12); indicator:SetPoint('BOTTOMRIGHT', button, 'BOTTOMRIGHT', -1, 1)
-    indicator:Hide()
-    button.groupIndicator = indicator
+    attachGroupIndicator(button)
     button:SetHighlightTexture('Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight')
-    button:SetScript('OnClick', function(_, mouseButton)
-        local target = mouseButton == 'RightButton' and OldKraken.GroupFinder or OldKraken.GuildRoster
-        if target and type(target.Toggle) == 'function' then target:Toggle() end
-    end)
+    button:SetScript('OnClick', onMinimapClick)
     button:SetScript('OnEnter', function(self)
         GameTooltip:SetOwner(self, 'ANCHOR_LEFT')
-        local gold = OldKraken.UIStyle.Colors.brandGold
-        GameTooltip:SetText(OldKraken.GetGuildDisplayName and OldKraken.GetGuildDisplayName() or 'Old Kraken', gold[1], gold[2], gold[3])
-        if matchingGroups > 0 then GameTooltip:AddLine(T('Підходящих груп за рівнем і роллю: ') .. matchingGroups, 0.41, 0.86, 0.55) end
-        GameTooltip:AddLine(T('Ліва кнопка: відкрити / закрити Old Kraken'), 1, 1, 1)
-        GameTooltip:AddLine(T('Права кнопка: відкрити / закрити групи'), 1, 1, 1)
-        GameTooltip:AddLine(T('Перетягніть, щоб перемістити'), 0.75, 0.75, 0.75)
+        populateTooltip(GameTooltip)
         GameTooltip:Show()
     end)
     button:SetScript('OnLeave', function() GameTooltip:Hide() end)
     button:SetScript('OnDragStart', function(self) self:SetScript('OnUpdate', updatePosition) end)
     button:SetScript('OnDragStop', function(self) self:SetScript('OnUpdate', nil) end)
     place(angle)
+end
+
+OldKraken:On('INITIALIZED', function(db)
+    if initialized or type(db) ~= 'table' or type(db.settings) ~= 'table' then return end
+    if not registerLibDBIcon(db) then
+        if not Minimap then return end
+        createOwnButton(db)
+    end
+    initialized = true
     updateMinimapVisibility()
     updateGroupIndicator()
     if C_Timer and type(C_Timer.NewTicker) == 'function' then C_Timer.NewTicker(10, updateGroupIndicator) end

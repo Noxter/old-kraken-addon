@@ -115,7 +115,7 @@ ChatLayoutSwitcher.lua
 
 ### Ключі `DB.settings`
 
-`roster` (`status` = `all|online|offline`, `sort` = `name|level|class|rank|zone`, `ascending` bool, `class`, `search`), `minimapAngle`, `showMinimapButton`, `alertPositions`, `groupFinderNotifications`, `guildEventNotifications`, `workshopOrderAlerts`, `versionIndicator`, `versionChatNotifications`, `versionSessionNotified`.
+`roster` (`status` = `all|online|offline`, `sort` = `name|level|class|rank|zone`, `ascending` bool, `class`, `search`), `minimapAngle`, `showMinimapButton`, `minimap` (таблиця `LibDBIcon-1.0`: `minimapPos`, `hide`), `alertPositions`, `groupFinderNotifications`, `guildEventNotifications`, `workshopOrderAlerts`, `versionIndicator`, `versionChatNotifications`, `versionSessionNotified`.
 
 Для визначення `realm` у всіх модулях використовується `Database:GetRealmScope()`: `Database:IsValidRealm("")` залишається `false`, але штатний порожній `GetRealmName() == ""` на WoW Forever `1.60.1` резолвиться в явний scope `"Forever"` (якщо `GetNormalizedRealmName()` і `GetCVar("realmName")` теж не дають валідного значення).
 
