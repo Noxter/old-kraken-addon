@@ -17,8 +17,8 @@ local professions = {
     {id=393, name='Свіжування'}, {id=185, name='Кулінарія'},
     {id=129, name='Перша допомога'}, {id=356, name='Риболовля'},
 }
-local byID = {}
-for _,entry in ipairs(professions) do byID[entry.id]=entry end
+local byID, orderByID = {}, {}
+for i,entry in ipairs(professions) do byID[entry.id]=entry; orderByID[entry.id]=i end
 local professionArt={
     [171]={136240,'Alchemy'}, [164]={136241,'Blacksmithing'}, [165]={136247,'Leatherworking'},
     [197]={136249,'Tailoring'}, [202]={136243,'Engineering'}, [333]={136244,'Enchanting'},
@@ -267,6 +267,9 @@ function Workshop:GetMemberProfessions(name)
     elseif nativeProfessions[name] then
         for _,p in ipairs(nativeProfessions[name]) do result[#result+1]=p end
     end
+    table.sort(result, function(a, b)
+        return (orderByID[a.id] or 999) < (orderByID[b.id] or 999)
+    end)
     return result
 end
 function Workshop:ProfessionInfo(id)

@@ -561,6 +561,29 @@ def test_bop_filter_reloads_after_item_data():
     ''')
 
 
+def test_open_create_form_preferred_profession_and_back():
+    lua = client('Alice', embedded=True)
+    tick(lua)
+    lua.execute('''
+        local hub = OldKraken.UIHub:ShowPage('workshop')
+        OldKraken.Workshop:Show('orders')
+        local ordersWin = OldKraken.UIHub.pages.workshop.frame.ordersView
+        -- Seed a stale Enchanting (333) draft first
+        OldKraken.WorkshopOrders:OpenCreateForm(333)
+        local form = ordersWin.orderForm
+        form.item:SetText('Enchant 2H Weapon - Impact')
+        assert(ordersWin.professionMenu.text == 'Зачарування')
+
+        local returned = 0
+        OldKraken.WorkshopOrders:Show()
+        assert(OldKraken.WorkshopOrders:OpenCreateForm(171, function() returned = returned + 1 end))
+        assert(ordersWin.professionMenu.text == 'Алхімія', 'expected Alchemy preselected')
+        assert(form.item:GetText() == '', 'stale Enchanting item must be cleared when switching profession')
+        OldKraken.Workshop:Back()
+        assert(returned == 1, 'Back must invoke onBack callback to return to caller')
+    ''')
+
+
 if __name__ == '__main__':
     test_open_draft_refreshes_after_migration()
     test_conflicting_drafts_can_be_selected_without_losing_either_copy()
@@ -573,4 +596,5 @@ if __name__ == '__main__':
     test_partial_recipe_scan_retains_records()
     test_order_relay_and_owner_authority()
     test_bop_filter_reloads_after_item_data()
+    test_open_create_form_preferred_profession_and_back()
     print('Workshop order checks passed')

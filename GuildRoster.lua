@@ -794,9 +794,14 @@ local function CreateRosterWindow(parent)
         end)
         panel.orderButton = makeActionBtn(T('Створити замовлення'), 540, 180, nil, function()
             if OldKraken.WorkshopOrders then
+                local targetMember = panel.member
+                local preferredProf = panel.firstCraftProfessionID
                 OldKraken.WorkshopOrders:Show()
                 if type(OldKraken.WorkshopOrders.OpenCreateForm) == 'function' then
-                    OldKraken.WorkshopOrders:OpenCreateForm()
+                    OldKraken.WorkshopOrders:OpenCreateForm(preferredProf, function()
+                        Roster:Show()
+                        if targetMember and OpenMemberProfile then OpenMemberProfile(targetMember) end
+                    end)
                 end
             end
         end)
@@ -929,20 +934,8 @@ RenderMemberProfile = function(member)
         local isSecondary = function(id)
             return OldKraken.Workshop and OldKraken.Workshop.IsSecondaryProfession and OldKraken.Workshop:IsSecondaryProfession(id)
         end
-        local function profTier(id)
-            if isSecondary(id) then return 3 end
-            if isGathering(id) then return 2 end
-            return 1
-        end
-        local ordered = {}
-        for i = 1, #professions do ordered[i] = professions[i] end
-        table.sort(ordered, function(a, b)
-            local ta, tb = profTier(a.id), profTier(b.id)
-            if ta ~= tb then return ta < tb end
-            return (a.id or 0) < (b.id or 0)
-        end)
-        for i = 1, math.min(5, #ordered) do
-            local p = ordered[i]
+        for i = 1, math.min(5, #professions) do
+            local p = professions[i]
             local prow = panel.profRows[i]
             local pname, picon = OldKraken.Workshop:ProfessionInfo(p.id)
             local nonCraft = isGathering(p.id) or isSecondary(p.id)

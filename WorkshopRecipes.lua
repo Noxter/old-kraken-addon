@@ -1134,7 +1134,7 @@ render=function()
     if frame.typeFilter then
         frame.typeFilter:ClearAllPoints()
         if frame.embedded then
-            frame.typeFilter:SetPoint('TOPLEFT',frame,'TOPLEFT',selectRecipe and 612 or 446,-61)
+            frame.typeFilter:SetPoint('TOPLEFT',frame,'TOPLEFT',selectRecipe and 638 or 446,-61)
         else
             frame.typeFilter:SetPoint('TOPLEFT',frame,'TOPLEFT',439,-71)
         end
@@ -1495,7 +1495,7 @@ local function createWindow(parent)
         f.onlineOnly=button(f,T('Лише онлайн: ні'),455,-74,160,function() mastersOnline=not mastersOnline; selectedEntry=nil; selectedRecipeMaster=nil; selectedMaster=nil; offset=0; render() end,nil,{rounded=true,height=34})
     end
     f.pickProfession=CreateFrame('Frame','OldKrakenRecipePickerProfession',f,'UIDropDownMenuTemplate'); OldKraken.UIStyle.Dropdown(f.pickProfession,{rounded=true})
-    f.pickProfession:SetPoint('TOPLEFT',f,'TOPLEFT',439,-71); UIDropDownMenu_SetWidth(f.pickProfession,160)
+    f.pickProfession:SetPoint('TOPLEFT',f,'TOPLEFT',439,-71); UIDropDownMenu_SetWidth(f.pickProfession,parent and 150 or 160)
     UIDropDownMenu_Initialize(f.pickProfession,function(_,level)
         local ids={0}; for id in pairs(professionNames) do if OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(id) then ids[#ids+1]=id end end
         table.sort(ids,function(a,b) if a==b then return false elseif a==0 then return true elseif b==0 then return false end; return professionNames[a]<professionNames[b] end)

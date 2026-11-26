@@ -158,7 +158,7 @@ def test_recipe_type_filter():
         dd.SetPoint = function(self, _, _, _, x, ...) placedX = x; return origSetPoint(self, _, _, _, x, ...) end
         OldKraken.WorkshopRecipes:Choose(function() end, 171)
         drainTimers()
-        assert(dd:IsShown() and placedX == 612, 'embedded selectRecipe should place type filter at x=612')
+        assert(dd:IsShown() and placedX == 638, 'embedded selectRecipe should place type filter at x=638')
     ''')
 
 

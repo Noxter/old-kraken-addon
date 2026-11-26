@@ -1394,12 +1394,29 @@ end
 function Orders:RefreshEmbedded()
     if window then refresh() end
 end
-function Orders:OpenCreateForm()
+function Orders:OpenCreateForm(preferredProfession,onBack)
     if not window or not window.createForm then
         chatError(T('Old Kraken: форма нового замовлення недоступна; відкрийте вкладку замовлень у Hub.'))
         return false
     end
-    if OldKraken.UIHub and OldKraken.Workshop then OldKraken.Workshop:Navigate('orderCreate')
+    if preferredProfession and professionNames[preferredProfession] and profession~=preferredProfession then
+        profession=preferredProfession
+        chosenRecipe=nil
+        if window.professionMenu and type(UIDropDownMenu_SetText)=='function' then
+            UIDropDownMenu_SetText(window.professionMenu,professionNames[profession])
+        end
+        local form=window.orderForm
+        if form then
+            if form.item and type(form.item.SetText)=='function' then form.item:SetText('') end
+            if type(form.UpdateItemIcon)=='function' then form.UpdateItemIcon() end
+        end
+        saveDraft()
+    end
+    if OldKraken.UIHub and OldKraken.Workshop then
+        OldKraken.Workshop:Navigate('orderCreate',type(onBack)=='function')
+        if type(onBack)=='function' and type(OldKraken.Workshop.navigationStack)=='table' and #OldKraken.Workshop.navigationStack>0 then
+            OldKraken.Workshop.navigationStack[#OldKraken.Workshop.navigationStack]={onBack=onBack}
+        end
     else window.createForm:Show() end
     return true
 end
