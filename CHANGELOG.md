@@ -3,7 +3,8 @@
 ## 0.5.7-alpha.1
 
 ### Performance & Diagnostics
-- Додано вбудований діагностичний профайлер `/okr perf [on|off|reset|report]` (`Core.lua`, `Locale.lua`, інструментація ключових обробників із нульовим оверхедом при вимкненому режимі та інтеграцією `C_AddOnProfiler`).
+- Додано вбудований діагностичний профайлер `/okr perf [on|off|reset|report]` (`Core.lua`, `Locale.lua`, інструментація ключових обробників із мінімальним overhead при вимкненому режимі без вимірювання часу та запису метрик, а також інтеграцією `C_AddOnProfiler`).
+- Додано легкі лічильники мережевого трафіку `/okr comm traffic [reset]` (`Communication.lua`, `Locale.lua`) із розділенням логічних повідомлень (`txQ`/`rxH`), транспортних фрагментів (`txFrag`/`rxFrag`), байтів, повторів, `rxDedup`, `rxFiltered` і `rxFilteredTail` (хвости `2..N` відфільтрованих чужих multipart-повідомлень).
 - Прибрано постійні idle `OnUpdate` цикли у `GuildRoster.lua` (`eventFrame`) та `GuildEvents.lua` (`raidInviteFrame`): фрейми приховані за замовчуванням і показуються лише на час активного оновлення чи черги рейд-запрошень.
 - Замір у реальному клієнті WoW Forever `1.60.1 (70938)` (~3,6 хв активної гри з `0.5.7-alpha.1` проти бази `0.5.6`): поточний CPU знизився з `6.49%` до `0.13%` (~50×), Average CPU — з `6.91%` до `1.30%` (~5.3×), кількість тіків `>5ms` — з `20809` до `50` (~416×), `>10ms` — з `16134` до `22` (~733×), `comm.recv` — без жодного виклику `>5ms` (`max=1.88ms`), `wk.wrget` — з `2019` до `5` викликів. Два зафіксовані піки `>50ms` належать одноразовому початковому завантаженню аддона до ввімкнення профайлера, а не фоновій роботі.
 
@@ -21,6 +22,7 @@
 - Оптимізовано `WorkshopSync.lua`: O(N) інкрементальний чанкінг у `handleWRGET`, weak-key кеш `validatedSnapshots`, `ExportSnapshotMeta()` для `WRIDX` без повного копіювання списку, придушення дубльованих relay `WRIDX` після відповіді власника або двох різних релейників із `rev >= ourRev`, збільшено інтервал `WRQ` до `600` с.
 - Реалізовано multi-provider failover у `incoming[owner]` (`WorkshopSync.lua`): до 8 резервних провайдерів (`backups`/`failed`), детермінований вибір (`pickBackup`), розділення `lastProgress` (активність/replay) та `lastNewProgress` + `MAX_STALL_ATTEMPTS = 2` (дублікати replay не відкладають перемикання за наявності резерву) і контрольний `WRQ` через `60` с при вичерпанні всіх резервів.
 - У `WorkshopRecipes.lua` додано `SPELLS_CHANGED` тротлінг (`60` с) та пропуск `pendingIds` за порожнього `pendingLearned`; у `Workshop.lua` на `GUILD_ROSTER_UPDATE` без зміни `active`/`profile`/`identity` виконується `scheduleRender()` замість повного `changed()`.
+- У `WorkshopOrders.lua` додано придушення зайвих `WORELAY` (`suppressRelay` / `relaySeen[k]`): черговий `relayDirty[k]` знімається лише після проходження перевірок актуальності замовлення при прямому `WORDER` або двох різних актуальних `WORELAY` (`o.rev >= cached.rev`); у живих замірах у гільдії (`1084` с та `761` с) вихідний `WORELAY` на один `WOQUERY` знизився на `~57%` (`-40%` за секунду).
 
 ## 0.5.6
 

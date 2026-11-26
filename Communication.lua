@@ -14,6 +14,10 @@ Communication.lastTestID = nil
 Communication.handlers = {}
 Communication.part1Filters = {}
 Communication.stats = { sent = 0, retried = 0, dropped = 0, received = 0, invalid = 0 }
+local function newTrafficState()
+    return { startedAt = GetTime(), byKind = {} }
+end
+Communication.traffic = newTrafficState()
 local MAX_QUEUE = 4096
 local ACTION_RESERVE = 256
 local MAX_ERROR_ATTEMPTS = 5
@@ -103,6 +107,41 @@ local VALID_TYPES = { ANNOUNCE = true, CANCEL = true, JOIN = true, RESPONSE = tr
     WRQ = true, WRIDX = true, WRGET = true, WRPAGE = true,
     WORDER = true, WORELAY = true, WOREQ = true, WOPAY = true, WOERROR = true, WOQUERY = true,
     WOACT = true, WOPAYR = true, WORESULT = true, WORESR = true }
+
+local function messageTrafficKind(message)
+    if type(message) ~= 'string' then return 'INVALID' end
+    if message:sub(1, 4) == 'GF2^' then
+        local k = message:match('^GF2%^([A-Z]+)%^')
+        return (k and VALID_TYPES[k]) and k or 'INVALID'
+    end
+    if message == 'OKP^QUERY' then return 'OKP_QUERY' end
+    if message == 'OKP^HERE' or message:sub(1, 9) == 'OKP^HERE^' then return 'OKP_HERE' end
+    if message:sub(1, 9) == 'OKP^SPEC^' then return 'OKP_SPEC' end
+    if message:sub(1, 10) == 'OKP^SPEC2^' then return 'OKP_SPEC2' end
+    if message:sub(1, 5) == 'TEST^' then return 'TEST' end
+    if message:sub(1, 4) == 'ACK^' then return 'ACK' end
+    return 'OTHER'
+end
+
+local function recordTraffic(self, kind, field, delta)
+    if not self.traffic then self.traffic = newTrafficState() end
+    local byKind = self.traffic.byKind
+    local b = byKind[kind]
+    if not b then
+        -- txLogical counts logical messages accepted into the outbound queue;
+        -- rxLogical counts inbound logical messages delivered to handlers.
+        b = {
+            txLogical = 0, txFrags = 0, txBytes = 0, txRetries = 0, txDedup = 0, txDrops = 0,
+            rxLogical = 0, rxFrags = 0, rxBytes = 0, rxDedup = 0, rxFiltered = 0, rxFilteredTail = 0, rxDropped = 0,
+        }
+        byKind[kind] = b
+    end
+    b[field] = b[field] + (delta or 1)
+end
+
+function Communication:ResetTraffic()
+    self.traffic = newTrafficState()
+end
 local GROUP_SNAPSHOTS={ANNOUNCE=true,UPDATE=true,SYNC=true,CANCEL=true,BUMP=true}
 local CRITICAL_KINDS={JOIN=true,RESPONSE=true,CANCEL=true,ANNOUNCE=true,UPDATE=true,BUMP=true,
     CEVENT=true,CVNEW=true,CEVRSVP=true,WORDER=true,WOREQ=true,WOPAY=true,WORESULT=true}
@@ -152,18 +191,18 @@ function Communication:SendProtocol(kind, payload)
     if #self.queue==0 then self.pendingTransmissions={} end
     local pendingKey=guild..'\001'..kind..'\001'..payload
     local pending=self.pendingTransmissions[pendingKey]
-    if pending then self.stats.deduplicated=self.stats.deduplicated+1; return true,pending.id end
+    if pending then self.stats.deduplicated=self.stats.deduplicated+1; recordTraffic(self, kind, 'txDedup', 1); return true,pending.id end
     local priority=PRIORITY[kind] or 2
     messageSequence = (messageSequence + 1) % 1000000
     local id = sessionID .. "-" .. tostring(messageSequence)
     local count = math.max(1, math.ceil(#payload / PART_BYTES))
     local limit=priority==0 and MAX_QUEUE or (MAX_QUEUE-ACTION_RESERVE)
-    if effectiveQueueSize(self)+count>limit then self.stats.backpressure=self.stats.backpressure+1; return false,'queue full' end
+    if effectiveQueueSize(self)+count>limit then self.stats.backpressure=self.stats.backpressure+1; recordTraffic(self, kind, 'txDrops', 1); return false,'queue full' end
     local messages = {}
     for part = 1, count do
         local data = payload:sub((part - 1) * PART_BYTES + 1, part * PART_BYTES)
         local message = table.concat({ "GF2", kind, id, part, count, Encode(data) }, "^")
-        if #message > 240 then return false, "message too long" end
+        if #message > 240 then recordTraffic(self, kind, 'txDrops', 1); return false, "message too long" end
         messages[part] = message
     end
     local job={key=pendingKey,id=id,kind=kind,messages=messages,remaining=count,priority=priority,
@@ -172,10 +211,12 @@ function Communication:SendProtocol(kind, payload)
     for part, message in ipairs(messages) do
         if not self:QueueMessage(message,job,part) then
             while #self.queue > originalCount do table.remove(self.queue) end
+            recordTraffic(self, kind, 'txDrops', 1)
             return false, "transport unavailable"
         end
     end
     self.pendingTransmissions[pendingKey]=job
+    recordTraffic(self, kind, 'txLogical', 1)
     return true, id
 end
 
@@ -289,15 +330,20 @@ function Communication:QueueMessage(message,job,part)
 
     if effectiveQueueSize(self) >= MAX_QUEUE then
         self.stats.backpressure=self.stats.backpressure+1
+        if not job then recordTraffic(self, messageTrafficKind(message), 'txDrops', 1) end
         return false
     end
 
     local guild
     if message:sub(1, 4) == 'GF2^' or message:sub(1, 9) == 'OKP^SPEC^' or message:sub(1, 10) == 'OKP^SPEC2^' then
         guild = GetGuildInfo and GetGuildInfo('player')
-        if type(guild) ~= 'string' or guild == '' then return false end
+        if type(guild) ~= 'string' or guild == '' then
+            if not job then recordTraffic(self, messageTrafficKind(message), 'txDrops', 1) end
+            return false
+        end
     end
     self.queue[#self.queue + 1] = { message = message, attempts = 0, guild = guild,job=job,part=part,priority=job and job.priority or 1 }
+    if not job then recordTraffic(self, messageTrafficKind(message), 'txLogical', 1) end
     return true
 end
 
@@ -319,6 +365,7 @@ end
 local function deferEntry(self,entry,reason)
     entry.attempts=entry.attempts+1
     self.stats.retried=self.stats.retried+1
+    recordTraffic(self, (entry.job and entry.job.kind) or messageTrafficKind(entry.message), 'txRetries', 1)
     self.backoff=math.min(60,self.backoff==0 and 2 or self.backoff*2)
     self.retryAt=GetTime()+self.backoff+math.random()
     self.lastSendError=reason
@@ -338,6 +385,7 @@ local function dropEntryOrJob(self,index,entry,reason,notifyCritical)
         if job.key and self.pendingTransmissions[job.key]==job then self.pendingTransmissions[job.key]=nil end
     end
     self.stats.dropped=self.stats.dropped+1
+    recordTraffic(self, (job and job.kind) or messageTrafficKind(entry.message), 'txDrops', 1)
     if job and notifyCritical and CRITICAL_KINDS[job.kind] then
         pcall(Print,'Не вдалося надіслати повідомлення: '..job.kind)
         if type(OldKraken.Fire)=='function' then
@@ -348,6 +396,7 @@ end
 local function entryError(self,index,entry,reason,now)
     entry.errorAttempts=(entry.errorAttempts or 0)+1
     self.stats.retried=self.stats.retried+1
+    recordTraffic(self, (entry.job and entry.job.kind) or messageTrafficKind(entry.message), 'txRetries', 1)
     self.lastSendError=reason
     if entry.errorAttempts>=MAX_ERROR_ATTEMPTS then
         dropEntryOrJob(self,index,entry,reason,true)
@@ -407,6 +456,7 @@ local function runPump(self)
                 errorAttempts=state and state[1],errorBackoff=state and state[2],nextTryAt=state and state[3]}
         end
         self.stats.restarted=self.stats.restarted+1
+        recordTraffic(self, job.kind or messageTrafficKind(entry.message), 'txRetries', 1)
         return
     end
     local chatInfo=C_ChatInfo
@@ -422,9 +472,13 @@ local function runPump(self)
         if throttle then deferEntry(self,entry,tostring(result)) else entryError(self,index,entry,tostring(result),now) end
         return
     end
+    local sentKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
+    local sentBytes = #entry.message
     finishEntry(self,index,true)
     self.backoff,self.retryAt,self.lastSendError=0,0,nil
     self.stats.sent=self.stats.sent+1
+    recordTraffic(self, sentKind, 'txFrags', 1)
+    recordTraffic(self, sentKind, 'txBytes', sentBytes)
 end
 function Communication:Pump()
     local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
@@ -873,7 +927,7 @@ function Communication:SendLocalSpec(forceOnQuery)
     return false
 end
 
-local function recordCompleted(key, now, kind)
+local function recordCompleted(key, now, kind, filtered)
     if completedCount >= CACHE_LIMIT then
         local oldestKey, oldestTime
         for k, v in pairs(completed) do if not oldestTime or v.time < oldestTime then oldestKey, oldestTime = k, v.time end end
@@ -883,15 +937,21 @@ local function recordCompleted(key, now, kind)
         end
     end
     if not completed[key] then completedCount = completedCount + 1 end
-    completed[key] = { time = now, kind = kind }
+    completed[key] = { time = now, kind = kind, filtered = filtered and true or nil }
 end
 
 local function receiveAddonMessage(self, message, sender)
+    local rxKind = messageTrafficKind(message)
+    local rxBytes = #message
     if type(sender) ~= "string" or sender == "" or #sender > 128 then
         return
     end
 
+    recordTraffic(self, rxKind, 'rxFrags', 1)
+    recordTraffic(self, rxKind, 'rxBytes', rxBytes)
+
     if #message > 240 then
+        recordTraffic(self, rxKind, 'rxDropped', 1)
         if message:sub(1, 10) == 'OKP^SPEC2^' then return end
         self.stats.invalid = self.stats.invalid + 1
         return
@@ -903,37 +963,61 @@ local function receiveAddonMessage(self, message, sender)
         if self.presenceGuild ~= '' then seenSenders[sender] = true end
     end
     if message == 'OKP^QUERY' then
+        recordTraffic(self, rxKind, 'rxLogical', 1)
         self:SendLocalSpec(true)
         local now = GetTime()
         if not self.lastPresenceReply or now - self.lastPresenceReply >= 10 then
             if self:QueueMessage('OKP^HERE^' .. self:GetLocalVersion()) then self.lastPresenceReply = now end
         end
         return
-    elseif message == 'OKP^HERE' then return
+    elseif message == 'OKP^HERE' then
+        recordTraffic(self, rxKind, 'rxLogical', 1)
+        return
     elseif message:sub(1, 9) == 'OKP^HERE^' then
         local version = message:sub(10)
         if #version <= 48 and version:match('^[%w%.%+%-]+$') then
             self:RecordRosterPresence(sender, version)
+            recordTraffic(self, rxKind, 'rxLogical', 1)
+        else
+            recordTraffic(self, rxKind, 'rxDropped', 1)
         end
         return
     elseif message:sub(1, 9) == 'OKP^SPEC^' then
         local raw = message:sub(10)
         local idStr = raw:match('^(%d+)$')
         local specID = idStr and tonumber(idStr)
-        if specID and specID >= 1 and specID <= 9999999 then self:RecordRosterSpec(sender, specID) end
+        if specID and specID >= 1 and specID <= 9999999 then
+            self:RecordRosterSpec(sender, specID)
+            recordTraffic(self, rxKind, 'rxLogical', 1)
+        else
+            recordTraffic(self, rxKind, 'rxDropped', 1)
+        end
         return
     elseif message:sub(1, 10) == 'OKP^SPEC2^' then
         local raw = message:sub(11)
         local seqStr, iconStr, pointsStr, nameStr = raw:match('^([^%^]+)%^([^%^]+)%^([^%^]+)%^(.*)$')
         if not seqStr or not iconStr or not pointsStr or not nameStr or nameStr:find('^', 1, true)
-            or not seqStr:match('^%d+$') or not iconStr:match('^%d+$') then return end
+            or not seqStr:match('^%d+$') or not iconStr:match('^%d+$') then
+            recordTraffic(self, rxKind, 'rxDropped', 1)
+            return
+        end
         local seq, icon = tonumber(seqStr), tonumber(iconStr)
         local a, b, c, unique = ParsePoints(pointsStr)
-        if not Integer(seq, 1, 999999999999) or not Integer(icon, 0, 999999999) or not a then return end
+        if not Integer(seq, 1, 999999999999) or not Integer(icon, 0, 999999999) or not a then
+            recordTraffic(self, rxKind, 'rxDropped', 1)
+            return
+        end
         if a + b + c == 0 then
-            if pointsStr ~= '0/0/0' or iconStr ~= '0' or nameStr ~= '' then return end
-        elseif not unique or not ValidSpecName(nameStr) then return end
+            if pointsStr ~= '0/0/0' or iconStr ~= '0' or nameStr ~= '' then
+                recordTraffic(self, rxKind, 'rxDropped', 1)
+                return
+            end
+        elseif not unique or not ValidSpecName(nameStr) then
+            recordTraffic(self, rxKind, 'rxDropped', 1)
+            return
+        end
         self:RecordRosterSpec2(sender, seq, icon, pointsStr, nameStr, iconStr .. '^' .. pointsStr .. '^' .. nameStr)
+        recordTraffic(self, rxKind, 'rxLogical', 1)
         return
     end
 
@@ -946,15 +1030,24 @@ local function receiveAddonMessage(self, message, sender)
             or encLen < 0 or encLen % 2 ~= 0 or encLen > PART_BYTES * 2
             or (part < count and encLen ~= PART_BYTES * 2) then
             self.stats.invalid = self.stats.invalid + 1
+            recordTraffic(self, rxKind, 'rxDropped', 1)
             return
         end
         local now = GetTime()
         Prune(now)
         local key = sender .. "\001" .. id
-        if completed[key] then return end
+        if completed[key] then
+            if completed[key].filtered and part > 1 then
+                recordTraffic(self, rxKind, 'rxFilteredTail', 1)
+            else
+                recordTraffic(self, rxKind, 'rxDedup', 1)
+            end
+            return
+        end
         local payload = Decode(encoded)
         if not payload then
             self.stats.invalid = self.stats.invalid + 1
+            recordTraffic(self, rxKind, 'rxDropped', 1)
             return
         end
         if part == 1 then
@@ -964,13 +1057,18 @@ local function receiveAddonMessage(self, message, sender)
                     assemblies[key] = nil
                     assemblyCount = math.max(0, assemblyCount - 1)
                 end
-                recordCompleted(key, now, kind)
+                recordCompleted(key, now, kind, true)
+                recordTraffic(self, rxKind, 'rxFiltered', 1)
                 return
             end
         end
         local item = assemblies[key]
         if not item then
-            if assemblyCount >= MAX_ASSEMBLIES then self.stats.invalid = self.stats.invalid + 1; return end
+            if assemblyCount >= MAX_ASSEMBLIES then
+                self.stats.invalid = self.stats.invalid + 1
+                recordTraffic(self, rxKind, 'rxDropped', 1)
+                return
+            end
             item = { kind = kind, count = count, time = now, parts = {}, received = 0 }
             assemblies[key] = item
             assemblyCount = assemblyCount + 1
@@ -978,6 +1076,7 @@ local function receiveAddonMessage(self, message, sender)
             assemblies[key] = nil
             assemblyCount = math.max(0, assemblyCount - 1)
             self.stats.invalid = self.stats.invalid + 1
+            recordTraffic(self, rxKind, 'rxDropped', 1)
             return
         end
         if item.parts[part] then
@@ -985,6 +1084,9 @@ local function receiveAddonMessage(self, message, sender)
                 assemblies[key] = nil
                 assemblyCount = math.max(0, assemblyCount - 1)
                 self.stats.invalid = self.stats.invalid + 1
+                recordTraffic(self, rxKind, 'rxDropped', 1)
+            else
+                recordTraffic(self, rxKind, 'rxDedup', 1)
             end
             return
         end
@@ -999,26 +1101,35 @@ local function receiveAddonMessage(self, message, sender)
             local ok, err = pcall(handler, sender, id, payload)
             if not ok then
                 self.stats.invalid = self.stats.invalid + 1
+                recordTraffic(self, rxKind, 'rxDropped', 1)
                 Print(T("Помилка обробника протоколу: ") .. tostring(err))
                 return
             end
         end
         recordCompleted(key, now, kind)
         self.stats.received = self.stats.received + 1
+        recordTraffic(self, rxKind, 'rxLogical', 1)
         return
     end
 
     local kind, id, target, origin = strsplit("^", message)
     local me = PlayerName()
     if not me then
+        recordTraffic(self, rxKind, 'rxDropped', 1)
         return
     end
 
     if kind == "TEST" then
+        recordTraffic(self, rxKind, 'rxLogical', 1)
         Print(T("Отримано TEST від ") .. sender .. T(". Надсилаю ACK у GUILD."))
         self:QueueMessage(table.concat({ "ACK", id or "", target or "", me }, "^"))
     elseif kind == "ACK" and target == me and id == self.lastTestID then
+        recordTraffic(self, rxKind, 'rxLogical', 1)
         Print(T("Отримано ACK від ") .. sender .. T(". Двосторонній обмін працює."))
+    elseif kind == "ACK" then
+        recordTraffic(self, rxKind, 'rxLogical', 1)
+    else
+        recordTraffic(self, rxKind, 'rxDropped', 1)
     end
 end
 
@@ -1029,6 +1140,51 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     receiveAddonMessage(self, message, sender)
     if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('comm.recv', debugprofilestop() - t0) end
+end
+
+function Communication:PrintTraffic()
+    local traffic = self.traffic or newTrafficState()
+    local elapsed = math.max(0, math.floor(GetTime() - (traffic.startedAt or GetTime())))
+    local totTxLog, totTxFrag, totTxB, totTxRet, totTxDup, totTxDrop = 0, 0, 0, 0, 0, 0
+    local totRxLog, totRxFrag, totRxB, totRxDup, totRxFilt, totRxTail, totRxDrop = 0, 0, 0, 0, 0, 0, 0
+    local rows = {}
+    for kind, b in pairs(traffic.byKind or {}) do
+        totTxLog = totTxLog + b.txLogical
+        totTxFrag = totTxFrag + b.txFrags
+        totTxB = totTxB + b.txBytes
+        totTxRet = totTxRet + b.txRetries
+        totTxDup = totTxDup + b.txDedup
+        totTxDrop = totTxDrop + b.txDrops
+        totRxLog = totRxLog + b.rxLogical
+        totRxFrag = totRxFrag + b.rxFrags
+        totRxB = totRxB + b.rxBytes
+        totRxDup = totRxDup + b.rxDedup
+        totRxFilt = totRxFilt + b.rxFiltered
+        totRxTail = totRxTail + b.rxFilteredTail
+        totRxDrop = totRxDrop + b.rxDropped
+        rows[#rows + 1] = { kind = kind, b = b, totalBytes = b.txBytes + b.rxBytes }
+    end
+    table.sort(rows, function(a, b)
+        if a.totalBytes ~= b.totalBytes then return a.totalBytes > b.totalBytes end
+        return a.kind < b.kind
+    end)
+    Print(string.format(T("Мережевий трафік Old Kraken (%d с):"), elapsed))
+    Print(string.format(
+        "  TX: queued=%d, frags=%d, bytes=%d, retries=%d, dedup=%d, drops=%d",
+        totTxLog, totTxFrag, totTxB, totTxRet, totTxDup, totTxDrop
+    ))
+    Print(string.format(
+        "  RX: handled=%d, frags=%d, bytes=%d, dedup=%d, filtered=%d, tail=%d, dropped=%d",
+        totRxLog, totRxFrag, totRxB, totRxDup, totRxFilt, totRxTail, totRxDrop
+    ))
+    for _, row in ipairs(rows) do
+        local b = row.b
+        Print(string.format(
+            "  %s: txQ=%d txFrag=%d txB=%d ret=%d txDup=%d txDrop=%d | rxH=%d rxFrag=%d rxB=%d rxDup=%d filt=%d tail=%d rxDrop=%d",
+            row.kind, b.txLogical, b.txFrags, b.txBytes, b.txRetries, b.txDedup, b.txDrops,
+            b.rxLogical, b.rxFrags, b.rxBytes, b.rxDedup, b.rxFiltered, b.rxFilteredTail, b.rxDropped
+        ))
+    end
 end
 
 function Communication:HandleCommand(command)
@@ -1043,13 +1199,18 @@ function Communication:HandleCommand(command)
         return false
     end
 
-    subcommand = string.lower(subcommand)
+    subcommand = string.lower((subcommand:gsub('^%s+', ''):gsub('%s+$', '')))
     if subcommand == "" or subcommand == "status" then
         self:PrintStatus()
     elseif subcommand == "test" then
         self:SendTest()
+    elseif subcommand == "traffic" then
+        self:PrintTraffic()
+    elseif subcommand == "traffic reset" then
+        self:ResetTraffic()
+        Print(T("Статистику мережевого трафіку скинуто."))
     else
-        Print(T("Використання: /okr comm status або /okr comm test"))
+        Print(T("Використання: /okr comm status, /okr comm test або /okr comm traffic [reset]"))
     end
 
     return true

@@ -697,6 +697,277 @@ def test_workshop_sync_multi_provider_backup_failover():
     )
 
 
+def test_comm_traffic_counters_and_commands():
+    for lang in ('ukUA', 'enUS'):
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.globals()._lang = lang
+        lua.execute(
+            '''
+            now = 1000
+            serverNow = 1700000000
+            printed = {}
+            function print(...)
+                local parts = {}
+                for i = 1, select('#', ...) do parts[#parts + 1] = tostring(select(i, ...)) end
+                printed[#printed + 1] = table.concat(parts, ' ')
+            end
+            function GetTime() return now end
+            function GetServerTime() return serverNow end
+            function IsInGuild() return true end
+            function GetGuildInfo() return 'Kraken' end
+            function UnitName() return 'Alice' end
+            function CreateFrame()
+                local f = { scripts = {} }
+                function f:RegisterEvent() end
+                function f:SetScript(name, fn) self.scripts[name] = fn end
+                return f
+            end
+            sendResult = 0
+            sentMessages = {}
+            Enum = { SendAddonMessageResult = { Success = 0, AddonMessageThrottle = 3 } }
+            C_ChatInfo = {
+                RegisterAddonMessagePrefix = function() return true end,
+                SendAddonMessage = function(prefix, msg, chan)
+                    if sendResult == 0 then sentMessages[#sentMessages + 1] = {prefix, msg, chan} end
+                    return sendResult
+                end
+            }
+            OldKraken = {}
+            '''
+        )
+        lua.execute(LOCALE)
+        lua.execute('OldKraken.InitializeLocale({ settings = { language = _lang } })')
+        lua.execute(COMM)
+        lua.execute(
+            '''
+            local Comm = OldKraken.Communication
+            Comm.ready = true
+            assert(Comm:RegisterHandler('WKPROF', function() end))
+            Comm.part1Filters.WRPAGE = function() return false end
+
+            -- 1. Multi-fragment TX (WKPROF): 1 logical, 2 fragments, 1 dedup, 1 throttle retry
+            local payload = string.rep('A', 100)
+            assert(Comm:SendProtocol('WKPROF', payload))
+            assert(Comm:SendProtocol('WKPROF', payload)) -- deduplicated before queue
+            sendResult = 3
+            Comm:Pump() -- throttle retry
+            sendResult = 0
+            now = now + 65
+            while #Comm.queue > 0 do Comm:Pump() end
+
+            local txBucket = Comm.traffic.byKind.WKPROF
+            assert(txBucket.txLogical == 1, 'expected 1 logical WKPROF')
+            assert(txBucket.txDedup == 1, 'expected 1 dedup WKPROF')
+            assert(txBucket.txRetries == 1, 'expected 1 retry WKPROF')
+            assert(txBucket.txFrags == 2, 'expected 2 fragments WKPROF')
+            assert(txBucket.txBytes == #sentMessages[1][2] + #sentMessages[2][2])
+
+            -- 2. RX: deliver both WKPROF fragments + replay fragment 1 (rxDedup)
+            Comm:OnAddonMessage(sentMessages[1][1], sentMessages[1][2], sentMessages[1][3], 'Peer1')
+            Comm:OnAddonMessage(sentMessages[2][1], sentMessages[2][2], sentMessages[2][3], 'Peer1')
+            Comm:OnAddonMessage(sentMessages[1][1], sentMessages[1][2], sentMessages[1][3], 'Peer1')
+            assert(txBucket.rxFrags == 3 and txBucket.rxLogical == 1 and txBucket.rxDedup == 1)
+
+            -- 3. Filtered RX (WRPAGE part1Filter=false) -> part 1 is rxFiltered, replayed part 1 is rxDedup, part 2 is rxFilteredTail
+            local wrPart1 = 'GF2^WRPAGE^1-1-1^1^2^' .. string.rep('41', 80)
+            local wrPart2 = 'GF2^WRPAGE^1-1-1^2^2^' .. string.rep('41', 10)
+            Comm:OnAddonMessage('OLDKRKN', wrPart1, 'GUILD', 'Peer2')
+            Comm:OnAddonMessage('OLDKRKN', wrPart1, 'GUILD', 'Peer2')
+            Comm:OnAddonMessage('OLDKRKN', wrPart2, 'GUILD', 'Peer2')
+            assert(Comm.traffic.byKind.WRPAGE.rxFiltered == 1 and Comm.traffic.byKind.WRPAGE.rxDedup == 1 and Comm.traffic.byKind.WRPAGE.rxFilteredTail == 1)
+            Comm:OnAddonMessage('OLDKRKN', 'GF2^BADKIND^1-1-1^1^1^41', 'GUILD', 'Peer2')
+            assert(Comm.traffic.byKind.INVALID.rxDropped == 1)
+
+            -- 4. OKP control messages and /okr comm traffic [reset]
+            Comm:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.7', 'GUILD', 'Peer3')
+            assert(Comm.traffic.byKind.OKP_HERE.rxLogical == 1 and Comm.traffic.byKind.OKP_HERE.rxFrags == 1)
+            assert(Comm:HandleCommand('comm traffic') == true)
+            local out = table.concat(printed, '\\n')
+            assert(out:find('TX: queued=', 1, true) and out:find('RX: handled=', 1, true) and out:find('tail=1', 1, true))
+            assert(out:find('WKPROF: txQ=1 txFrag=2', 1, true))
+            assert(Comm:HandleCommand('comm traffic reset') == true)
+            assert(next(Comm.traffic.byKind) == nil)
+            '''
+        )
+
+
+def test_workshop_orders_worelay_suppression():
+    mod = runpy.run_path(str(ROOT / 'tests/test_workshop_orders.py'))
+    make_client = mod['client']
+    tick = mod['tick']
+    owner = make_client('Alice')
+    relay = make_client('Bob')
+    tick(owner); tick(relay)
+    owner.execute('''
+        OldKraken.WorkshopOrders:Show()
+        pickOrderRecipe(OldKrakenWorkshopOrdersFrame.orderForm, 'Relay potion', 171, 0, 9004)
+        click('Опублікувати')
+        for k in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['Alice Mon']) do orderKey = k end
+    ''')
+    tick(owner)
+    owner.execute('''
+        for _, p in ipairs(outgoing) do
+            if p[1] == 'WORDER' then worder_v1 = p[2] end
+        end
+    ''')
+    worder_v1 = owner.globals().worder_v1
+    assert worder_v1
+
+    # Cancel order on owner to produce rev=2
+    owner.execute('''
+        outgoing = {}
+        OldKraken.WorkshopOrders:Show(orderKey)
+        local b = OldKrakenWorkshopOrdersFrame.cancel
+        b.scripts.OnClick(b)
+    ''')
+    tick(owner)
+    owner.execute('''
+        for _, p in ipairs(outgoing) do
+            if p[1] == 'WORDER' then worder_v2 = p[2] end
+        end
+    ''')
+    worder_v2 = owner.globals().worder_v2
+    assert worder_v2
+
+    relay.globals().worder_v1 = worder_v1
+    relay.globals().worder_v2 = worder_v2
+    relay.execute('''
+        -- Bob receives direct rev=2 from Alice (cached in scope.orderRelays)
+        handlers.WORDER('Alice Mon', 'GUILD', worder_v2)
+        outgoing = {}
+
+        -- 1. WOQUERY schedules relayDirty; stale WORELAY (rev=1 < cachedRev=2) must NOT suppress
+        handlers.WOQUERY('Carol Mon', 'GUILD', '')
+        handlers.WORELAY('Relay1 Mon', 'GUILD', worder_v1)
+        handlers.WORELAY('Relay2 Mon', 'GUILD', worder_v1)
+        clock = clock + 4; for _, f in ipairs(timers) do f() end
+        local sent = 0
+        for _, p in ipairs(outgoing) do if p[1] == 'WORELAY' then sent = sent + 1 end end
+        assert(sent == 1, 'stale WORELAY must not suppress backup WORELAY')
+
+        -- 2. Next WOQUERY cycle: 1 current WORELAY preserves backup; 2nd distinct WORELAY suppresses
+        clock = clock + 35
+        outgoing = {}
+        handlers.WOQUERY('Dave Mon', 'GUILD', '')
+        handlers.WORELAY('Relay1 Mon', 'GUILD', worder_v2)
+        clock = clock + 4; for _, f in ipairs(timers) do f() end
+        sent = 0
+        for _, p in ipairs(outgoing) do if p[1] == 'WORELAY' then sent = sent + 1 end end
+        assert(sent == 1, 'single current WORELAY must keep backup alive')
+
+        clock = clock + 35
+        outgoing = {}
+        handlers.WOQUERY('Eve Mon', 'GUILD', '')
+        handlers.WORELAY('Relay1 Mon', 'GUILD', worder_v2)
+        handlers.WORELAY('Relay2 Mon', 'GUILD', worder_v2)
+        clock = clock + 4; for _, f in ipairs(timers) do f() end
+        sent = 0
+        for _, p in ipairs(outgoing) do if p[1] == 'WORELAY' then sent = sent + 1 end end
+        assert(sent == 0, 'two distinct current WORELAYs must suppress relayDirty')
+
+        -- 3. Next WOQUERY cycle: Relay1 from previous cycle must NOT leak (relaySeen reset), and stale direct WORDER must NOT suppress
+        clock = clock + 35
+        outgoing = {}
+        handlers.WOQUERY('Frank Mon', 'GUILD', '')
+        handlers.WORDER('Alice Mon', 'GUILD', worder_v1)
+        clock = clock + 4; for _, f in ipairs(timers) do f() end
+        sent = 0
+        for _, p in ipairs(outgoing) do if p[1] == 'WORELAY' then sent = sent + 1 end end
+        assert(sent == 1, 'stale direct WORDER must NOT suppress relayDirty')
+
+        -- 4. Current direct WORDER cancels immediately
+        clock = clock + 35
+        outgoing = {}
+        handlers.WOQUERY('Frank2 Mon', 'GUILD', '')
+        handlers.WORDER('Alice Mon', 'GUILD', worder_v2)
+        clock = clock + 4; for _, f in ipairs(timers) do f() end
+        sent = 0
+        for _, p in ipairs(outgoing) do if p[1] == 'WORELAY' then sent = sent + 1 end end
+        assert(sent == 0, 'direct WORDER must suppress relayDirty immediately')
+
+        -- 5. cached.rev=1, observed.rev=2 (via newer WORELAY): two relays with rev=1 must NOT suppress cached rev=1
+        handlers.WORDER('Alice Mon', 'GUILD', worder_v1) -- ensure cached is rev=1? Need fresh order where cached=1, observed=2
+    ''')
+    # Fresh order: cached=1 (direct v1), observed=2 (relayed v2) -> two rev=1 relays must NOT suppress
+    alice3 = make_client('AliceThree')
+    tick(alice3)
+    alice3.execute('''
+        OldKraken.WorkshopOrders:Show()
+        pickOrderRecipe(OldKrakenWorkshopOrdersFrame.orderForm, 'Relay potion', 171, 0, 9004)
+        click('Опублікувати')
+        for k in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['AliceThree Mon']) do orderKey = k end
+    ''')
+    tick(alice3)
+    alice3.execute("for _, p in ipairs(outgoing) do if p[1] == 'WORDER' then a3_v1 = p[2] end end")
+    a3_v1 = alice3.globals().a3_v1
+    alice3.execute('''
+        outgoing = {}
+        OldKraken.WorkshopOrders:Show(orderKey)
+        local b = OldKrakenWorkshopOrdersFrame.cancel
+        b.scripts.OnClick(b)
+    ''')
+    tick(alice3)
+    alice3.execute("for _, p in ipairs(outgoing) do if p[1] == 'WORDER' then a3_v2 = p[2] end end")
+    a3_v2 = alice3.globals().a3_v2
+
+    relay_split = make_client('BobSplit')
+    tick(relay_split)
+    relay_split.globals().a3_v1 = a3_v1
+    relay_split.globals().a3_v2 = a3_v2
+    relay_split.execute('''
+        handlers.WORDER('AliceThree Mon', 'GUILD', a3_v1) -- cached.rev = 1
+        handlers.WORELAY('RelayX Mon', 'GUILD', a3_v2)   -- observed.rev = 2
+        clock = clock + 35
+        outgoing = {}
+        handlers.WOQUERY('Ivan Mon', 'GUILD', '')
+        handlers.WORELAY('Relay1 Mon', 'GUILD', a3_v1)
+        handlers.WORELAY('Relay2 Mon', 'GUILD', a3_v1)
+        clock = clock + 4; for _, f in ipairs(timers) do f() end
+        local sent = 0
+        for _, p in ipairs(outgoing) do if p[1] == 'WORELAY' then sent = sent + 1 end end
+        assert(sent == 1, 'rev=1 relays must not suppress when observed.rev=2 even if cached.rev=1')
+    ''')
+    # 4. Newer WORELAY still updates observed even when relayDirty is active
+    alice2 = make_client('AliceTwo')
+    tick(alice2)
+    alice2.execute('''
+        OldKraken.WorkshopOrders:Show()
+        pickOrderRecipe(OldKrakenWorkshopOrdersFrame.orderForm, 'Relay potion', 171, 0, 9004)
+        click('Опублікувати')
+        for k in pairs(OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderOwners['AliceTwo Mon']) do orderKey = k end
+    ''')
+    tick(alice2)
+    alice2.execute('''
+        for _, p in ipairs(outgoing) do if p[1] == 'WORDER' then a2_v1 = p[2] end end
+    ''')
+    a2_v1 = alice2.globals().a2_v1
+    alice2.execute('''
+        outgoing = {}
+        OldKraken.WorkshopOrders:Show(orderKey)
+        local b = OldKrakenWorkshopOrdersFrame.cancel
+        b.scripts.OnClick(b)
+    ''')
+    tick(alice2)
+    alice2.execute('''
+        for _, p in ipairs(outgoing) do if p[1] == 'WORDER' then a2_v2 = p[2] end end
+    ''')
+    a2_v2 = alice2.globals().a2_v2
+    relay.globals().a2_v1 = a2_v1
+    relay.globals().a2_v2 = a2_v2
+    relay.execute('''
+        handlers.WORDER('AliceTwo Mon', 'GUILD', a2_v1)
+        clock = clock + 35
+        handlers.WOQUERY('Hank Mon', 'GUILD', '')
+        handlers.WORELAY('Relay1 Mon', 'GUILD', a2_v2)
+        local s = OldKraken.DB.workshop.guilds['Realm\\001Guild'].orderObserved
+        local updated = false
+        for _, o in pairs(s) do
+            if o.owner == 'AliceTwo Mon' and o.status == 'cancelled' and o.rev == 2 then updated = true end
+        end
+        assert(updated, 'newer WORELAY must still update observed')
+    ''')
+
+
 if __name__ == '__main__':
     test_core_perf_commands_and_metrics()
     test_comm_hex_codec_and_cache_counters()
@@ -706,4 +977,6 @@ if __name__ == '__main__':
     test_workshop_sync_suppresses_duplicate_relay_wridx()
     test_workshop_sync_multi_provider_backup_failover()
     test_group_finder_people_party_only_and_index_reuse()
+    test_comm_traffic_counters_and_commands()
+    test_workshop_orders_worelay_suppression()
     print('Perf diagnostics and codec/cache checks passed')

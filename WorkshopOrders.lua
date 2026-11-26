@@ -18,7 +18,7 @@ local professionIcons={[171]=136240,[164]=136241,[165]=136247,[197]=136249,[202]
 local statusColors={open={0.35,0.88,0.53},assigned={0.40,0.72,1},delivered={1,0.78,0.30},done={0.35,0.88,0.53},cancelled={1,0.42,0.38},expired={1,0.58,0.25}}
 local CARDS_PER_PAGE=4
 local active,identity,profile,scope,own,observed,intents=false,nil,nil,nil,{}, {}, {}
-local dirty,relayDirty,sequence,nextSync,lastQueries,nextDisplay={}, {},0,0,{},0
+local dirty,relayDirty,relaySeen,sequence,nextSync,lastQueries,nextDisplay={}, {}, {},0,0,{},0
 local requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
 local nextRelaySweep=0
 local lastSnapshotQuery=-60
@@ -257,7 +257,7 @@ end
 local function connect()
     local name=me(); local guild=type(GetGuildInfo)=='function' and GetGuildInfo('player'); local realm=resolveRealm()
     if not name or not textOK(guild,1,128) or not validRealm(realm) or not OldKraken.DB then
-        active,identity,profile,scope,own,observed,intents,dirty,relayDirty=false,nil,nil,nil,{}, {}, {}, {}, {}
+        active,identity,profile,scope,own,observed,intents,dirty,relayDirty,relaySeen=false,nil,nil,nil,{}, {}, {}, {}, {}, {}
         requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
         if window and not OldKraken.UIHub then window:Hide() end; return
     end
@@ -274,7 +274,7 @@ local function connect()
     scope.orderActionRelays={}; scope.orderPaymentRelays={}
     if type(scope.orderDeliveryTallies[name])~='table' then scope.orderDeliveryTallies[name]={} end
     active,identity,profile=true,name,guildKey
-    own,observed,intents,dirty,relayDirty={}, {}, {}, {}, {}
+    own,observed,intents,dirty,relayDirty,relaySeen={}, {}, {}, {}, {}, {}
     requestDirty,paymentDirty,resultDirty,resultRelayDirty={},{},{},{}
     local function loadOrders(source,target,requireOwner)
         if type(source)~='table' then return end
@@ -466,6 +466,18 @@ local function confirmPending(k,o,direct)
     intents[k]=nil; requestDirty[k]=nil
     if not applied and not relayedConfirmation then notify(T('Дію щодо замовлення не виконано'),displayOrderItem(o)..T(' · стан змінився'),k) end
 end
+local function suppressRelay(k,sender,o,isRelay)
+    if not relayDirty[k] then return end
+    local cached=scope.orderRelays[k] and decode(scope.orderRelays[k],nil,true)
+    if not cached or type(cached.rev)~='number' or not sameOrder(cached,o) or o.rev<cached.rev then return end
+    if not isRelay then
+        relayDirty[k]=nil; relaySeen[k]=nil
+    elseif relaySeen[k] and relaySeen[k]~=sender then
+        relayDirty[k]=nil; relaySeen[k]=nil
+    else
+        relaySeen[k]=sender
+    end
+end
 local function receiveOrder(sender,payload,isRelay)
     if not active or not nameOK(sender) or sender==identity or type(payload)~='string' or #payload>2560 then return end
     local o=decode(payload,sender,isRelay); if not o or o.owner==identity or (isRelay and sender==o.owner) then return end
@@ -476,7 +488,8 @@ local function receiveOrder(sender,payload,isRelay)
         if direct and not sameOrder(direct,o) then return end
     end
     if isRelay then
-        if previous and previous.rev>=o.rev then return end
+        if previous and previous.rev>o.rev then return end
+        if previous and previous.rev==o.rev then suppressRelay(k,sender,o,true); return end
         o.relayed=true; o.ownerRev=previous and (previous.ownerRev or (not previous.relayed and previous.rev) or 0) or 0
     else
         local ownerRev=previous and (previous.ownerRev or (not previous.relayed and previous.rev) or 0) or 0
@@ -485,6 +498,7 @@ local function receiveOrder(sender,payload,isRelay)
         o.ownerRev=o.rev
     end
     if not previous and size(observed)>=100 then return end
+    suppressRelay(k,sender,o,isRelay)
     if not isRelay then
         scope.orderRelays[k]=payload
     end
@@ -642,7 +656,7 @@ comm:RegisterHandler('WOQUERY',function(sender,_,payload)
     if now-lastSnapshotQuery>=30 then
         lastSnapshotQuery=now
         for k in pairs(own) do dirty[k]=true end
-        for k in pairs(scope.orderRelays) do relayDirty[k]=true end
+        for k in pairs(scope.orderRelays) do relayDirty[k]=true; relaySeen[k]=nil end
     end
     for k,entry in pairs(scope.orderResults) do if entry.owner==identity and entry.actor==sender then resultDirty[k]=true end end
     for k,entry in pairs(scope.orderResultRelays) do if entry.actor==sender then scheduleRelay(resultRelayDirty,k) end end
@@ -700,7 +714,7 @@ local function runOrdersTick()
         end
     end
     local expired=false; for k,o in pairs(own) do if o.created<GetServerTime()-2592000 then own[k],dirty[k]=nil,nil; expired=true end end
-    for k,o in pairs(observed) do if o.created<GetServerTime()-2592000 then observed[k],intents[k],relayDirty[k],scope.orderRelays[k]=nil,nil,nil,nil; expired=true end end
+    for k,o in pairs(observed) do if o.created<GetServerTime()-2592000 then observed[k],intents[k],relayDirty[k],relaySeen[k],scope.orderRelays[k]=nil,nil,nil,nil,nil; expired=true end end
     for k in pairs(scope.orderDeliveryTallies[identity]) do if not get(k) then scope.orderDeliveryTallies[identity][k]=nil end end
     finalizeExchanges()
     if expired then persist(); changed() end
@@ -726,7 +740,7 @@ local function runOrdersTick()
     local relayKey=next(relayDirty)
     if relayKey and #comm.queue<=8 then
         local payload=scope.orderRelays[relayKey]
-        if not payload or comm:SendProtocol('WORELAY',payload) then relayDirty[relayKey]=nil end
+        if not payload or comm:SendProtocol('WORELAY',payload) then relayDirty[relayKey]=nil; relaySeen[relayKey]=nil end
     end
     pumpRelay(resultDirty,scope.orderResults,'WORESULT','result',resultPayload)
     pumpRelay(resultRelayDirty,scope.orderResultRelays,'WORESR','result',resultPayload)
