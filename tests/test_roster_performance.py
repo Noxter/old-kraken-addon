@@ -48,6 +48,26 @@ OldKraken.DB.settings.roster.search='Member 500'
 roster:Render()
 assert(scroll.offset==0 and #visible()==1 and visible()[1].member.name=='Member 500')
 OldKraken.DB.settings.roster.search='no results'; roster:Render(); assert(#visible()==0)
+-- Roster render breakdown records roster.filter, roster.sort, roster.visible and roster.render with item counts
+local perfLog = {}
+local origPerfEnabled = OldKraken.perfEnabled
+local origDebugProfilestop = debugprofilestop
+local origPerfRecord = OldKraken.PerfRecord
+OldKraken.perfEnabled = true
+debugprofilestop = function() return 0 end
+OldKraken.PerfRecord = function(_, label, _, count) perfLog[label] = {calls = (perfLog[label] and perfLog[label].calls or 0) + 1, items = (perfLog[label] and perfLog[label].items or 0) + (count or 0)} end
+OldKraken.DB.settings.roster.search = ''
+roster:Render()
+local fullVisibleCount = #visible()
+OldKraken.DB.settings.roster.search = 'Member 500'
+roster:Render()
+assert(perfLog['roster.filter'].calls == 2 and perfLog['roster.filter'].items == 1000)
+assert(perfLog['roster.sort'].calls == 2 and perfLog['roster.sort'].items == 501)
+assert(perfLog['roster.visible'].calls == 2 and perfLog['roster.visible'].items == fullVisibleCount + 1)
+assert(perfLog['roster.render'].calls == 2)
+OldKraken.perfEnabled = origPerfEnabled
+debugprofilestop = origDebugProfilestop
+OldKraken.PerfRecord = origPerfRecord
 -- Bursty roster/presence notifications cause one reload, not 500 reloads.
 local loads,renders=0,0
 local oldLoad,oldRender=roster.Load,roster.Render

@@ -1175,13 +1175,18 @@ local function runRender(self)
         CreateRosterWindow()
     end
 
+    local perf = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and type(OldKraken.PerfRecord) == 'function'
+    local tFilter = perf and debugprofilestop() or nil
     filteredData = {}
     for _, member in ipairs(rosterData) do
         if MatchesFilters(member) then
             filteredData[#filteredData + 1] = member
         end
     end
+    if tFilter then OldKraken:PerfRecord('roster.filter', debugprofilestop() - tFilter, #rosterData) end
+    local tSort = perf and debugprofilestop() or nil
     table.sort(filteredData, SortMembers)
+    if tSort then OldKraken:PerfRecord('roster.sort', debugprofilestop() - tSort, #filteredData) end
 
     UpdateSummary()
     UpdateFilterButtonLabels()
@@ -1214,6 +1219,7 @@ end
 
 function Roster:RenderVisible()
     if not rosterFrame or drawing then return end
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     drawing = true
     local content = rosterFrame.contentFrame
     local scroll = rosterFrame.scrollFrame
@@ -1360,6 +1366,7 @@ function Roster:RenderVisible()
         rowFrames[index]:Hide()
     end
     drawing = false
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.visible', debugprofilestop() - t0, count) end
 end
 
 local function Pack(...) return {n = select('#', ...), ...} end
