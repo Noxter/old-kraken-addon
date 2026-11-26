@@ -372,6 +372,7 @@ function Events:PumpRaidInvites()
     end
     if inRaid then raidInvites=nil end
 end
+local raidInviteFrame
 local function queueRaidInvites(key,names)
     local e=events[key]
     if not active or not e or e.owner~=identity or e.cancelled or e.kind~='raid' or not canLeadInvites() then return false end
@@ -384,6 +385,7 @@ local function queueRaidInvites(key,names)
         end
     end
     Events:PumpRaidInvites()
+    if raidInvites and type(raidInviteFrame.Show)=='function' then raidInviteFrame:Show() end
     return added>0
 end
 function Events:InviteMember(key,name) return queueRaidInvites(key,{name}) end
@@ -396,14 +398,22 @@ function Events:InviteAll(key)
     end; table.sort(names)
     return queueRaidInvites(key,names)
 end
-local raidInviteFrame=CreateFrame('Frame')
+raidInviteFrame=CreateFrame('Frame')
 raidInviteFrame:RegisterEvent('GROUP_ROSTER_UPDATE')
-raidInviteFrame:SetScript('OnEvent',function() Events:PumpRaidInvites() end)
+if type(raidInviteFrame.Hide)=='function' then raidInviteFrame:Hide() end
+raidInviteFrame:SetScript('OnEvent',function() Events:PumpRaidInvites(); if not raidInvites and type(raidInviteFrame.Hide)=='function' then raidInviteFrame:Hide() end end)
 local inviteElapsed=0
 raidInviteFrame:SetScript('OnUpdate',function(_,elapsed)
-    if not raidInvites then inviteElapsed=0; return end
+    if not raidInvites then
+        inviteElapsed=0
+        if type(raidInviteFrame.Hide)=='function' then raidInviteFrame:Hide() end
+        return
+    end
     inviteElapsed=inviteElapsed+elapsed
-    if inviteElapsed>=0.8 then inviteElapsed=0; Events:PumpRaidInvites() end
+    if inviteElapsed>=0.8 then
+        inviteElapsed=0; Events:PumpRaidInvites()
+        if not raidInvites and type(raidInviteFrame.Hide)=='function' then raidInviteFrame:Hide() end
+    end
 end)
 
 local function fitCancellation(e)
@@ -544,41 +554,46 @@ frame:SetScript('OnEvent',function(_,event)
     connect()
     if (event=='GUILD_ROSTER_UPDATE' or event=='GROUP_ROSTER_UPDATE') and window and window:IsShown() and refresh then refresh() end
 end)
-if C_Timer and C_Timer.NewTicker then
-    C_Timer.NewTicker(3,function()
-        if not active then connect(); return end
-        local name,guild=character(),type(GetGuildInfo)=='function' and GetGuildInfo('player')
-        local realm=resolveRealm()
-        if name~=identity or not validText(guild,1,128) or not validRealm(realm) or (realm..'\001'..guild..'\001'..name)~=profile then active=false; connect(); return end
-        local removed = false
-        for key,e in pairs(events) do
-            if e.when < GetServerTime()-172800 then events[key],directEvents[key],relayEvents[key],dirty[key],intents[key],newDirty[key],relayDirty[key],storage.relays[key]=nil,nil,nil,nil,nil,nil,nil,nil; removed=true end
-        end
-        if removed then save(); fire() end
-        local now=GetTime()
-        if now>=nextRetry then
-            if comm:SendProtocol('CEVQUERY','') then nextRetry=now+180 end
-            for key in pairs(intents) do
-                local e=events[key]; local intent=intents[key]
-                if e and e.owner~=identity then
-                    local fields={e.owner,e.id,intent.role,string.format('%.0f',intent.version)}
-                    fields[5]=codec:RoleCapabilityCode()
-                    comm:SendProtocol('CEVRSVP',codec._pack(fields))
-                end
+local function runEventsTick()
+    if not active then connect(); return end
+    local name,guild=character(),type(GetGuildInfo)=='function' and GetGuildInfo('player')
+    local realm=resolveRealm()
+    if name~=identity or not validText(guild,1,128) or not validRealm(realm) or (realm..'\001'..guild..'\001'..name)~=profile then active=false; connect(); return end
+    local removed = false
+    for key,e in pairs(events) do
+        if e.when < GetServerTime()-172800 then events[key],directEvents[key],relayEvents[key],dirty[key],intents[key],newDirty[key],relayDirty[key],storage.relays[key]=nil,nil,nil,nil,nil,nil,nil,nil; removed=true end
+    end
+    if removed then save(); fire() end
+    local now=GetTime()
+    if now>=nextRetry then
+        if comm:SendProtocol('CEVQUERY','') then nextRetry=now+180 end
+        for key in pairs(intents) do
+            local e=events[key]; local intent=intents[key]
+            if e and e.owner~=identity then
+                local fields={e.owner,e.id,intent.role,string.format('%.0f',intent.version)}
+                fields[5]=codec:RoleCapabilityCode()
+                comm:SendProtocol('CEVRSVP',codec._pack(fields))
             end
         end
-        local key=next(dirty)
-        if key then
-            local e=events[key]
-            local created=e and tonumber(e.id:match('^(%d+)%-'))
-            local announce=e and newDirty[key] and not e.cancelled and created and GetServerTime()-created<=120
-            if not e or comm:SendProtocol(announce and 'CVNEW' or 'CEVENT',encode(e)) then dirty[key],newDirty[key]=nil,nil end
-        end
-        local relayKey=next(relayDirty)
-        if relayKey and #comm.queue<=8 then
-            local payload=storage.relays[relayKey]
-            if not payload or comm:SendProtocol('CVSTATE',payload) then relayDirty[relayKey]=nil end
-        end
+    end
+    local key=next(dirty)
+    if key then
+        local e=events[key]
+        local created=e and tonumber(e.id:match('^(%d+)%-'))
+        local announce=e and newDirty[key] and not e.cancelled and created and GetServerTime()-created<=120
+        if not e or comm:SendProtocol(announce and 'CVNEW' or 'CEVENT',encode(e)) then dirty[key],newDirty[key]=nil,nil end
+    end
+    local relayKey=next(relayDirty)
+    if relayKey and #comm.queue<=8 then
+        local payload=storage.relays[relayKey]
+        if not payload or comm:SendProtocol('CVSTATE',payload) then relayDirty[relayKey]=nil end
+    end
+end
+if C_Timer and C_Timer.NewTicker then
+    C_Timer.NewTicker(3,function()
+        local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+        runEventsTick()
+        if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('events.ticker', debugprofilestop() - t0) end
     end)
 end
 

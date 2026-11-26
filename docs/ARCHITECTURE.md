@@ -222,10 +222,11 @@ SLASH_OLDKRAKEN1 = "/okr"        SLASH_OLDKRAKEN2 = "/oldkraken"
 
 Порядок диспетчеризації:
 
-1. `OldKraken.Communication:HandleCommand(command)` — `comm status`, `comm test`. Повертає `true` → вихід.
+1. `OldKraken.Communication:HandleCommand(command)` — `comm status`, `comm test`, `comm traffic [reset]`. Повертає `true` → вихід.
 2. `OldKraken.GroupFinderAPI:HandleCommand(command)` — лише `group api`.
-3. Локальні підкоманди: `recipes`, `orders`, `workshop`|`craft`, `events`|`calendar`, `alerts group|request|event|workshop`, `group status`, `group sync`, `group`|`groups`.
-4. Фолбеки: `refresh` → `Roster:RequestUpdate()`; **будь-яка невідома команда → відкриває ростер**.
+3. `OldKraken:HandlePerfCommand(command)` — `perf [on|off|reset|report]`.
+4. Локальні підкоманди: `recipes`, `orders`, `workshop`|`craft`, `events`|`calendar`, `alerts group|request|event|workshop`, `group status`, `group sync`, `group`|`groups`.
+5. Фолбеки: `refresh` → `Roster:RequestUpdate()`; **будь-яка невідома команда → відкриває ростер**.
 
 **Немає help-виводу.** Невідома команда тихо відкриває ростер. Якщо додаєш підкоманду — вписуй її **перед** фолбеком `else` і пам'ятай, що `Communication` перевіряється першим (не називай підкоманду `comm …`, якщо не хочеш перехоплення).
 
@@ -259,7 +260,7 @@ cd ~/Projects/old-kraken-alpha
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-- **63 файли** `tests/test_*.py`.
+- **64 файли** `tests/test_*.py`.
 - Рантайм: `lupa==2.8`, `from lupa.lua51 import LuaRuntime` — **Lua 5.1**.
 - **`.venv` не потрібен**: `lupa 2.8` встановлено в user-site `~/.local/lib/python3.14/site-packages/`; `lua`/`lua5.1`/`luac` у системі **немає**. Якщо агент запускає тести в ізольованій пісочниці, `~/.local` може бути недоступним (`ModuleNotFoundError: No module named 'lupa'`) — у такому разі цикл тестів треба запускати поза пісочницею (`BypassSandbox: true`).
 - **Немає pytest/unittest/conftest/Makefile/requirements** — це прості скрипти з Lua-`assert` усередині `lua.execute('''…''')`, успіх = `print('PASS: …')`.
@@ -279,7 +280,7 @@ for test in tests/test_*.py; do python "$test" || exit 1; done
 
 | Воркфлоу | Тригер | Що робить |
 |---|---|---|
-| `validate-pr.yml` | PR + push у `main`/`alpha` (**`alpha` — незакомічена зміна**) | Python 3.12, `lupa==2.8`, перевірка існування файлів з TOC через `awk`, потім цикл по `tests/test_*.py` |
+| `validate-pr.yml` | PR + push у `main`/`alpha` | Python 3.12, `lupa==2.8`, перевірка існування файлів з TOC через `awk`, потім цикл по `tests/test_*.py` |
 | `package-alpha.yml` | push у `alpha` + manual | Збирає ZIP з TOC-файлів + `Media/OldKrakenKraken.tga`, `OldKrakenEmblem.tga`, `RoleSlot.tga`, `StatusOnline.tga`, `StatusOffline.tga` |
 | `package-release.yml` | релізний | Те саме для релізу |
 

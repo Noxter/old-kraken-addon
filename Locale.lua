@@ -144,6 +144,9 @@ local english = {
     ["Отримано ACK від "] = "Received ACK from ",
     [". Двосторонній обмін працює."] = ". Two-way communication is working.",
     ["Використання: /okr comm status або /okr comm test"] = "Usage: /okr comm status or /okr comm test",
+    ["Використання: /okr comm status, /okr comm test або /okr comm traffic [reset]"] = "Usage: /okr comm status, /okr comm test, or /okr comm traffic [reset]",
+    ["Мережевий трафік Old Kraken (%d с):"] = "Old Kraken network traffic (%ds):",
+    ["Статистику мережевого трафіку скинуто."] = "Network traffic statistics cleared.",
     ["RegisterAddonMessagePrefix недоступний у цьому клієнті."] = "RegisterAddonMessagePrefix is unavailable in this client.",
     ["Префікс OLDKRKN зареєстровано."] = "OLDKRKN prefix registered.",
     ["Не вдалося зареєструвати префікс OLDKRKN: "] = "Could not register the OLDKRKN prefix: ",
@@ -894,6 +897,13 @@ local english = {
     ["Рівень %d"] = "Level %d",
     ["Аддон: "] = "Addon: ",
     ["Не виявлено"] = "Not detected",
+    ["Профілювання Old Kraken увімкнено. Пограйте 1–2 хв і виконайте /okr perf."] = "Old Kraken profiling enabled. Play for 1-2 min and run /okr perf.",
+    ["Профілювання Old Kraken вимкнено."] = "Old Kraken profiling disabled.",
+    ["Статистику профілювання скинуто."] = "Profiling statistics cleared.",
+    ["Використання: /okr perf [on|off|reset|report]"] = "Usage: /okr perf [on|off|reset|report]",
+    ["Звіт продуктивності Old Kraken:"] = "Old Kraken performance report:",
+    ["Зібраних даних поки немає (увімкніть через /okr perf on)."] = "No samples collected yet (enable with /okr perf on).",
+    ["Lua-лічильники ще не зібрані (увімкніть через /okr perf on)."] = "Lua counters not collected yet (enable with /okr perf on).",
 }
 
 local language = 'ukUA'

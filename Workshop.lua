@@ -17,8 +17,8 @@ local professions = {
     {id=393, name='Свіжування'}, {id=185, name='Кулінарія'},
     {id=129, name='Перша допомога'}, {id=356, name='Риболовля'},
 }
-local byID = {}
-for _,entry in ipairs(professions) do byID[entry.id]=entry end
+local byID, orderByID = {}, {}
+for i,entry in ipairs(professions) do byID[entry.id]=entry; orderByID[entry.id]=i end
 local professionArt={
     [171]={136240,'Alchemy'}, [164]={136241,'Blacksmithing'}, [165]={136247,'Leatherworking'},
     [197]={136249,'Tailoring'}, [202]={136243,'Engineering'}, [333]={136244,'Enchanting'},
@@ -220,8 +220,10 @@ function Workshop:RefreshNativeProfessions()
     nativeScan=job
     lastNativeScan=now
     local function step()
+      local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
       if nativeScan~=job or not active or profile~=job.profile or identity~=job.identity then
           if nativeScan==job then nativeScan=nil end
+          if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.native', debugprofilestop() - t0) end
           return
       end
       local stop=math.min(#members,job.index+24,10000)
@@ -241,10 +243,12 @@ function Workshop:RefreshNativeProfessions()
       end
       job.index=stop+1
       if job.index<=math.min(#members,10000) then
+          if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.native', debugprofilestop() - t0) end
           if C_Timer and C_Timer.After then C_Timer.After(0,step) else step() end
       else
           nativeProfessions=fresh; nativeScan=nil
           if C_Timer and C_Timer.After then changed() end
+          if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.native', debugprofilestop() - t0) end
       end
     end
     if C_Timer and C_Timer.After then C_Timer.After(0,step) else step() end
@@ -263,6 +267,9 @@ function Workshop:GetMemberProfessions(name)
     elseif nativeProfessions[name] then
         for _,p in ipairs(nativeProfessions[name]) do result[#result+1]=p end
     end
+    table.sort(result, function(a, b)
+        return (orderByID[a.id] or 999) < (orderByID[b.id] or 999)
+    end)
     return result
 end
 function Workshop:ProfessionInfo(id)
@@ -340,21 +347,30 @@ for _,event in ipairs({'PLAYER_LOGIN','PLAYER_ENTERING_WORLD','PLAYER_GUILD_UPDA
 end
 listener:SetScript('OnEvent',function(_,event)
     ownProfessionCache=nil
-    if event=='PLAYER_LOGIN' or event=='PLAYER_ENTERING_WORLD' or event=='PLAYER_GUILD_UPDATE' or event=='GUILD_ROSTER_UPDATE' then connect(); changed()
+    if event=='GUILD_ROSTER_UPDATE' then
+        local wasActive,prevProfile,prevIdentity=active,profile,identity
+        connect()
+        if active~=wasActive or profile~=prevProfile or identity~=prevIdentity then changed() else scheduleRender() end
+    elseif event=='PLAYER_LOGIN' or event=='PLAYER_ENTERING_WORLD' or event=='PLAYER_GUILD_UPDATE' then connect(); changed()
     elseif active then nextScan=0; changed() end
 end)
+local function runWorkshopTick()
+    connect(); if not active then return end
+    local now=GetTime()
+    if now>=nextScan then local complete=updateOwn(); nextScan=now+(complete and 60 or (scanState=='checking' and 3 or 15)) end
+    if queryPending and comm:SendProtocol('WKQUERY','') then queryPending=false end
+    if pending and records[identity] and comm:SendProtocol('WKPROF',encode(records[identity])) then pending=false end
+    local owner=next(professionRelayDirty)
+    if owner and #comm.queue<=8 then
+        local payload=store.professionRelays[owner]
+        if not payload or owner==identity or comm:SendProtocol('WKRELAY',codec._pack({owner,payload})) then professionRelayDirty[owner]=nil end
+    end
+end
 if C_Timer and type(C_Timer.NewTicker)=='function' then
     C_Timer.NewTicker(3,function()
-        connect(); if not active then return end
-        local now=GetTime()
-        if now>=nextScan then local complete=updateOwn(); nextScan=now+(complete and 60 or (scanState=='checking' and 3 or 15)) end
-        if queryPending and comm:SendProtocol('WKQUERY','') then queryPending=false end
-        if pending and records[identity] and comm:SendProtocol('WKPROF',encode(records[identity])) then pending=false end
-        local owner=next(professionRelayDirty)
-        if owner and #comm.queue<=8 then
-            local payload=store.professionRelays[owner]
-            if not payload or owner==identity or comm:SendProtocol('WKRELAY',codec._pack({owner,payload})) then professionRelayDirty[owner]=nil end
-        end
+        local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+        runWorkshopTick()
+        if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.ticker', debugprofilestop() - t0) end
     end)
 end
 

@@ -155,7 +155,12 @@ def setup_env(lang='ukUA', workshop_loaded=True, in_guild=True):
             }
             OldKraken.WorkshopOrders = {
                 Show = function() orderShows = orderShows + 1 end,
-                OpenCreateForm = function() orderCreateOpens = orderCreateOpens + 1; return true end,
+                OpenCreateForm = function(_, prof, onBack)
+                    orderCreateOpens = orderCreateOpens + 1
+                    orderCreateArgs = orderCreateArgs or {}
+                    orderCreateArgs[#orderCreateArgs + 1] = { prof = prof, onBack = onBack }
+                    return true
+                end,
             }
         end
     ''')
@@ -200,11 +205,34 @@ lua.execute('''
     assert(whispers[1] == 'Alice Tester' and invites[1] == 'Alice Tester')
     assert(recipeJumps[1].name == 'Alice Tester' and recipeJumps[1].id == 171)
     assert(orderShows == 1 and orderCreateOpens == 1)
+    assert(orderCreateArgs[1].prof == 171 and type(orderCreateArgs[1].onBack) == 'function')
 
     -- Returning to roster preserves filters/sort and scroll offset
     p.backButton.scripts.OnClick(p.backButton)
     assert(not p:IsShown() and rf.scrollFrame:IsShown() and rf.scrollFrame:GetVerticalScroll() == 80)
+    -- External onBack from Create Order returns straight to Alice's profile
+    orderCreateArgs[1].onBack()
+    assert(rf.profilePanel:IsShown() and rf.profilePanel.member.name == 'Alice Tester')
+    p.backButton.scripts.OnClick(p.backButton)
     rf.scrollFrame:SetVerticalScroll(0)
+
+    -- Verify profile does not re-sort crafting professions by numeric ID (171 before 164 follows GetMemberProfessions)
+    profs['Alice Tester'] = {
+        { id = 171, rank = 300, maximum = 300 },
+        { id = 164, rank = 300, maximum = 300 },
+    }
+    Roster:RenderVisible()
+    aliceRow = nil
+    for _, f in ipairs(frames) do
+        if f.professions and f.member and f.member.name == 'Alice Tester' then aliceRow = f; break end
+    end
+    assert(aliceRow ~= nil)
+    aliceRow.cellHovers[1].scripts.OnClick(aliceRow.cellHovers[1], 'LeftButton')
+    assert(p.profRows[1].professionID == aliceRow.professions[1].professionID, 'profile order must match roster row order')
+    assert(p.profRows[2].professionID == aliceRow.professions[2].professionID, 'profile order must match roster row order')
+    assert(p.profRows[1].professionID == 171 and p.profRows[2].professionID == 164, 'profile must follow GetMemberProfessions order')
+    assert(p.firstCraftProfessionID == 171, 'firstCraftProfessionID must match first displayed crafting profession')
+    p.backButton.scripts.OnClick(p.backButton)
     Roster:RenderVisible()
     for _, f in ipairs(frames) do
         if f.professions and f.member and f.member.name == 'Alice Tester' then aliceRow = f; break end

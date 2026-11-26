@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.5.6"
+OldKraken.version = "0.5.7"
 local metadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
 if type(metadata)=='function' and type(ADDON_NAME)=='string' then
     local ok,version=pcall(metadata,ADDON_NAME,'Version')
@@ -1253,6 +1253,116 @@ function OldKraken:Fire(eventName, ...)
     for _, callback in ipairs(listeners) do
         callback(...)
     end
+end
+
+OldKraken.perfEnabled = false
+OldKraken.perfStats = {}
+
+function OldKraken:PerfRecord(label, elapsedMs)
+    if type(label) ~= 'string' or type(elapsedMs) ~= 'number' or elapsedMs ~= elapsedMs or elapsedMs < 0 then
+        return
+    end
+    local s = self.perfStats[label]
+    if not s then
+        s = {calls = 0, total = 0, max = 0, over5 = 0, over10 = 0, over50 = 0}
+        self.perfStats[label] = s
+    end
+    s.calls = s.calls + 1
+    s.total = s.total + elapsedMs
+    if elapsedMs > s.max then s.max = elapsedMs end
+    if elapsedMs >= 5 then s.over5 = s.over5 + 1 end
+    if elapsedMs >= 10 then s.over10 = s.over10 + 1 end
+    if elapsedMs >= 50 then s.over50 = s.over50 + 1 end
+end
+
+local function addonProfilerMetric(metricName)
+    if not C_AddOnProfiler or type(C_AddOnProfiler.GetAddOnMetric) ~= 'function'
+        or type(Enum) ~= 'table' or type(Enum.AddOnProfilerMetric) ~= 'table' then
+        return nil
+    end
+    local metric = Enum.AddOnProfilerMetric[metricName]
+    if metric == nil then return nil end
+    local ok, value = pcall(C_AddOnProfiler.GetAddOnMetric, ADDON_NAME, metric)
+    if ok and type(value) == 'number' and value == value then return value end
+    return nil
+end
+
+local function formatMetric(v, fmt)
+    if v == nil then return 'n/a' end
+    return string.format(fmt, v)
+end
+
+function OldKraken:PerfReport()
+    self:Print(T("Звіт продуктивності Old Kraken:"))
+    local recent = addonProfilerMetric('RecentAverageTime')
+    local session = addonProfilerMetric('SessionAverageTime')
+    local peak = addonProfilerMetric('PeakTime')
+    local over5 = addonProfilerMetric('CountTimeOver5Ms')
+    local over10 = addonProfilerMetric('CountTimeOver10Ms')
+    local over50 = addonProfilerMetric('CountTimeOver50Ms')
+    local hasProfiler = recent or session or peak or over5 or over10 or over50
+    if hasProfiler then
+        self:Print(string.format(
+            "  C_AddOnProfiler: recent=%s, session=%s, peak=%s, >5ms=%s, >10ms=%s, >50ms=%s",
+            formatMetric(recent, "%.2fms"), formatMetric(session, "%.2fms"), formatMetric(peak, "%.2fms"),
+            formatMetric(over5, "%d"), formatMetric(over10, "%d"), formatMetric(over50, "%d")
+        ))
+    end
+    local list = {}
+    for label, s in pairs(self.perfStats or {}) do
+        if type(s) == 'table' and (s.calls or 0) > 0 then
+            list[#list + 1] = {label = label, stat = s}
+        end
+    end
+    if #list == 0 then
+        if not hasProfiler then
+            self:Print(T("Зібраних даних поки немає (увімкніть через /okr perf on)."))
+        else
+            self:Print(T("Lua-лічильники ще не зібрані (увімкніть через /okr perf on)."))
+        end
+        return
+    end
+    table.sort(list, function(a, b)
+        if a.stat.total ~= b.stat.total then return a.stat.total > b.stat.total end
+        return a.label < b.label
+    end)
+    for _, item in ipairs(list) do
+        local s = item.stat
+        self:Print(string.format(
+            "  %s: calls=%d, total=%.2fms, avg=%.2fms, max=%.2fms (>5:%d >10:%d >50:%d)",
+            item.label, s.calls, s.total, s.total / s.calls, s.max, s.over5, s.over10, s.over50
+        ))
+    end
+end
+
+function OldKraken:HandlePerfCommand(command)
+    command = string.lower(((command or ""):gsub('^%s+', ''):gsub('%s+$', '')))
+    local subcommand
+    if command == "perf" then
+        subcommand = ""
+    else
+        subcommand = string.match(command, "^perf%s+(.+)$")
+    end
+    if subcommand == nil then
+        return false
+    end
+    if subcommand == "on" then
+        self.perfStats = {}
+        self.perfEnabled = true
+        self:Print(T("Профілювання Old Kraken увімкнено. Пограйте 1–2 хв і виконайте /okr perf."))
+    elseif subcommand == "off" then
+        self.perfEnabled = false
+        self:Print(T("Профілювання Old Kraken вимкнено."))
+        self:PerfReport()
+    elseif subcommand == "reset" then
+        self.perfStats = {}
+        self:Print(T("Статистику профілювання скинуто."))
+    elseif subcommand == "" or subcommand == "report" then
+        self:PerfReport()
+    else
+        self:Print(T("Використання: /okr perf [on|off|reset|report]"))
+    end
+    return true
 end
 
 function OldKraken.GetGuildDisplayName()

@@ -48,12 +48,23 @@ local function connect()
     active,identity,profile=true,name,key
     indices,indexCount,jobs,incoming,lastRequest={},0,{},{},{}; nextQuery=0
 end
+local validatedSnapshots=setmetatable({},{__mode='k'})
 local function snapshot(owner)
     if owner==identity then return recipes:ExportSnapshot() end
     local saved=store.recipeDirectSnapshots[owner]
     if type(saved)~='table' or not int(saved.rev,1,9000000000000000) or type(saved.records)~='table' or #saved.records>5000 then return nil end
+    local cached=validatedSnapshots[saved]
+    if cached and cached.rev==saved.rev and cached.count==#saved.records then return saved.rev,saved.records end
     for _,r in ipairs(saved.records) do if not recipes:ValidateSnapshotRecord(r) then return nil end end
+    validatedSnapshots[saved]={rev=saved.rev,count=#saved.records}
     return saved.rev,saved.records
+end
+local function snapshotMeta(owner)
+    if owner==identity then
+        if type(recipes.ExportSnapshotMeta)=='function' then return recipes:ExportSnapshotMeta() end
+        local rev,recs=recipes:ExportSnapshot(); return rev,recs and #recs or nil
+    end
+    local rev,recs=snapshot(owner); return rev,recs and #recs or nil
 end
 local function scheduleIndex(target,owner)
     local k=target..'\001'..owner
@@ -70,9 +81,65 @@ comm:RegisterHandler('WRQ',function(sender,_,payload)
     lastRequest[sender]=now; scheduleIndex(sender,identity)
     for owner in pairs(store.recipeDirectSnapshots) do if owner~=identity then scheduleIndex(sender,owner) end end
 end)
+local function targetMatchesSelf(part1)
+    if not active or not identity then return true end
+    local first, last, sz = part1:find('(%d+):', 1)
+    if first ~= 1 or not sz or #sz > 4 then return true end
+    sz = tonumber(sz)
+    if not sz or last + sz > #part1 then return true end
+    return part1:sub(last + 1, last + sz) == identity
+end
+if type(comm.part1Filters)=='table' then
+    comm.part1Filters.WRPAGE=targetMatchesSelf
+    comm.part1Filters.WRGET=targetMatchesSelf
+end
+local MAX_STALL_ATTEMPTS = 2
+local function storeBackup(pending, sender, rev, count)
+    if type(pending.backups) ~= 'table' then pending.backups = {} end
+    if type(pending.failed) == 'table' and pending.failed[sender] then return end
+    local existing = pending.backups[sender]
+    if existing and existing.rev > rev then return end
+    if not existing and size(pending.backups) >= 8 then return end
+    pending.backups[sender] = { rev = rev, count = count }
+end
+local function pickBackup(pending, owner)
+    if type(pending.backups) ~= 'table' then return nil end
+    local bestName, bestEntry
+    for name, entry in pairs(pending.backups) do
+        if not (type(pending.failed) == 'table' and pending.failed[name]) then
+            if not bestEntry
+                or entry.rev > bestEntry.rev
+                or (entry.rev == bestEntry.rev and (name == owner or (bestName ~= owner and name < bestName))) then
+                bestName, bestEntry = name, entry
+            end
+        end
+    end
+    if bestName then pending.backups[bestName] = nil end
+    return bestName, bestEntry
+end
 comm:RegisterHandler('WRIDX',function(sender,_,payload)
     if not active or not text(sender,128) or sender==identity then return end
-    local f=codec._unpackFields(payload,4); if not f or #f~=4 or f[1]~=identity or not text(f[2],128) or f[2]==identity then return end
+    local f=codec._unpackFields(payload,4); if not f or #f~=4 or not text(f[1],128) or not text(f[2],128) then return end
+    if f[1]~=identity then
+        local target,owner,rev=f[1],f[2],tonumber(f[3])
+        if owner~=identity and int(rev,1,9000000000000000) then
+            local k=target..'\001'..owner
+            local entry=indices[k]
+            if entry~=nil then
+                local saved=store.recipeDirectSnapshots[owner]
+                local ourRev=type(saved)=='table' and tonumber(saved.rev) or 0
+                if rev>=(ourRev or 0) then
+                    if sender==owner or (entry.seenRelay and entry.seenRelay~=sender) then
+                        indices[k]=nil; indexCount=math.max(0,indexCount-1)
+                    else
+                        entry.seenRelay=sender
+                    end
+                end
+            end
+        end
+        return
+    end
+    if f[2]==identity then return end
     local owner,rev,count=f[2],tonumber(f[3]),tonumber(f[4])
     if not int(rev,1,9000000000000000) or rev>GetServerTime()*1000+600000 or not int(count,0,5000) then return end
     local old=store.recipeSnapshotViews[owner]; local oldRev=type(old)=='table' and old.rev or 0
@@ -87,27 +154,47 @@ comm:RegisterHandler('WRIDX',function(sender,_,payload)
     local now=GetTime()
     if pending and now<pending.expires and now-pending.lastProgress<180 then
         if pending.provider==owner then
-            if not direct or rev<=pending.rev then return end
-        elseif not direct and (pending.provider==sender or now-pending.lastProgress<45) then return end
+            if not direct or rev<=pending.rev then
+                if sender~=pending.provider then storeBackup(pending,sender,rev,count) end
+                return
+            end
+        elseif not direct and (pending.provider==sender or now-pending.lastProgress<45) then
+            if sender~=pending.provider then storeBackup(pending,sender,rev,count) end
+            return
+        end
     end
     if not pending and size(incoming)>=8 then return end
-    incoming[owner]={provider=sender,rev=rev,count=count,parts={},partPayloads={},received=0,recordCount=0,expires=now+21600,lastProgress=now,sent=false}
+    local backups=pending and pending.backups or {}
+    local failed=pending and pending.failed or {}
+    backups[sender]=nil
+    failed[sender]=nil
+    incoming[owner]={provider=sender,rev=rev,count=count,parts={},partPayloads={},received=0,recordCount=0,expires=now+21600,lastProgress=now,lastNewProgress=now,sent=false,stalledAttempts=0,backups=backups,failed=failed}
 end)
-comm:RegisterHandler('WRGET',function(sender,_,payload)
+local function handleWRGET(sender,payload)
     if not active or not text(sender,128) or sender==identity then return end
     local f=codec._unpackFields(payload,3); if not f or #f~=3 or f[1]~=identity or not text(f[2],128) then return end
     local rev,records=snapshot(f[2]); if not rev or rev~=tonumber(f[3]) then return end
     local jobKey=sender..'\001'..f[2]
     if jobs[jobKey] or size(jobs)>=10 then return end
-    local chunks,chunk={},{}
+    local headerBytes=#codec._pack({sender,f[2],string.format('%.0f',rev),999,999})
+    local chunks,chunk,chunkBytes={}, {}, headerBytes
     for _,r in ipairs(records) do
         local fields={r.recipe,r.item,r.profession,r.seen,r.name,r.product,r.deleted and 'D' or 'L'}
-        local nextChunk={unpack(chunk)}; for _,v in ipairs(fields) do nextChunk[#nextChunk+1]=v end
-        local probe={sender,f[2],string.format('%.0f',rev),999,999}; for _,v in ipairs(nextChunk) do probe[#probe+1]=v end
-        if #nextChunk>112 or #codec._pack(probe)>2300 then chunks[#chunks+1]=chunk; chunk=fields else chunk=nextChunk end
+        local fieldsBytes=#codec._pack(fields)
+        if #chunk>0 and (#chunk+7>112 or chunkBytes+fieldsBytes>2300) then
+            chunks[#chunks+1]=chunk; chunk=fields; chunkBytes=headerBytes+fieldsBytes
+        else
+            for _,v in ipairs(fields) do chunk[#chunk+1]=v end
+            chunkBytes=chunkBytes+fieldsBytes
+        end
     end
     if #chunk>0 or #chunks==0 then chunks[#chunks+1]=chunk end
     jobs[jobKey]={target=sender,owner=f[2],rev=rev,chunks=chunks,pos=1,expires=GetTime()+21600}
+end
+comm:RegisterHandler('WRGET',function(sender,_,payload)
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    handleWRGET(sender,payload)
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.wrget', debugprofilestop() - t0) end
 end)
 comm:RegisterHandler('WRPAGE',function(sender,_,payload)
     if not active or not text(sender,128) or sender==identity then return end
@@ -130,8 +217,9 @@ comm:RegisterHandler('WRPAGE',function(sender,_,payload)
         records[#records+1]=r
     end
     if pending.recordCount+#records>pending.count then incoming[owner]=nil; return end
+    local progressNow=GetTime()
     pending.total=total; pending.parts[part]=records; pending.partPayloads[part]=payload
-    pending.recordCount=pending.recordCount+#records; pending.received=pending.received+1; pending.lastProgress=GetTime()
+    pending.recordCount=pending.recordCount+#records; pending.received=pending.received+1; pending.lastProgress=progressNow; pending.lastNewProgress=progressNow; pending.stalledAttempts=0
     if pending.received~=total then return end
     local all,seen={},{}
     for i=1,total do for _,r in ipairs(pending.parts[i]) do
@@ -155,21 +243,43 @@ end)
 local listener=CreateFrame('Frame')
 for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE'}) do pcall(listener.RegisterEvent,listener,event) end
 listener:SetScript('OnEvent',connect)
-if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
+local function runSyncTick()
     connect(); if not active then return end
     local now=GetTime()
-    if now>=nextQuery and comm:SendProtocol('WRQ','') then nextQuery=now+180 end
+    if now>=nextQuery and comm:SendProtocol('WRQ','') then nextQuery=now+600 end
     for owner,pending in pairs(incoming) do
         if now>=pending.expires or now-pending.lastProgress>=180 then incoming[owner]=nil
         else
-            if pending.sent and pending.lastRequest and now-pending.lastRequest>=45 then pending.sent=false end
-            if not pending.sent and #comm.queue<=8 and comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)})) then pending.sent=true; pending.lastRequest=now end
+            if pending.sent and pending.lastRequest and now-pending.lastRequest>=45 then
+                local hasBackup=type(pending.backups)=='table' and next(pending.backups)~=nil
+                local stalledNoNew=(now-(pending.lastNewProgress or pending.lastProgress))>=45
+                local stalledNoActivity=(now-pending.lastProgress)>=45
+                if (pending.stalledAttempts or 0)>=MAX_STALL_ATTEMPTS and (stalledNoActivity or (hasBackup and stalledNoNew)) then
+                    pending.failed=pending.failed or {}
+                    pending.failed[pending.provider]=true
+                    local nextProvider,backup=pickBackup(pending,owner)
+                    if nextProvider then
+                        pending.provider=nextProvider; pending.rev=backup.rev; pending.count=backup.count
+                        pending.parts={}; pending.partPayloads={}; pending.received=0; pending.recordCount=0; pending.total=nil
+                        pending.sent=false; pending.stalledAttempts=0; pending.lastProgress=now; pending.lastNewProgress=now
+                    else
+                        incoming[owner]=nil
+                        pending=nil
+                        if nextQuery>now+60 then nextQuery=now+60 end
+                    end
+                else
+                    pending.sent=false
+                end
+            end
+            if pending and not pending.sent and #comm.queue<=8 and comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)})) then
+                pending.sent=true; pending.lastRequest=now; pending.stalledAttempts=(pending.stalledAttempts or 0)+1
+            end
         end
     end
     local k,index=next(indices)
     if k and #comm.queue<=8 then
-        local rev,records=snapshot(index.owner)
-        if now>=index.expires or not rev or comm:SendProtocol('WRIDX',codec._pack({index.target,index.owner,string.format('%.0f',rev),#records})) then
+        local rev,recordCount=snapshotMeta(index.owner)
+        if now>=index.expires or not rev or comm:SendProtocol('WRIDX',codec._pack({index.target,index.owner,string.format('%.0f',rev),recordCount})) then
             if indices[k]~=nil then indices[k]=nil; indexCount=math.max(0,indexCount-1) end
         end
     end
@@ -181,4 +291,9 @@ if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,func
             if comm:SendProtocol('WRPAGE',codec._pack(fields)) then job.pos=job.pos+1; if job.pos>#job.chunks then jobs[jobKey]=nil end end
         end
     end
+end
+if C_Timer and type(C_Timer.NewTicker)=='function' then C_Timer.NewTicker(3,function()
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    runSyncTick()
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.sync', debugprofilestop() - t0) end
 end) end

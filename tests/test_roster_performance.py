@@ -69,7 +69,8 @@ OldKrakenRosterFrame:Show(); eventFrame.scripts.OnUpdate(nil,0.2); assert(loads=
 # Native profession scanning yields between 25-member batches and caches results.
 lua=LuaRuntime(unpack_returned_tuples=True)
 lua.execute('''
-OldKraken={DB={},Communication={RegisterHandler=function() end},Fire=function() end,On=function() end}
+handlers={}
+OldKraken={DB={},Communication={RegisterHandler=function(_,k,fn) handlers[k]=fn end},Fire=function() end,On=function() end}
 function UnitName() return 'Me' end
 function GetRealmName() return 'Realm' end
 function GetGuildInfo() return 'Guild' end
@@ -94,6 +95,10 @@ end
 assert(scanned==500)
 OldKraken.Workshop:RefreshNativeProfessions(); assert(scanned==500 and #timers==0)
 assert(OldKraken.Workshop:GetMemberProfessions('Member 500')[1].id==171)
+-- Verify crafting -> gathering -> secondary sorting in GetMemberProfessions
+handlers.WKPROF('Mixed Guy','GUILD',OldKraken.GroupFinder._pack({1700000000,4,185,300,300,182,225,300,333,250,300,171,300,300}))
+local sortedProfs = OldKraken.Workshop:GetMemberProfessions('Mixed Guy')
+assert(#sortedProfs == 4 and sortedProfs[1].id == 171 and sortedProfs[2].id == 333 and sortedProfs[3].id == 182 and sortedProfs[4].id == 185)
 ''')
 for name in ['StatusOnline','StatusOffline']:
     asset=ROOT/'Media'/f'{name}.tga'

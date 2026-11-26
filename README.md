@@ -3,7 +3,7 @@
 [![WoW Forever](https://img.shields.io/badge/WoW_Forever-1.60.1-blue.svg)](https://github.com/Noxter/old-kraken-addon)
 [![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)](https://github.com/Noxter/old-kraken-addon)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-63%20test%20files-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-64%20test%20files-brightgreen.svg)](tests/)
 
 **Old Kraken** — аддон для гри World of Warcraft (клієнт **WoW Forever 1.60.1**, Interface `16001`), створений для об'єднання ключових активностей гільдії в одному зручному інтерфейсі: реєстр учасників, гільдійний пошук груп, календар подій, розумні сповіщення та майстерня професій.
 
@@ -92,6 +92,8 @@
 | `/okr alerts workshop` | Показати тестовий банер замовлення для налаштування позиції |
 | `/okr comm status` | Вивести діагностику гільдійного транспорту повідомлень |
 | `/okr comm test` | Надіслати тестовий пінг у гільдійний канал |
+| `/okr comm traffic [reset]` | Показати або скинути лічильники мережевого трафіку за типами |
+| `/okr perf [on|off|reset|report]` | Увімкнути/вимкнути/скинути або показати звіт профілювання CPU |
 
 Кнопка біля мінікарти відкриває Ростер (лівий клік) або Пошук груп (правий клік). Позицію кнопки можна перетягувати по колу мінікарти.
 
@@ -109,8 +111,8 @@
 ## Версія збірки
 
 У **Alpha ZIP**, створених GitHub Actions (`scripts/stamp-version.py`), до базової версії з `OldKraken.toc` додається `+g` і перші 12 символів Git-коміту, тоді як релізні збірки використовують чисту версію без Git-суфікса:
-- **Alpha ZIP:** `<version>+g<12-символьний SHA>` (наприклад, `0.5.6-alpha.1+g0123456789ab`)
-- **Release ZIP та сирий `OldKraken.toc` релізу:** базова версія без суфікса (наприклад, `0.5.5`)
+- **Alpha ZIP:** `<version>+g<12-символьний SHA>` (наприклад, `0.5.7-alpha.1+g0123456789ab`)
+- **Release ZIP та сирий `OldKraken.toc` релізу:** базова версія без суфікса (наприклад, `0.5.7`)
 
 Цю версію видно в списку аддонів і ростері; різні Git-збірки одного релізу позначаються окремо.
 
@@ -118,7 +120,7 @@
 
 ## Тестування та надійність
 
-Проєкт містить **63 автоматизованих тестових файли** (`tests/test_*.py`), які CI (`.github/workflows/validate-pr.yml`) запускає через Python/Lupa на середовищі Lua 5.1. Вони перевіряють:
+Проєкт містить **64 автоматизовані тестові файли** (`tests/test_*.py`), які CI (`.github/workflows/validate-pr.yml`) запускає через Python/Lupa на середовищі Lua 5.1. Вони перевіряють:
 - Цілісність бази даних та міграції схеми (`Database.lua`).
 - Кодек, чергу, фрагментацію та обробку пакетів (`Communication.lua`).
 - Моделі станів груп, monotonic fence та дедуплікацію (`GroupFinder.lua`).

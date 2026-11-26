@@ -17,6 +17,7 @@ end
 
 local function updateGroupIndicator()
     if not button then return end
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     local finder = OldKraken.GroupFinder
     local level = type(UnitLevel) == 'function' and tonumber(UnitLevel('player'))
     local count = 0
@@ -43,6 +44,7 @@ local function updateGroupIndicator()
     end
     matchingGroups = count
     if count > 0 then button.groupIndicator:Show() else button.groupIndicator:Hide() end
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('minimap.ind', debugprofilestop() - t0) end
 end
 
 local function place(angle)
