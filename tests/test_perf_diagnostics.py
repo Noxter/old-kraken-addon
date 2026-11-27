@@ -1131,6 +1131,42 @@ def test_workshop_orders_worelay_suppression():
     ''')
 
 
+def test_workshop_recipes_first_open_perf_labels():
+    mod = runpy.run_path(str(ROOT / 'tests/test_workshop_orders.py'))
+    make_client = mod['client']
+    c1 = make_client('Alice')
+    c1.execute('''
+        local profCalls = 0
+        debugprofilestop = function() profCalls = profCalls + 1; return profCalls * 2.5 end
+        OldKraken.perfEnabled = false
+        OldKraken.perfStats = {}
+        function OldKraken:PerfRecord(label) self.perfStats[label] = (self.perfStats[label] or 0) + 1 end
+        OldKraken.WorkshopRecipes:Show()
+        assert(profCalls == 0, 'debugprofilestop must not be called when perfEnabled is false')
+        assert(OldKraken.perfStats['wk.recipes.show'] == nil)
+    ''')
+    c2 = make_client('Bob', embedded=True)
+    c2.execute('''
+        local profCalls = 0
+        debugprofilestop = function() profCalls = profCalls + 1; return profCalls * 2.5 end
+        OldKraken.perfEnabled = true
+        OldKraken.perfStats = {}
+        function OldKraken:PerfRecord(label, elapsedMs, itemCount)
+            local s = self.perfStats[label] or { calls = 0, total = 0 }
+            s.calls = s.calls + 1
+            s.total = s.total + (elapsedMs or 0)
+            self.perfStats[label] = s
+        end
+        OldKraken.WorkshopRecipes:Show()
+        local s = OldKraken.perfStats
+        assert(s['wk.ui.create'] and s['wk.ui.create'].calls == 1, 'must record wk.ui.create on first open')
+        assert(s['wk.recipes.create'] and s['wk.recipes.create'].calls == 1, 'must record wk.recipes.create on first open')
+        assert(s['wk.recipes.show'] and s['wk.recipes.show'].calls == 1, 'must record wk.recipes.show')
+        assert(s['wk.recipes.render'] and s['wk.recipes.render'].calls >= 1, 'must record wk.recipes.render')
+        assert(s['wk.recipes.scan'] and s['wk.recipes.scan'].calls >= 1, 'must record wk.recipes.scan')
+    ''')
+
+
 if __name__ == '__main__':
     test_core_perf_commands_and_metrics()
     test_comm_hex_codec_and_cache_counters()
@@ -1142,4 +1178,5 @@ if __name__ == '__main__':
     test_group_finder_people_party_only_and_index_reuse()
     test_comm_traffic_counters_and_commands()
     test_workshop_orders_worelay_suppression()
+    test_workshop_recipes_first_open_perf_labels()
     print('Perf diagnostics and codec/cache checks passed')

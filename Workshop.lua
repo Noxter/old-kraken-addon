@@ -704,7 +704,11 @@ end
 if OldKraken.UIHub then
     OldKraken.UIHub:RegisterPage('workshop','Майстерня','04',function(parent)
         if not active then connect() end
-        if not frame then frame=createWindow(parent) end
+        if not frame then
+            local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+            frame=createWindow(parent)
+            if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.ui.create', debugprofilestop() - t0) end
+        end
         return frame
     end)
 end
