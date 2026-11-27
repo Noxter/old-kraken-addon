@@ -125,6 +125,28 @@ local function updatePosition(self)
     place(angle)
 end
 
+local function migrateMinimapPosition(db, usingLibDBIcon)
+    local settings = db and db.settings
+    if type(settings) ~= 'table' or settings.minimapPositionSynced then return end
+    if type(settings.minimap) ~= 'table' then settings.minimap = {} end
+    local angle = tonumber(settings.minimapAngle)
+    local pos = tonumber(settings.minimap.minimapPos)
+    local hasAngle = angle ~= nil and angle == angle and angle >= 0 and angle < 360
+    local hasPos = pos ~= nil and pos == pos and pos >= 0 and pos < 360
+    if hasAngle and not hasPos then
+        settings.minimap.minimapPos = angle
+    elseif hasPos and not hasAngle then
+        settings.minimapAngle = pos
+    elseif hasAngle and hasPos and angle ~= pos then
+        if usingLibDBIcon then
+            settings.minimapAngle = pos
+        else
+            settings.minimap.minimapPos = angle
+        end
+    end
+    settings.minimapPositionSynced = true
+end
+
 local function registerLibDBIcon(db)
     local libStub = LibStub
     if type(libStub) ~= 'table' and type(libStub) ~= 'function' then return false end
@@ -134,7 +156,8 @@ local function registerLibDBIcon(db)
     if type(broker.NewDataObject) ~= 'function' or type(libIcon.Register) ~= 'function' then return false end
 
     if type(db.settings.minimap) ~= 'table' then db.settings.minimap = {} end
-    if db.settings.minimap.minimapPos == nil and type(db.settings.minimapAngle) == 'number' then
+    local origMinimapPos = db.settings.minimap.minimapPos
+    if origMinimapPos == nil and type(db.settings.minimapAngle) == 'number' then
         db.settings.minimap.minimapPos = db.settings.minimapAngle
     end
     db.settings.minimap.hide = db.settings.showMinimapButton == false
@@ -146,9 +169,16 @@ local function registerLibDBIcon(db)
         OnClick = onMinimapClick,
         OnTooltipShow = populateTooltip,
     })
-    if not okObj or not launcher then return false end
+    if not okObj or not launcher then
+        db.settings.minimap.minimapPos = origMinimapPos
+        return false
+    end
     local okReg = pcall(libIcon.Register, libIcon, LDB_NAME, launcher, db.settings.minimap)
-    if not okReg then return false end
+    if not okReg then
+        db.settings.minimap.minimapPos = origMinimapPos
+        return false
+    end
+    migrateMinimapPosition(db, true)
     libDBIcon = libIcon
     ensureLibDBIconButton()
     return true
@@ -199,6 +229,7 @@ OldKraken:On('INITIALIZED', function(db)
     if initialized or type(db) ~= 'table' or type(db.settings) ~= 'table' then return end
     if not registerLibDBIcon(db) then
         if not Minimap then return end
+        migrateMinimapPosition(db, false)
         createOwnButton(db)
     end
     initialized = true

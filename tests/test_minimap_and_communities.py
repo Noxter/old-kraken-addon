@@ -279,4 +279,86 @@ lua_err.execute('''
     assert(OldKrakenMinimapButton ~= nil, 'must fall back to own button when LibDBIcon:Register errors')
 ''')
 
+# 6. Legacy profile migration when minimapPos and minimapAngle differ
+# 6a. Fallback mode (no LibDBIcon): legacy minimapAngle wins once and syncs minimap.minimapPos
+lua_legacy_fb = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_legacy_fb.execute('''
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 45 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKraken.DB.settings.minimap.minimapPos == 120, 'legacy fallback profile must sync minimapAngle -> minimapPos')
+    assert(OldKraken.DB.settings.minimapPositionSynced == true)
+    local pt = OldKrakenMinimapButton.points[1]
+    local expectedX = math.cos(math.rad(120)) * (140 / 2 + 5)
+    local expectedY = math.sin(math.rad(120)) * (140 / 2 + 5)
+    assert(math.abs(pt[4] - expectedX) < 1e-6 and math.abs(pt[5] - expectedY) < 1e-6)
+''')
+
+# 6b. Already-synced profile (e.g. LibDBIcon updated minimapPos after migration): fallback must NOT overwrite minimapPos
+lua_synced_fb = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_synced_fb.execute('''
+    OldKraken.DB.settings.minimapPositionSynced = true
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 200 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKraken.DB.settings.minimap.minimapPos == 200, 'already-synced profile must preserve minimapPos')
+    local pt = OldKrakenMinimapButton.points[1]
+    local expectedX = math.cos(math.rad(200)) * (140 / 2 + 5)
+    local expectedY = math.sin(math.rad(200)) * (140 / 2 + 5)
+    assert(math.abs(pt[4] - expectedX) < 1e-6 and math.abs(pt[5] - expectedY) < 1e-6)
+''')
+
+# 6c. Legacy LibDBIcon mode: minimapPos wins once and syncs minimapAngle
+lua_legacy_ldb = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_legacy_ldb.execute('''
+    local registeredDb
+    LibStub = setmetatable({}, {
+        __call = function(_, name)
+            if name == 'LibDataBroker-1.1' then
+                return { NewDataObject = function(_, _, obj) return obj end }
+            end
+            if name == 'LibDBIcon-1.0' then
+                return {
+                    Register = function(_, _, _, dbTable) registeredDb = dbTable end,
+                    GetMinimapButton = function() return nil end,
+                }
+            end
+            return nil
+        end,
+    })
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 45 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(registeredDb ~= nil and registeredDb.minimapPos == 45, 'legacy LibDBIcon profile must preserve minimapPos')
+    assert(OldKraken.DB.settings.minimapAngle == 45, 'legacy LibDBIcon profile must sync minimapPos -> minimapAngle')
+    assert(OldKraken.DB.settings.minimapPositionSynced == true)
+''')
+
+# 6d. Legacy profile when LibDBIcon:Register() errors: fallback must choose minimapAngle and set minimapPositionSynced
+lua_legacy_err = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_legacy_err.execute('''
+    LibStub = setmetatable({}, {
+        __call = function(_, name)
+            if name == 'LibDataBroker-1.1' then
+                return { NewDataObject = function(_, _, obj) return obj end }
+            end
+            if name == 'LibDBIcon-1.0' then
+                return { Register = function() error('duplicate registration') end }
+            end
+            return nil
+        end,
+    })
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 45 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKrakenMinimapButton ~= nil, 'must fall back to own button when LibDBIcon:Register errors')
+    assert(OldKraken.DB.settings.minimapAngle == 120, 'fallback after LibDBIcon error must keep minimapAngle')
+    assert(OldKraken.DB.settings.minimap.minimapPos == 120, 'fallback after LibDBIcon error must sync minimapAngle -> minimapPos')
+    assert(OldKraken.DB.settings.minimapPositionSynced == true)
+    local pt = OldKrakenMinimapButton.points[1]
+    local expectedX = math.cos(math.rad(120)) * (140 / 2 + 5)
+    local expectedY = math.sin(math.rad(120)) * (140 / 2 + 5)
+    assert(math.abs(pt[4] - expectedX) < 1e-6 and math.abs(pt[5] - expectedY) < 1e-6)
+''')
+
 print('Minimap and Communities checks passed')
