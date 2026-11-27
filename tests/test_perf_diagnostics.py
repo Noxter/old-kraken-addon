@@ -1218,6 +1218,9 @@ def test_workshop_recipes_first_open_perf_labels():
         end
         assert(itemFrame ~= nil)
         local store = OldKraken.DB.workshop.guilds['Realm\\001Guild'].recipes
+        store['Alice Mon'] = store['Alice Mon'] or {}
+        store['Bob Mon'] = store['Bob Mon'] or {}
+        store['Carol Mon'] = store['Carol Mon'] or {}
         store['Carol Mon'][9991] = { recipe = 9991, item = 77771, profession = 171, seen = 1700000000, name = 'Uncached', product = '' }
         OldKraken.WorkshopRecipes:Show(true)
         for _, fn in ipairs(afterQueue) do fn() end
@@ -1258,6 +1261,9 @@ def test_workshop_recipes_render_name_cache_and_sort_keys():
         C_Spell = nil
 
         local store = OldKraken.DB.workshop.guilds['Realm\\001Guild'].recipes
+        store['Alice Mon'] = store['Alice Mon'] or {}
+        store['Bob Mon'] = store['Bob Mon'] or {}
+        store['Carol Mon'] = store['Carol Mon'] or {}
         for ownerIdx = 1, 20 do
             local owner = string.format('Crafter%02d Mon', ownerIdx)
             store[owner] = {}
@@ -1349,6 +1355,167 @@ def test_workshop_recipes_render_name_cache_and_sort_keys():
     ''')
 
 
+def test_workshop_recipes_indexes_count_cache_and_masters_perf():
+    mod = runpy.run_path(str(ROOT / 'tests/test_workshop_orders.py'))
+    make_client = mod['client']
+    c = make_client('Alice', embedded=True)
+    c.execute('''
+        local timers = {}
+        C_Timer.After = function(_, fn) timers[#timers + 1] = fn end
+        OldKraken.perfEnabled = true
+        OldKraken.perfStats = {}
+        function OldKraken:PerfRecord(label, elapsedMs, itemCount)
+            local s = self.perfStats[label] or { calls = 0, items = 0 }
+            s.calls = s.calls + 1
+            s.items = s.items + (itemCount or 0)
+            self.perfStats[label] = s
+        end
+        debugprofilestop = function() return 10 end
+
+        local itemInfoCalls = 0
+        local bopItems = {}
+        local origGetItemInfo = GetItemInfo
+        local origCItemGetItemInfo = C_Item and C_Item.GetItemInfo
+        local function mockGetItemInfo(id)
+            itemInfoCalls = itemInfoCalls + 1
+            if id == 88001 then
+                return 'Shared Item', nil, 1, 1, 1, 'Trade Goods', 'Parts', 1, '', 134400, 0, 7, 0, bopItems[id] and 1 or 0
+            elseif id == 88002 then
+                if bopItems[id] == nil then return nil end
+                return 'Dynamic BoP Item', nil, 1, 1, 1, 'Armor', 'Cloth', 1, 'INVTYPE_CHEST', 134400, 0, 4, 1, bopItems[id] and 1 or 0
+            end
+            return origGetItemInfo(id)
+        end
+        GetItemInfo = mockGetItemInfo
+        if C_Item then C_Item.GetItemInfo = mockGetItemInfo end
+
+        local store = OldKraken.DB.workshop.guilds['Realm\\001Guild'].recipes
+        store['Alice Mon'] = store['Alice Mon'] or {}
+        store['Bob Mon'] = store['Bob Mon'] or {}
+        store['Carol Mon'] = store['Carol Mon'] or {}
+        -- Same itemID (88001) produced by two professions (164 Blacksmithing, 202 Engineering)
+        store['Alice Mon'][1001] = { recipe = 1001, item = 88001, profession = 164, seen = 1700000010, name = 'BS Craft', product = 'Shared Item' }
+        store['Bob Mon'][1002] = { recipe = 1002, item = 88001, profession = 202, seen = 1700000020, name = 'Eng Craft', product = 'Shared Item' }
+        -- Same recipeID (1001) + different itemID (0) to verify union semantics
+        store['Carol Mon'][1001] = { recipe = 1001, item = 0, profession = 164, seen = 1700000030, name = 'BS Craft', product = '' }
+        -- Master with an uncached item (88002) for countCachedMasterRecipes itemDataRevision invalidation
+        store['Bob Mon'][1003] = { recipe = 1003, item = 88002, profession = 202, seen = 1700000025, name = 'Robes', product = 'Dynamic BoP Item' }
+
+        local profs = OldKraken.DB.workshop.guilds['Realm\\001Guild'].records
+        profs['Alice Mon'] = { timestamp = 1700000010, list = { { id = 164, rank = 300, maximum = 300 } } }
+        profs['Bob Mon'] = { timestamp = 1700000020, list = { { id = 202, rank = 300, maximum = 300 } } }
+        OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED')
+
+        -- 1. Incomplete index rebuild (C_Timer.After queued, not flushed yet): FindMasters must still be accurate
+        local m164 = OldKraken.WorkshopRecipes:FindMasters(88001, 1001, 164)
+        assert(#m164 == 2 and m164[1].name == 'Alice Mon' and m164[2].name == 'Carol Mon', 'incomplete index must still return union for 164')
+        local m202 = OldKraken.WorkshopRecipes:FindMasters(88001, 1002, 202)
+        assert(#m202 == 1 and m202[1].name == 'Bob Mon', 'incomplete index must isolate profession 202')
+        local mAny = OldKraken.WorkshopRecipes:FindMasters(88001, 0)
+        assert(#mAny == 2 and mAny[1].name == 'Alice Mon' and mAny[2].name == 'Bob Mon', 'item-only FindMasters without profession must include both')
+
+        -- Flush index build -> now indexedRevision == indexRevision
+        while #timers > 0 do
+            local batch = timers
+            timers = {}
+            for _, fn in ipairs(batch) do fn() end
+        end
+
+        -- 2. Indexed path: exact same results for same itemID across different professions (including recipeID == 0 to force itemProfessionIndex)
+        local idx164 = OldKraken.WorkshopRecipes:FindMasters(88001, 1001, 164)
+        assert(#idx164 == 2 and idx164[1].name == 'Alice Mon' and idx164[2].name == 'Carol Mon')
+        local idx202 = OldKraken.WorkshopRecipes:FindMasters(88001, 1002, 202)
+        assert(#idx202 == 1 and idx202[1].name == 'Bob Mon')
+        local only164 = OldKraken.WorkshopRecipes:FindMasters(88001, 0, 164)
+        assert(#only164 == 1 and only164[1].name == 'Alice Mon', 'itemProfessionIndex must isolate profession 164')
+        local only202 = OldKraken.WorkshopRecipes:FindMasters(88001, 0, 202)
+        assert(#only202 == 1 and only202[1].name == 'Bob Mon', 'itemProfessionIndex must isolate profession 202')
+        local idxAny = OldKraken.WorkshopRecipes:FindMasters(88001, 0)
+        assert(#idxAny == 2 and idxAny[1].name == 'Alice Mon' and idxAny[2].name == 'Bob Mon')
+
+        -- 3. Update via ImportSnapshot (adds Dave Mon) while index rebuild is still pending -> must NOT serve stale index
+        local okImport = OldKraken.WorkshopRecipes:ImportSnapshot('Dave Mon', {
+            { recipe = 1002, item = 88001, profession = 202, seen = 1700000040, name = 'Eng Craft', product = 'Shared Item' },
+        }, true)
+        assert(okImport, 'ImportSnapshot must succeed')
+        local pending202 = OldKraken.WorkshopRecipes:FindMasters(88001, 0, 202)
+        assert(#pending202 == 2 and pending202[1].name == 'Bob Mon' and pending202[2].name == 'Dave Mon', 'must not use stale index before rebuild finishes')
+
+        -- 4. Tombstone via ImportSnapshot while index rebuild is pending, then flush all rebuilds and verify itemProfessionIndex
+        local okDel = OldKraken.WorkshopRecipes:ImportSnapshot('Dave Mon', {
+            { recipe = 1002, item = 88001, profession = 202, seen = 1700000045, name = 'Eng Craft', product = 'Shared Item', deleted = true },
+        }, false, true)
+        assert(okDel)
+        local afterForget = OldKraken.WorkshopRecipes:FindMasters(88001, 0, 202)
+        assert(#afterForget == 1 and afterForget[1].name == 'Bob Mon')
+        while #timers > 0 do local batch = timers; timers = {}; for _, fn in ipairs(batch) do fn() end end
+        local afterFlush = OldKraken.WorkshopRecipes:FindMasters(88001, 0, 202)
+        assert(#afterFlush == 1 and afterFlush[1].name == 'Bob Mon')
+        while #timers > 0 do local batch = timers; timers = {}; for _, fn in ipairs(batch) do fn() end end
+        local final202 = OldKraken.WorkshopRecipes:FindMasters(88001, 0, 202)
+        assert(#final202 == 1 and final202[1].name == 'Bob Mon', 'updated itemProfessionIndex must reflect tombstone after rebuild completes')
+
+        -- 5. mastersView sub-metrics and countCachedMasterRecipes cache + invalidation
+        OldKraken.WorkshopRecipes:Show()
+        while #timers > 0 do local batch = timers; timers = {}; for _, fn in ipairs(batch) do fn() end end
+        OldKraken.WorkshopRecipes:SelectTab('masters')
+        OldKraken.perfStats = {}
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(OldKraken.perfStats['wk.recipes.masters.collect'] and OldKraken.perfStats['wk.recipes.masters.collect'].calls == 1)
+        assert(OldKraken.perfStats['wk.recipes.masters.counts'] and OldKraken.perfStats['wk.recipes.masters.counts'].calls == 1)
+        assert(OldKraken.perfStats['wk.recipes.masters.sort'] and OldKraken.perfStats['wk.recipes.masters.sort'].calls == 1)
+        assert(OldKraken.perfStats['wk.recipes.masters.rows'] and OldKraken.perfStats['wk.recipes.masters.rows'].calls == 1)
+        assert(OldKraken.perfStats['wk.recipes.masters.detail'] and OldKraken.perfStats['wk.recipes.masters.detail'].calls == 1)
+
+        -- Repeat masters render with unchanged revisions must hit countCachedMasterRecipes cache (0 GetItemInfo calls)
+        local rvMasters = OldKraken.UIHub.pages.workshop.frame.recipesView
+        local bobRowFound = false
+        for _, row in ipairs(frames) do
+            if type(row.entry) == 'table' and row.entry.name == 'Bob Mon' and row:IsShown() and row.scripts and row.scripts.OnClick then
+                bobRowFound = true
+                row.scripts.OnClick(row)
+                break
+            end
+        end
+        assert(bobRowFound, 'Bob Mon row must be shown on masters tab')
+        assert(rvMasters.detailTitle:GetText():find('Bob Mon', 1, true), 'clicking Bob Mon row must select Bob Mon in detail panel')
+        assert(rvMasters.detailInfo:GetText():find('Збережено рецептів: 2', 1, true), 'Bob Mon must initially count 2 recipes before 88002 resolves as BoP')
+        itemInfoCalls = 0
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(itemInfoCalls == 0, 'cached master recipe counts must avoid re-scanning items, got ' .. itemInfoCalls)
+
+        -- Resolve 88002 as BoP and fire GET_ITEM_INFO_RECEIVED -> itemDataRevision invalidates masterRecipeCountCache and updates count to 1
+        local itemFrame
+        for _, f in ipairs(frames) do
+            if f.events and f.events.GET_ITEM_INFO_RECEIVED and f.scripts and f.scripts.OnEvent then itemFrame = f break end
+        end
+        assert(itemFrame ~= nil)
+        bopItems[88002] = true
+        itemFrame.scripts.OnEvent(itemFrame, 'GET_ITEM_INFO_RECEIVED', 88002, true)
+        itemInfoCalls = 0
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(itemInfoCalls >= 1, 'itemDataRevision bump must invalidate masterRecipeCountCache')
+        assert(rvMasters.detailInfo:GetText():find('Збережено рецептів: 1', 1, true),
+            'Bob Mon recipe count must drop from 2 to 1 after 88002 resolves as BoP')
+
+        -- 6. selectedType == 'all' short-circuit skips classifyRecipe on recipes tab when bopCache is warm
+        OldKraken.WorkshopRecipes:SelectTab('recipes')
+        while #timers > 0 do local batch = timers; timers = {}; for _, fn in ipairs(batch) do fn() end end
+        local rv = OldKraken.UIHub.pages.workshop.frame.recipesView
+        rv.query:SetText('ZZZNoMatch')
+        rv.query.scripts.OnTextChanged(rv.query, true)
+        while #timers > 0 do local batch = timers; timers = {}; for _, fn in ipairs(batch) do fn() end end
+        itemInfoCalls = 0
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        -- All records are already in bopCache and query matches 0 rows (no recipeIcon calls):
+        -- selectedType == 'all' must not call GetItemInfo for classifyRecipe
+        assert(itemInfoCalls == 0, 'selectedType == all must skip classifyRecipe GetItemInfo calls, got ' .. itemInfoCalls)
+
+        GetItemInfo = origGetItemInfo
+        if C_Item then C_Item.GetItemInfo = origCItemGetItemInfo end
+    ''')
+
+
 if __name__ == '__main__':
     test_core_perf_commands_and_metrics()
     test_comm_hex_codec_and_cache_counters()
@@ -1362,4 +1529,5 @@ if __name__ == '__main__':
     test_workshop_orders_worelay_suppression()
     test_workshop_recipes_first_open_perf_labels()
     test_workshop_recipes_render_name_cache_and_sort_keys()
+    test_workshop_recipes_indexes_count_cache_and_masters_perf()
     print('Perf diagnostics and codec/cache checks passed')
