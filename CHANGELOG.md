@@ -1,14 +1,12 @@
 # Changelog
 
-## 0.5.8-alpha.2
+## 0.5.8
 - **Minimap & LibDBIcon-1.0:** додано підтримку `LibDBIcon-1.0` / `LibDataBroker-1.1` (`OptionalDeps`), центрування fallback-іконки та синхронізацію `minimapAngle` і `minimap.minimapPos` при перетягуванні (`Minimap.lua`).
 - **Майстерня та ростер:** вилучено збиральні (`186, 182, 393`) і вторинні (`185, 129, 356`) професії з активного UI та нової обробки даних; старі записи залишаються інертними, `Workshop.lua` фільтрує їх через `LEGACY_IGNORED_PROFESSIONS`, а `WorkshopRecipes.lua` / `WorkshopOrders.lua` відхиляють їх на прийомі.
 - **Продуктивність (CPU):** додано кешування ключів сортування та пропуск зайвих перемальовувань у `GuildRoster.lua`, роздільне профілювання (`roster.filter`, `roster.sort`, `roster.visible`), а також тротлінг скан-подій у `GroupFinderUI.lua` (зі збереженням `pruneOfflineApplications()` та `scheduleRefresh()`).
 - **Події гільдії та чат:** додано компактні гільдійні оголошення подій із клікабельним лінком `oldkraken:events` (`GuildEvents.lua`, `GroupFinderChat.lua`, `Locale.lua`).
-- **Транспорт WHISPER (`WRGET`/`WRPAGE`):** переведено адресні `WRGET`/`WRPAGE` на `WHISPER` для клієнтів `>= 0.5.8-alpha.2` із `GUILD`-фолбеком для старіших/невідомих/`self`, негайним failover у `WorkshopSync.lua` при `TargetOffline` (`COMM_WHISPER_DROPPED` за `jobID`), валідацією WHISPER-відправника за `GUILD`-присутністю та інвалідацією presence вибулих учасників (`PruneRosterPresence`).
+- **Транспорт WHISPER (`WRGET`/`WRPAGE`):** переведено адресні `WRGET`/`WRPAGE` на `WHISPER` для клієнтів `>= 0.5.8-alpha.2` із `GUILD`-фолбеком для старіших/невідомих/`self`, негайним failover у `WorkshopSync.lua` при `TargetOffline` (`COMM_WHISPER_DROPPED` за `jobID`), валідацією WHISPER-відправника за `GUILD`-присутністю та інвалідацією presence вибулих учасників (`PruneRosterPresence`, включно з UI-незалежним debounced `GUILD_ROSTER_UPDATE` у `Communication.lua`).
 - **Сумісність та Dormant Gate:** додано крос-версійні тести сумісності (`test_protocol_compat_matrix.py`, `test_workshop_orders_compat.py`), документацію (`docs/PROTOCOL_COMPATIBILITY.md`, оновлення §6 `docs/ARCHITECTURE.md`) і вимкнений за замовчуванням UI Compatibility Gate (`Communication.lua`, `UIHub.lua`).
-
-## 0.5.8-alpha.1
 
 ## 0.5.7
 
