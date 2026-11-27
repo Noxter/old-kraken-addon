@@ -83,12 +83,20 @@ local function myName()
     if safeText(a,1,128) then return a end
 end
 local changedPending=false
-local function changed()
-    if changedPending then return end
+local function changed(reason)
+    if OldKraken.perfEnabled and type(OldKraken.PerfRecord)=='function' then
+        OldKraken:PerfRecord('wk.recipes.chg.'..(reason or 'other'), 0)
+    end
+    if changedPending then
+        if OldKraken.perfEnabled and type(OldKraken.PerfRecord)=='function' then
+            OldKraken:PerfRecord('wk.recipes.chg.coalesced', 0)
+        end
+        return
+    end
     if not (frame and frame:IsShown()) then return end
     local function flush()
         changedPending=false
-        if frame and frame:IsShown() then if render then render() end end
+        if frame and frame:IsShown() then if render then render('changed') end end
     end
     if C_Timer and C_Timer.After then changedPending=true; C_Timer.After(0.15,flush) else flush() end
 end
@@ -102,7 +110,7 @@ OldKraken:On('WORKSHOP_SCOPE_MIGRATED',function(migratedProfile)
     if integer(saved,0,8999999999999999) then
         scope.recipeVersions[identity]=math.max(saved+1,GetServerTime()*1000)
     end
-    changed()
+    changed('scopeMigrated')
 end)
 
 local function validRecord(r)
@@ -167,7 +175,7 @@ local function connect()
     if type(removals)=='table' and type(Recipes.ForgetProfession)=='function' then
         for profession in pairs(removals) do Recipes:ForgetProfession(profession,name,k) end
     end
-    changed()
+    changed('connect')
 end
 local function storeRecipe(owner,r,relayed,authoritative)
     if type(people[owner])~='table' then if count(people)>=1000 then return nil end; people[owner]={} end
@@ -287,7 +295,7 @@ local function recordLearned(r,deferRefresh)
     if activeQuery and matches and matches(r,activeQuery.query) then
         local resultKey=identity..'\001'..r.recipe
         if resultSet[resultKey] or count(resultSet)<500 then resultSet[resultKey]={owner=identity,record=r} end
-        if not deferRefresh then changed() end
+        if not deferRefresh then changed('ownLearn') end
     end
     return true
 end
@@ -302,13 +310,13 @@ local function forgetRecipe(id,deferRefresh)
     if #sendQueue<100 then
         sendQueue[#sendQueue+1]={kind='WRFORGET',payload=codec._pack({removed.recipe,removed.item,removed.profession,removed.seen,removed.name,removed.product}),expires=GetTime()+600}
     end
-    indexRevision=indexRevision+1; recipeChanged=true; if not deferRefresh then changed() end; return true
+    indexRevision=indexRevision+1; recipeChanged=true; if not deferRefresh then changed('forget') end; return true
 end
 function Recipes:ForgetProfession(profession,expectedIdentity,expectedProfile)
     if not active or not professionNames[profession] or identity~=expectedIdentity or profile~=expectedProfile then return false end
     local ids={}; for id,r in pairs(people[identity] or {}) do if validRecord(r) and r.profession==profession then ids[#ids+1]=id end end
     local changedAny=false; for _,id in ipairs(ids) do if forgetRecipe(id,true) then changedAny=true end end
-    if changedAny then changed() end
+    if changedAny then changed('forget') end
     if type(scope.pendingProfessionRemovals)=='table' and type(scope.pendingProfessionRemovals[identity])=='table' then scope.pendingProfessionRemovals[identity][profession]=nil end
     return true,changedAny
 end
@@ -384,7 +392,7 @@ local function scan()
             if check.count>=3 and now-check.first>=6 then if forgetRecipe(id,true) then removedAny=true end else scanPending=true end
         end
     end
-    if touched>0 or removedAny then changed() end
+    if touched>0 or removedAny then changed('scanLearned') end
     scanStatus=T('Останнє зчитування: ')..touched..T(' вивчених рецептів. Список може бути відфільтрований.')
     if frame and frame:IsShown() then frame.status:SetText(scanStatus) end
     return true
@@ -549,7 +557,7 @@ local function addCached(query,filter,professionFilter)
                 resultSet[key]={owner=name,record=r}
             end
         end
-    end,function() changed() end,function() return searchJob==job end)
+    end,function() changed('addCached') end,function() return searchJob==job end)
 end
 local function search(value)
     if not active or not safeText(value,1,200) then chatError(T('Old Kraken: введіть назву або посилання на предмет.')); return false end
@@ -560,12 +568,12 @@ local function search(value)
     offset=0; addCached(q,nil,selectRecipe and pickerProfession or nil)
     if now-lastQuery<10 then
         if activeQuery and activeQuery.query~=q then activeQuery=nil end
-        changed(); chatInfo(T('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.')); return false
+        changed('search'); chatInfo(T('Old Kraken: показано збережені результати; повторіть запит гільдії через кілька секунд.')); return false
     end
     sequence=sequence+1
     local token=tostring(GetServerTime())..'-'..tostring(math.random(100000,999999))..'-'..sequence
-    if not comm:SendProtocol('WRQUERY',codec._pack({token,q})) then activeQuery=nil; changed(); chatError(T('Old Kraken: показано збережені результати; запит гільдії надіслати не вдалося.')); return false end
-    lastQuery=now; activeQuery={token=token,query=q,untilTime=now+(q:match('^prof:%d+$') and 600 or 120)}; changed(); return true
+    if not comm:SendProtocol('WRQUERY',codec._pack({token,q})) then activeQuery=nil; changed('search'); chatError(T('Old Kraken: показано збережені результати; запит гільдії надіслати не вдалося.')); return false end
+    lastQuery=now; activeQuery={token=token,query=q,untilTime=now+(q:match('^prof:%d+$') and 600 or 120)}; changed('search'); return true
 end
 comm:RegisterHandler('WRQUERY',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
@@ -631,7 +639,7 @@ comm:RegisterHandler('WRBATCH',function(sender,_,payload)
             end
         end
     end
-    if updated then changed(); indexRevision=indexRevision+1; recipeChanged=true end
+    if updated then changed('net'); indexRevision=indexRevision+1; recipeChanged=true end
 end)
 comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     if not active or not activeQuery or GetTime()>activeQuery.untilTime or not safeText(sender,1,128) then return end
@@ -644,7 +652,7 @@ comm:RegisterHandler('WRRESULT',function(sender,_,payload)
     local stored=storeRecipe(sender,r,false,true); if not stored then return end
     local k=sender..'\001'..r.recipe
     if resultSet[k] or count(resultSet)<500 then resultSet[k]={owner=sender,record=stored} end
-    changed(); indexRevision=indexRevision+1; recipeChanged=true
+    changed('net'); indexRevision=indexRevision+1; recipeChanged=true
 end)
 comm:RegisterHandler('WRLEARN',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
@@ -662,13 +670,13 @@ comm:RegisterHandler('WRLEARN',function(sender,_,payload)
         if matches(stored,activeQuery.query) and (resultSet[k] or count(resultSet)<500) then resultSet[k]={owner=sender,record=stored}
         elseif resultSet[k] then resultSet[k]=nil end
     end
-    changed(); indexRevision=indexRevision+1; recipeChanged=true
+    changed('net'); indexRevision=indexRevision+1; recipeChanged=true
 end)
 comm:RegisterHandler('WRFORGET',function(sender,_,payload)
     if not active or not safeText(sender,1,128) or sender==identity then return end
     local f=codec._unpackFields(payload,6); if not f or #f~=6 then return end
     local r={recipe=tonumber(f[1]),item=tonumber(f[2]),profession=tonumber(f[3]),seen=tonumber(f[4]),name=f[5],product=f[6],deleted=true}
-    if validRecord(r) and storeTombstone(sender,r,false,true) then changed(); indexRevision=indexRevision+1; recipeChanged=true end
+    if validRecord(r) and storeTombstone(sender,r,false,true) then changed('net'); indexRevision=indexRevision+1; recipeChanged=true end
 end)
 
 local lastSpellsCatalogScan=-60
@@ -1023,7 +1031,7 @@ local function ensureAvailableTypes()
             if present[slot] then set[slot]=true end
         end
         availableTypeCache={rev=job.rev,itemRev=job.itemRev,key=job.key,list=list,set=set}
-        changed()
+        changed('typeScan')
     end,function() return typeScanJob==job end)
     return {'all'}, {all=true}, false
 end
@@ -1056,7 +1064,7 @@ itemEvents:SetScript('OnEvent',function(_,_,id,success)
     if pendingItems[id] and success~=false then
         pendingItems[id]=nil
         itemDataRevision=itemDataRevision+1
-        changed()
+        changed('itemData')
         OldKraken:Fire('WORKSHOP_ITEM_DATA_CHANGED')
     end
 end)
@@ -1263,9 +1271,13 @@ local function renderBody()
         end
         resizeInfo(); return
     end
+    local perf=OldKraken.perfEnabled and type(debugprofilestop)=='function' and type(OldKraken.PerfRecord)=='function'
+    local tFilter=perf and debugprofilestop() or nil
+    local filterScanned=0
     local list,grouped,groupCounts={},{},{}
     local byRecipe=not selectRecipe and not viewOwner and not (filter and (filter:find('^item:') or filter:find('^recipe:')))
     for _,entry in pairs(resultSet) do
+        if perf then filterScanned=filterScanned+1 end
         if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
@@ -1282,15 +1294,19 @@ local function renderBody()
         end
     end
     if byRecipe then for _,entry in pairs(grouped) do list[#list+1]=entry end end
+    if tFilter then OldKraken:PerfRecord('wk.recipes.render.filter', debugprofilestop() - tFilter, filterScanned) end
+    local tSort=perf and debugprofilestop() or nil
     local sortNames={}
     for i=1,#list do
         local entry=list[i]
         sortNames[entry]=displayRecipeName(entry.record)
     end
     table.sort(list,function(a,b) local an,bn=sortNames[a],sortNames[b]; if an~=bn then return an<bn end return a.owner<b.owner end)
+    if tSort then OldKraken:PerfRecord('wk.recipes.render.sort', debugprofilestop() - tSort, #list) end
     offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
     frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
     frame.count:SetText(T('Знайдено: ')..#list..T(' · результати можуть бути застарілими або неповними'))
+    local tRows=perf and debugprofilestop() or nil
     for i,row in ipairs(rows) do
         local entry=list[offset*PAGE_SIZE+i]
         if entry then
@@ -1315,6 +1331,8 @@ local function renderBody()
             row:Show()
         else row.entry=nil; row:UnlockHighlight(); row:Hide() end
     end
+    if tRows then OldKraken:PerfRecord('wk.recipes.render.rows', debugprofilestop() - tRows, #rows) end
+    local tDetail=perf and debugprofilestop() or nil
     local entry=selectedEntry; local r=entry and entry.record
     frame.detailIcon:SetShown(r~=nil)
     if r then
@@ -1428,15 +1446,18 @@ local function renderBody()
         frame.detailReagents:SetText(''); hideReagentRows()
     end
     resizeInfo()
+    if tDetail then OldKraken:PerfRecord('wk.recipes.render.detail', debugprofilestop() - tDetail) end
 end
-render=function()
-    local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+render=function(source)
+    local perf = OldKraken.perfEnabled and type(OldKraken.PerfRecord) == 'function'
+    if perf then OldKraken:PerfRecord('wk.recipes.rnd.' .. (source or 'direct'), 0) end
+    local t0 = perf and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     activeItemNames, activeSpellNames, activeDisplayNames, renderApiCalls = {}, {}, {}, 0
     local ok, err = pcall(renderBody)
     local calls = renderApiCalls
     activeItemNames, activeSpellNames, activeDisplayNames, renderApiCalls = nil, nil, nil, 0
     if not ok then error(err) end
-    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.render', debugprofilestop() - t0, calls) end
+    if t0 then OldKraken:PerfRecord('wk.recipes.render', debugprofilestop() - t0, calls) end
 end
 local function switchTab(nextTab)
     if tab==nextTab then return end
@@ -1833,7 +1854,7 @@ function Recipes:CreatePanel(parent)
     end
     return frame
 end
-function Recipes:RefreshPanel() render() end
+function Recipes:RefreshPanel() render('refreshPanel') end
 function Recipes:IsPicking() return selectRecipe~=nil end
 function Recipes:CancelPicker() selectRecipe=nil; pickerProfession=0 end
 function Recipes:GetTab() return selectRecipe and 'recipes' or tab end
@@ -1887,7 +1908,7 @@ local function showRecipes(self,forceNavigation)
     professionContext,temporaryProfessionContext,selectedMaster,tab,viewOwner,selectRecipe,mastersOnline,selectedType=nil,false,nil,'recipes',nil,nil,false,'all'
     restoringView=true; frame.query:SetText(''); restoringView=false
     addCached('')
-    frame:Show(); render()
+    frame:Show(); render('show')
 end
 function Recipes:Show(forceNavigation)
     local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
@@ -1940,7 +1961,7 @@ function Recipes:ImportSnapshot(owner,records,relayed,allowOverride)
             end
         end
     end
-    indexRevision=indexRevision+1; recipeChanged=true; changed(); return true
+    indexRevision=indexRevision+1; recipeChanged=true; changed('import'); return true
 end
 function Recipes:ValidateSnapshotRecord(r) return validRecord(r) and (r.deleted==nil or r.deleted==true) and true or false end
 function Recipes:GetProfessionSummaries()
@@ -2031,8 +2052,8 @@ function Recipes:ShowMasters(itemID,recipeID)
     frame.query:SetText(query); frame.status:SetText(T('Відомі майстри; дата показує останнє зчитування рецепта.'))
     search(query); frame:Raise()
 end
-OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function() if tab=='masters' then changed() end end)
-OldKraken:On('WORKSHOP_INDEX_CHANGED',changed)
+OldKraken:On('WORKSHOP_PROFESSIONS_CHANGED',function() if tab=='masters' then changed('professions') end end)
+OldKraken:On('WORKSHOP_INDEX_CHANGED',function() changed('index') end)
 
 if OldKraken.LocalizeTable then
     OldKraken.LocalizeTable(professionNames)

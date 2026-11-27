@@ -1163,7 +1163,80 @@ def test_workshop_recipes_first_open_perf_labels():
         assert(s['wk.recipes.create'] and s['wk.recipes.create'].calls == 1, 'must record wk.recipes.create on first open')
         assert(s['wk.recipes.show'] and s['wk.recipes.show'].calls == 1, 'must record wk.recipes.show')
         assert(s['wk.recipes.render'] and s['wk.recipes.render'].calls >= 1, 'must record wk.recipes.render')
+        assert(s['wk.recipes.render.filter'] and s['wk.recipes.render.filter'].calls >= 1, 'must record wk.recipes.render.filter')
+        assert(s['wk.recipes.render.sort'] and s['wk.recipes.render.sort'].calls >= 1, 'must record wk.recipes.render.sort')
+        assert(s['wk.recipes.render.rows'] and s['wk.recipes.render.rows'].calls >= 1, 'must record wk.recipes.render.rows')
+        assert(s['wk.recipes.render.detail'] and s['wk.recipes.render.detail'].calls >= 1, 'must record wk.recipes.render.detail')
+        assert(s['wk.recipes.rnd.show'] and s['wk.recipes.rnd.show'].calls == 1, 'must record wk.recipes.rnd.show')
         assert(s['wk.recipes.scan'] and s['wk.recipes.scan'].calls >= 1, 'must record wk.recipes.scan')
+    ''')
+    c3 = make_client('Carol', embedded=True)
+    c3.execute('''
+        local afterQueue = {}
+        C_Timer.After = function(_, fn) afterQueue[#afterQueue + 1] = fn end
+        OldKraken.perfEnabled = true
+        OldKraken.perfStats = {}
+        function OldKraken:PerfRecord(label, elapsedMs, itemCount)
+            local s = self.perfStats[label] or { calls = 0, total = 0, items = 0 }
+            s.calls = s.calls + 1
+            s.total = s.total + (elapsedMs or 0)
+            s.items = s.items + (itemCount or 0)
+            self.perfStats[label] = s
+        end
+        debugprofilestop = function() return 10 end
+        OldKraken.WorkshopRecipes:Show()
+        for _, fn in ipairs(afterQueue) do fn() end
+        afterQueue = {}
+        OldKraken.perfStats = {}
+        -- Fire 3 WORKSHOP_INDEX_CHANGED events in a burst -> 1st schedules timer, 2nd & 3rd coalesce
+        OldKraken:Fire('WORKSHOP_INDEX_CHANGED')
+        OldKraken:Fire('WORKSHOP_INDEX_CHANGED')
+        OldKraken:Fire('WORKSHOP_INDEX_CHANGED')
+        assert(OldKraken.perfStats['wk.recipes.chg.index'].calls == 3)
+        assert(OldKraken.perfStats['wk.recipes.chg.coalesced'].calls == 2)
+        assert(#afterQueue == 1)
+        afterQueue[1]()
+        assert(OldKraken.perfStats['wk.recipes.rnd.changed'].calls == 1)
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(OldKraken.perfStats['wk.recipes.rnd.refreshPanel'].calls == 1)
+
+        -- WORKSHOP_PROFESSIONS_CHANGED only triggers changed('professions') on masters tab
+        afterQueue = {}
+        OldKraken.WorkshopRecipes:SelectTab('masters')
+        OldKraken.perfStats = {}
+        OldKraken:Fire('WORKSHOP_PROFESSIONS_CHANGED')
+        assert(OldKraken.perfStats['wk.recipes.chg.professions'].calls == 1)
+        assert(#afterQueue == 1)
+        afterQueue[1]()
+
+        -- GET_ITEM_INFO_RECEIVED for a pending item triggers changed('itemData')
+        afterQueue = {}
+        OldKraken.WorkshopRecipes:SelectTab('recipes')
+        local itemFrame
+        for _, f in ipairs(frames) do
+            if f.events and f.events.GET_ITEM_INFO_RECEIVED and f.scripts and f.scripts.OnEvent then itemFrame = f break end
+        end
+        assert(itemFrame ~= nil)
+        local store = OldKraken.DB.workshop.guilds['Realm\\001Guild'].recipes
+        store['Carol Mon'][9991] = { recipe = 9991, item = 77771, profession = 171, seen = 1700000000, name = 'Uncached', product = '' }
+        OldKraken.WorkshopRecipes:Show(true)
+        for _, fn in ipairs(afterQueue) do fn() end
+        afterQueue = {}
+        OldKraken.perfStats = {}
+        itemFrame.scripts.OnEvent(itemFrame, 'GET_ITEM_INFO_RECEIVED', 77771, true)
+        assert(OldKraken.perfStats['wk.recipes.chg.itemData'] and OldKraken.perfStats['wk.recipes.chg.itemData'].calls == 1)
+        assert(#afterQueue == 1)
+        afterQueue[1]()
+
+        -- Hidden recipes frame: changed() records reason but does NOT schedule timer or increment coalesced
+        local rv = OldKraken.UIHub.pages.workshop.frame.recipesView
+        rv:Hide()
+        afterQueue = {}
+        OldKraken.perfStats = {}
+        OldKraken:Fire('WORKSHOP_INDEX_CHANGED')
+        assert(OldKraken.perfStats['wk.recipes.chg.index'].calls == 1)
+        assert(OldKraken.perfStats['wk.recipes.chg.coalesced'] == nil)
+        assert(#afterQueue == 0)
     ''')
 
 
@@ -1221,6 +1294,8 @@ def test_workshop_recipes_render_name_cache_and_sort_keys():
         assert(itemCalls <= 10, 'GetItemInfo must be called at most once per unique item, got ' .. itemCalls)
         assert(spellCalls <= 5, 'GetSpellInfo must be called at most once per unique spell, got ' .. spellCalls)
         assert(OldKraken.perfStats['wk.recipes.render'].items == itemCalls + spellCalls)
+        assert(OldKraken.perfStats['wk.recipes.render.filter'].items == 300, 'filter.items must count all scanned resultSet records, not grouped list')
+        assert(OldKraken.perfStats['wk.recipes.render.sort'].items == 15, 'sort.items must count grouped rows')
 
         -- Verify sort order (name ascending, deterministic across repeat renders)
         local function visibleNames()
