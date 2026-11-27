@@ -133,7 +133,7 @@ local function trafficBucket(self, kind)
         -- txLogical counts logical messages accepted into the outbound queue;
         -- rxLogical counts inbound logical messages delivered to handlers.
         b = {
-            txLogical = 0, txFrags = 0, txBytes = 0, txRetries = 0, txDedup = 0, txDrops = 0,
+            txLogical = 0, txFrags = 0, txBytes = 0, txRetries = 0, txDedup = 0, txDrops = 0, txDropReasons = {},
             rxLogical = 0, rxFrags = 0, rxBytes = 0, rxDedup = 0, rxFiltered = 0, rxFilteredTail = 0, rxDropped = 0,
         }
         byKind[kind] = b
@@ -144,6 +144,13 @@ end
 local function recordTraffic(self, kind, field, delta)
     local b = trafficBucket(self, kind)
     b[field] = b[field] + (delta or 1)
+end
+
+local function recordTxDrop(self, kind, reason)
+    local b = trafficBucket(self, kind)
+    b.txDrops = b.txDrops + 1
+    local key = (type(reason) == 'string' and reason ~= '') and reason or 'other'
+    b.txDropReasons[key] = (b.txDropReasons[key] or 0) + 1
 end
 
 function Communication:ResetTraffic()
@@ -223,21 +230,22 @@ function Communication:SendProtocol(kind, payload, target)
     local id = sessionID .. "-" .. tostring(messageSequence)
     local count = math.max(1, math.ceil(#payload / PART_BYTES))
     local limit=priority==0 and MAX_QUEUE or (MAX_QUEUE-ACTION_RESERVE)
-    if effectiveQueueSize(self)+count>limit then self.stats.backpressure=self.stats.backpressure+1; recordTraffic(self, kind, 'txDrops', 1); return false,'queue full' end
+    if effectiveQueueSize(self)+count>limit then self.stats.backpressure=self.stats.backpressure+1; recordTxDrop(self, kind, 'overflow'); return false,'queue full' end
     local messages = {}
     for part = 1, count do
         local data = payload:sub((part - 1) * PART_BYTES + 1, part * PART_BYTES)
         local message = table.concat({ "GF2", kind, id, part, count, Encode(data) }, "^")
-        if #message > 240 then recordTraffic(self, kind, 'txDrops', 1); return false, "message too long" end
+        if #message > 240 then recordTxDrop(self, kind, 'tooLong'); return false, "message too long" end
         messages[part] = message
     end
     local job={key=pendingKey,id=id,kind=kind,messages=messages,remaining=count,priority=priority,
         recordKey=groupRecordKey(kind,payload),snapshot=GROUP_SNAPSHOTS[kind],channel=channel,target=dest}
     local originalCount = #self.queue
     for part, message in ipairs(messages) do
-        if not self:QueueMessage(message,job,part,channel,dest) then
+        local queued, qReason = self:QueueMessage(message,job,part,channel,dest)
+        if not queued then
             while #self.queue > originalCount do table.remove(self.queue) end
-            recordTraffic(self, kind, 'txDrops', 1)
+            recordTxDrop(self, kind, qReason or 'unavailable')
             return false, "transport unavailable"
         end
     end
@@ -347,25 +355,26 @@ end
 
 function Communication:QueueMessage(message,job,part,channel,target)
     if type(message) ~= "string" or message == "" then
-        return false
+        return false, 'unavailable'
     end
 
     if #message > 240 then
-        return false
+        if not job then recordTxDrop(self, messageTrafficKind(message), 'tooLong') end
+        return false, 'tooLong'
     end
 
     if effectiveQueueSize(self) >= MAX_QUEUE then
         self.stats.backpressure=self.stats.backpressure+1
-        if not job then recordTraffic(self, messageTrafficKind(message), 'txDrops', 1) end
-        return false
+        if not job then recordTxDrop(self, messageTrafficKind(message), 'overflow') end
+        return false, 'overflow'
     end
 
     local guild
     if message:sub(1, 4) == 'GF2^' or message:sub(1, 9) == 'OKP^SPEC^' or message:sub(1, 10) == 'OKP^SPEC2^' then
         guild = GetGuildInfo and GetGuildInfo('player')
         if type(guild) ~= 'string' or guild == '' then
-            if not job then recordTraffic(self, messageTrafficKind(message), 'txDrops', 1) end
-            return false
+            if not job then recordTxDrop(self, messageTrafficKind(message), 'noGuild') end
+            return false, 'noGuild'
         end
     end
     local sendChannel = (job and job.channel) or channel or 'GUILD'
@@ -398,7 +407,7 @@ local function deferEntry(self,entry,reason)
     self.retryAt=GetTime()+self.backoff+math.random()
     self.lastSendError=reason
 end
-local function dropEntryOrJob(self,index,entry,reason,notifyCritical)
+local function dropEntryOrJob(self,index,entry,reason,notifyCritical,dropCategory)
     local job=entry.job
     if not job then
         table.remove(self.queue,index)
@@ -413,7 +422,7 @@ local function dropEntryOrJob(self,index,entry,reason,notifyCritical)
         if job.key and self.pendingTransmissions[job.key]==job then self.pendingTransmissions[job.key]=nil end
     end
     self.stats.dropped=self.stats.dropped+1
-    recordTraffic(self, (job and job.kind) or messageTrafficKind(entry.message), 'txDrops', 1)
+    recordTxDrop(self, (job and job.kind) or messageTrafficKind(entry.message), dropCategory or reason)
     if job and notifyCritical and CRITICAL_KINDS[job.kind] then
         pcall(Print,'Не вдалося надіслати повідомлення: '..job.kind)
         if type(OldKraken.Fire)=='function' then
@@ -427,7 +436,7 @@ local function entryError(self,index,entry,reason,now)
     recordTraffic(self, (entry.job and entry.job.kind) or messageTrafficKind(entry.message), 'txRetries', 1)
     self.lastSendError=reason
     if entry.errorAttempts>=MAX_ERROR_ATTEMPTS then
-        dropEntryOrJob(self,index,entry,reason,true)
+        dropEntryOrJob(self,index,entry,reason,true,'sendError')
     else
         entry.errorBackoff=math.min(60,(entry.errorBackoff or 0)==0 and 2 or entry.errorBackoff*2)
         entry.nextTryAt=now+entry.errorBackoff+math.random()
@@ -462,7 +471,7 @@ local function runPump(self)
     if not index then return end
     local entry=self.queue[index]
     if entry.guild and (not GetGuildInfo or GetGuildInfo('player')~=entry.guild) then
-        dropEntryOrJob(self,index,entry,'guild changed',false); return
+        dropEntryOrJob(self,index,entry,'guild changed',false,'guildChanged'); return
     end
     -- If a multipart transfer was interrupted long enough to approach the receiver
     -- assembly timeout, replay its complete set rather than leave orphaned fragments.
@@ -520,7 +529,9 @@ local function runPump(self)
             if targetError then
                 local dropKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
                 local dropID = entry.job and entry.job.id
-                dropEntryOrJob(self,index,entry,tostring(result),false)
+                local isOffline = (results and results.TargetOffline ~= nil and result == results.TargetOffline)
+                    or ((not results or results.TargetOffline == nil) and result == 12)
+                dropEntryOrJob(self,index,entry,tostring(result),false,isOffline and 'targetOffline' or 'targetError')
                 if OldKraken and type(OldKraken.Fire) == 'function' then
                     OldKraken:Fire('COMM_WHISPER_DROPPED', dropKind, sendTarget, tostring(result), dropID)
                 end
@@ -1291,11 +1302,30 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
     if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('comm.recv', debugprofilestop() - t0) end
 end
 
+local function formatDropReasons(reasons)
+    if type(reasons) ~= 'table' or not next(reasons) then return nil end
+    local list = {}
+    for reason, count in pairs(reasons) do
+        if (count or 0) > 0 then list[#list + 1] = { reason = reason, count = count } end
+    end
+    if #list == 0 then return nil end
+    table.sort(list, function(a, b)
+        if a.count ~= b.count then return a.count > b.count end
+        return a.reason < b.reason
+    end)
+    local parts = {}
+    for i = 1, #list do
+        parts[i] = list[i].reason .. '=' .. list[i].count
+    end
+    return table.concat(parts, ', ')
+end
+
 function Communication:PrintTraffic()
     local traffic = self.traffic or newTrafficState()
     local elapsed = math.max(0, math.floor(GetTime() - (traffic.startedAt or GetTime())))
     local totTxLog, totTxFrag, totTxB, totTxRet, totTxDup, totTxDrop = 0, 0, 0, 0, 0, 0
     local totRxLog, totRxFrag, totRxB, totRxDup, totRxFilt, totRxTail, totRxDrop = 0, 0, 0, 0, 0, 0, 0
+    local totDropReasons = {}
     local rows = {}
     for kind, b in pairs(traffic.byKind or {}) do
         totTxLog = totTxLog + b.txLogical
@@ -1304,6 +1334,9 @@ function Communication:PrintTraffic()
         totTxRet = totTxRet + b.txRetries
         totTxDup = totTxDup + b.txDedup
         totTxDrop = totTxDrop + b.txDrops
+        for reason, cnt in pairs(b.txDropReasons or {}) do
+            totDropReasons[reason] = (totDropReasons[reason] or 0) + cnt
+        end
         totRxLog = totRxLog + b.rxLogical
         totRxFrag = totRxFrag + b.rxFrags
         totRxB = totRxB + b.rxBytes
@@ -1322,15 +1355,21 @@ function Communication:PrintTraffic()
         "  TX: queued=%d, frags=%d, bytes=%d, retries=%d, dedup=%d, drops=%d",
         totTxLog, totTxFrag, totTxB, totTxRet, totTxDup, totTxDrop
     ))
+    local totReasonsText = totTxDrop > 0 and formatDropReasons(totDropReasons) or nil
+    if totReasonsText then
+        Print("  TX drops: " .. totReasonsText)
+    end
     Print(string.format(
         "  RX: handled=%d, frags=%d, bytes=%d, dedup=%d, filtered=%d, tail=%d, dropped=%d",
         totRxLog, totRxFrag, totRxB, totRxDup, totRxFilt, totRxTail, totRxDrop
     ))
     for _, row in ipairs(rows) do
         local b = row.b
+        local reasonsText = b.txDrops > 0 and formatDropReasons(b.txDropReasons) or nil
+        local dropDetail = reasonsText and (" (" .. reasonsText .. ")") or ""
         Print(string.format(
-            "  %s: txQ=%d txFrag=%d txB=%d ret=%d txDup=%d txDrop=%d | rxH=%d rxFrag=%d rxB=%d rxDup=%d filt=%d tail=%d rxDrop=%d",
-            row.kind, b.txLogical, b.txFrags, b.txBytes, b.txRetries, b.txDedup, b.txDrops,
+            "  %s: txQ=%d txFrag=%d txB=%d ret=%d txDup=%d txDrop=%d%s | rxH=%d rxFrag=%d rxB=%d rxDup=%d filt=%d tail=%d rxDrop=%d",
+            row.kind, b.txLogical, b.txFrags, b.txBytes, b.txRetries, b.txDedup, b.txDrops, dropDetail,
             b.rxLogical, b.rxFrags, b.rxBytes, b.rxDedup, b.rxFiltered, b.rxFilteredTail, b.rxDropped
         ))
     end
