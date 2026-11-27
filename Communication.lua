@@ -442,6 +442,88 @@ local function entryError(self,index,entry,reason,now)
         entry.nextTryAt=now+entry.errorBackoff+math.random()
     end
 end
+local pendingWhisperSends = {}
+local confirmedOfflineTargets = {}
+local whisperSuppressTicks = {}
+local whisperHandledTicks = {}
+local notFoundPattern, notFoundPatternChecked = nil, false
+
+local function pruneWhisperState(now)
+    for k, v in pairs(pendingWhisperSends) do
+        if not v or v.expires < now or (v.count or 0) <= 0 then pendingWhisperSends[k] = nil end
+    end
+    for k, exp in pairs(confirmedOfflineTargets) do
+        if exp < now then confirmedOfflineTargets[k] = nil end
+    end
+    for k, t in pairs(whisperSuppressTicks) do
+        if t < now then whisperSuppressTicks[k] = nil end
+    end
+    for k, t in pairs(whisperHandledTicks) do
+        if t < now then whisperHandledTicks[k] = nil end
+    end
+end
+
+local function extractNotFoundWhisperTarget(msg)
+    if type(msg) ~= 'string' or msg == '' then return nil end
+    if not notFoundPatternChecked then
+        notFoundPatternChecked = true
+        if type(ERR_CHAT_PLAYER_NOT_FOUND_S) == 'string' and ERR_CHAT_PLAYER_NOT_FOUND_S ~= '' and ERR_CHAT_PLAYER_NOT_FOUND_S:find('%s', 1, true) then
+            local escaped = ERR_CHAT_PLAYER_NOT_FOUND_S:gsub('([%(%)%.%%%+%-%*%?%[%]%^%$])', '%%%1')
+            notFoundPattern = '^' .. escaped:gsub('%%%%s', '(.-)', 1) .. '$'
+        end
+    end
+    if notFoundPattern then
+        local target = msg:match(notFoundPattern)
+        if type(target) == 'string' and target ~= '' then return target end
+    end
+    local fallback = msg:match("^No player named '(.+)' is currently playing%.$")
+    if type(fallback) == 'string' and fallback ~= '' then return fallback end
+    return nil
+end
+
+local function handleWhisperSystemMessage(self, msg, fromFilter)
+    local target = extractNotFoundWhisperTarget(msg)
+    if not target then return false end
+    local now = type(GetTime) == 'function' and GetTime() or 0
+    pruneWhisperState(now)
+    if fromFilter and whisperSuppressTicks[target] == now then
+        return true
+    end
+    if not fromFilter and whisperHandledTicks[target] == now then
+        whisperHandledTicks[target] = nil
+        return true
+    end
+    local pending = pendingWhisperSends[target]
+    if not pending or pending.expires < now or pending.count <= 0 then
+        return false
+    end
+    pending.count = pending.count - 1
+    if pending.count <= 0 then pendingWhisperSends[target] = nil end
+    confirmedOfflineTargets[target] = now + 10
+    whisperSuppressTicks[target] = now
+    if fromFilter then whisperHandledTicks[target] = now end
+    for i = #self.queue, 1, -1 do
+        local entry = self.queue[i]
+        if entry then
+            local ch = entry.channel or (entry.job and entry.job.channel)
+            local t = entry.target or (entry.job and entry.job.target)
+            if ch == 'WHISPER' and t == target then
+                local dropKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
+                local dropID = entry.job and entry.job.id
+                dropEntryOrJob(self, i, entry, 'targetOffline', false, 'targetOffline')
+                if OldKraken and type(OldKraken.Fire) == 'function' then
+                    OldKraken:Fire('COMM_WHISPER_DROPPED', dropKind, target, 'targetOffline', dropID)
+                end
+            end
+        end
+    end
+    return true
+end
+
+function Communication:OnSystemMessage(msg)
+    return handleWhisperSystemMessage(self, msg, false)
+end
+
 local function runPump(self)
     EnsurePresenceGuild(self)
     if self.pendingSpecBroadcast and self.ready and IsInGuild and IsInGuild()
@@ -505,6 +587,17 @@ local function runPump(self)
     local sendTarget = entry.target or (job and job.target)
     local ok,result
     if sendChannel == 'WHISPER' and type(sendTarget) == 'string' and sendTarget ~= '' then
+        pruneWhisperState(now)
+        local blockedUntil = confirmedOfflineTargets[sendTarget]
+        if blockedUntil and blockedUntil >= now then
+            local dropKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
+            local dropID = entry.job and entry.job.id
+            dropEntryOrJob(self, index, entry, 'targetOffline', false, 'targetOffline')
+            if OldKraken and type(OldKraken.Fire) == 'function' then
+                OldKraken:Fire('COMM_WHISPER_DROPPED', dropKind, sendTarget, 'targetOffline', dropID)
+            end
+            return
+        end
         ok,result=pcall(chatInfo.SendAddonMessage,self.PREFIX,entry.message,'WHISPER',sendTarget)
     else
         sendChannel = 'GUILD'
@@ -541,6 +634,15 @@ local function runPump(self)
     end
     local sentKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
     local sentBytes = #entry.message
+    if sendChannel == 'WHISPER' and type(sendTarget) == 'string' and sendTarget ~= '' then
+        local pending = pendingWhisperSends[sendTarget]
+        if not pending or pending.expires < now then
+            pendingWhisperSends[sendTarget] = { count = 1, expires = now + 3 }
+        else
+            pending.count = pending.count + 1
+            pending.expires = now + 3
+        end
+    end
     finishEntry(self,index,true)
     self.backoff,self.retryAt,self.lastSendError=0,0,nil
     self.stats.sent=self.stats.sent+1
@@ -1413,6 +1515,13 @@ pcall(frame.RegisterEvent, frame, 'PLAYER_SPECIALIZATION_CHANGED')
 pcall(frame.RegisterEvent, frame, 'PLAYER_ENTERING_WORLD')
 pcall(frame.RegisterEvent, frame, 'PLAYER_REGEN_ENABLED')
 pcall(frame.RegisterEvent, frame, 'GUILD_ROSTER_UPDATE')
+pcall(frame.RegisterEvent, frame, 'CHAT_MSG_SYSTEM')
+
+if type(ChatFrame_AddMessageEventFilter) == 'function' then
+    pcall(ChatFrame_AddMessageEventFilter, 'CHAT_MSG_SYSTEM', function(_, _, msg)
+        return handleWhisperSystemMessage(Communication, msg, true)
+    end)
+end
 
 local hookedTalentFrames = {}
 local function InstallTalentHooks()
@@ -1471,6 +1580,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
         Communication:CheckVersionNotification()
     elseif event == 'GUILD_ROSTER_UPDATE' then
         Communication:ScheduleRosterPresencePrune()
+    elseif event == 'CHAT_MSG_SYSTEM' then
+        Communication:OnSystemMessage(...)
     elseif event == "CHAT_MSG_ADDON" then
         Communication:OnAddonMessage(...)
     end
