@@ -517,7 +517,12 @@ local function runPump(self)
                 or (results.InvalidChatType~=nil and result==results.InvalidChatType)
                 or (results.InvalidChannel~=nil and result==results.InvalidChannel)))
                 or result==12 or result==6 or result==4 or result==7)
-            if targetError then dropEntryOrJob(self,index,entry,tostring(result),false)
+            if targetError then
+                local dropKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
+                dropEntryOrJob(self,index,entry,tostring(result),false)
+                if OldKraken and type(OldKraken.Fire) == 'function' then
+                    OldKraken:Fire('COMM_WHISPER_DROPPED', dropKind, sendTarget, tostring(result))
+                end
             else entryError(self,index,entry,tostring(result),now) end
         end
         return
@@ -651,6 +656,36 @@ function Communication:HasRosterAddon(name)
     EnsurePresenceGuild(self)
     local key = PresenceKey(name)
     return IsSelfPresenceKey(key) or self.rosterPresence[key] == true
+end
+function Communication:PruneRosterPresence(members)
+    EnsurePresenceGuild(self)
+    if self.presenceGuild == '' or type(members) ~= 'table' or #members == 0 then return false end
+    local activeKeys = {}
+    for i = 1, #members do
+        local entry = members[i]
+        local key = PresenceKey(type(entry) == 'table' and entry.name or entry)
+        if key ~= '' then activeKeys[key] = true end
+    end
+    if not next(activeKeys) then return false end
+    local removed = false
+    for key in pairs(self.rosterPresence) do
+        if not activeKeys[key] and not IsSelfPresenceKey(key) then
+            self.rosterPresence[key] = nil
+            self.rosterVersions[key] = nil
+            self.rosterSpecs[key] = nil
+            removed = true
+        end
+    end
+    if removed then
+        for sender in pairs(seenSenders) do
+            local key = PresenceKey(sender)
+            if key ~= '' and not activeKeys[key] and not IsSelfPresenceKey(key) then
+                seenSenders[sender] = nil
+            end
+        end
+        if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+    end
+    return removed
 end
 function Communication:GetRosterVersion(name)
     self:HasRosterAddon(name)

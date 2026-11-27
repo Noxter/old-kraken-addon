@@ -1431,6 +1431,11 @@ function Roster:Load()
         end
     end
 
+    local comm = OldKraken.Communication
+    if comm and type(comm.PruneRosterPresence) == 'function' and #rosterData > 0 then
+        comm:PruneRosterPresence(rosterData)
+    end
+
     self:Render()
     if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.load', debugprofilestop() - t0) end
     return #rosterData

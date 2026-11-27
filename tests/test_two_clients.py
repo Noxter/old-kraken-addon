@@ -156,9 +156,10 @@ def load_sync_client(name, realm, version):
     lua.globals().realm = realm
     lua.globals().client_ver = version
     lua.execute('''
-        OldKraken={DB={workshop={guilds={}}},WorkshopRecipes={}}
+        OldKraken={DB={workshop={guilds={}}},WorkshopRecipes={},listeners={}}
+        function OldKraken:On(n,fn) self.listeners[n]=self.listeners[n] or {}; table.insert(self.listeners[n],fn) end
+        function OldKraken:Fire(n,...) for _,fn in ipairs(self.listeners[n] or {}) do fn(...) end end
         frames={}; timers={}; outgoing={}; imported={}; local_records={}
-        function OldKraken:Fire(...) end
         function print(...) end
         function UnitName() return player, realm end
         function GetGuildInfo() return guild_name or 'Guild' end
@@ -357,12 +358,48 @@ s_alice.execute("""
     OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888896-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
     assert(OldKraken.Communication.stats.received == beforeRx + 1)
     outgoing = {}
+
+    -- 8f. PruneRosterPresence invalidates a member who left the guild and blocks subsequent WHISPER
+    assert(OldKraken.Communication:PruneRosterPresence({{name = 'Alice Moon'}}))
+    assert(not OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    beforeRx = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888897-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
+    assert(OldKraken.Communication.stats.received == beforeRx)
 """)
 s_bob.execute("""
     local beforeRx = OldKraken.Communication.stats.received
     OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRPAGE^1700000000-888889-1^1^1^504159', 'WHISPER', 'Stranger Other')
     assert(not OldKraken.Communication:HasRosterAddon('Stranger Other'))
     assert(OldKraken.Communication.stats.received == beforeRx)
+""")
+
+# 9. TargetOffline (12) on WHISPER WRGET triggers immediate failover to backup provider without waiting 45s
+s_bob.execute("""
+    clock = clock + 700; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    outgoing = {}
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Offline Provider')
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Backup Provider')
+    local idx1 = OldKraken.GroupFinder._pack({'Bob Other Realm', 'Crafter Owner', '2', '1'})
+    local idx2 = OldKraken.GroupFinder._pack({'Bob Other Realm', 'Crafter Owner', '2', '1'})
+    local h1 = idx1:gsub('.', function(c) return string.format('%02X', string.byte(c)) end)
+    local h2 = idx2:gsub('.', function(c) return string.format('%02X', string.byte(c)) end)
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRIDX^1700000000-777771-1^1^1^' .. h1, 'GUILD', 'Offline Provider')
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRIDX^1700000000-777772-1^1^1^' .. h2, 'GUILD', 'Backup Provider')
+    send_mode = 'target_offline'
+    clock = clock + 1; timers[1]()
+    clock = clock + 1; OldKraken.Communication:Pump()
+    assert(#outgoing == 0)
+    send_mode = nil
+    -- Very next tick (+1s, well under 45s) immediately switches to Backup Provider
+    clock = clock + 1; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    local switched = false
+    for _, p in ipairs(outgoing) do
+        if p.message:match('^GF2%^WRGET%^') and p.target == 'Backup Provider' then switched = true end
+    end
+    assert(switched)
+    outgoing = {}
 """)
 
 print('Two simulated clients passed')
