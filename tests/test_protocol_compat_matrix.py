@@ -3,7 +3,7 @@ from pathlib import Path
 from lupa.lua51 import LuaRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKPOINTS = ['v0.4.0', 'v0.5.2', 'v0.5.4', 'v0.5.6', 'origin/main']
+CHECKPOINTS = ['v0.4.0', 'v0.5.2', 'v0.5.4', 'v0.5.6', 'v0.5.7']
 REMOVED_PROFESSIONS = (186, 182, 393, 185, 129, 356)
 
 
