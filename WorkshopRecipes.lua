@@ -454,7 +454,8 @@ local function scanCachedRecords(visit,done,valid)
     local ownerIndex,records,recordIndex,currentOwner=1,nil,1,nil
     local function step()
         if people~=source or (valid and not valid()) then return end
-        local budget=200
+        local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+        local budget, visited = 200, 0
         while budget>0 and ownerIndex<=#owners do
             if not records then
                 currentOwner=owners[ownerIndex]; records={}; recordIndex=1
@@ -464,10 +465,14 @@ local function scanCachedRecords(visit,done,valid)
             end
             local r=records[recordIndex]
             if r then
-                recordIndex=recordIndex+1; budget=budget-1
-                if visit(currentOwner,r)==false then done(); return end
+                recordIndex=recordIndex+1; budget=budget-1; visited=visited+1
+                if visit(currentOwner,r)==false then
+                    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.scan', debugprofilestop() - t0, visited) end
+                    done(); return
+                end
             else ownerIndex=ownerIndex+1; records=nil; budget=budget-1 end
         end
+        if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.scan', debugprofilestop() - t0, visited) end
         if ownerIndex>#owners then done()
         elseif C_Timer and C_Timer.After then C_Timer.After(0,step) else return step() end
     end
@@ -1093,7 +1098,7 @@ local function resizeInfo()
         frame.infoContent:SetHeight(math.max(frame.embedded and 262 or 110,frame.detailInfo:GetStringHeight()+mastersHeight+reagents+8))
     end
 end
-render=function()
+local function renderBody()
     if not frame or not frame:IsShown() then return end
     local online,classes=onlineIndex(); local list={}; local grouped={}
     local mastersView=tab=='masters' and not selectRecipe
@@ -1384,6 +1389,11 @@ render=function()
         frame.detailReagents:SetText(''); hideReagentRows()
     end
     resizeInfo()
+end
+render=function()
+    local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    renderBody()
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.render', debugprofilestop() - t0) end
 end
 local function switchTab(nextTab)
     if tab==nextTab then return end
@@ -1773,7 +1783,11 @@ local function createWindow(parent)
     f:Hide(); return f
 end
 function Recipes:CreatePanel(parent)
-    if not frame then frame=createWindow(parent) end
+    if not frame then
+        local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+        frame=createWindow(parent)
+        if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.create', debugprofilestop() - t0) end
+    end
     return frame
 end
 function Recipes:RefreshPanel() render() end
@@ -1819,7 +1833,7 @@ function Recipes:RestoreView(state)
     if tab=='recipes' and not professionContext then addCached('',textFilter(state.query)) end
     frame.status:SetText(state.status or ''); render()
 end
-function Recipes:Show(forceNavigation)
+local function showRecipes(self,forceNavigation)
     connect(); if not active then chatError(T('Old Kraken: пошук рецептів доступний членам гільдії.')); return end
     if OldKraken.UIHub and OldKraken.Workshop then
         OldKraken.UIHub:ShowPage('workshop')
@@ -1831,6 +1845,11 @@ function Recipes:Show(forceNavigation)
     restoringView=true; frame.query:SetText(''); restoringView=false
     addCached('')
     frame:Show(); render()
+end
+function Recipes:Show(forceNavigation)
+    local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
+    showRecipes(self,forceNavigation)
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.show', debugprofilestop() - t0) end
 end
 function Recipes:ExportSnapshotMeta()
     if not active or not scope or type(people[identity])~='table' then return nil end
