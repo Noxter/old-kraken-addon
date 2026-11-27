@@ -57,6 +57,30 @@ local function playerIdentity()
     return name, name
 end
 
+local wasInDungeon = false
+local pendingDungeonClose = {}
+local dungeonRevisionWarned = {}
+local processPendingDungeonClose
+
+local function isInDungeon()
+    if type(IsInInstance) ~= 'function' then return false end
+    local ok, inInstance, instanceType = pcall(IsInInstance)
+    return ok and inInstance == true and instanceType == 'party'
+end
+
+local function resolveGroupTitle(group)
+    local title = group.title or group.id
+    local catalog = OldKraken.ActivityCatalog
+    if catalog and catalog.IsCanonicalTitle and catalog.IsCanonicalTitle(group.dungeon, title) then
+        for _, list in ipairs({catalog.dungeon or {}, catalog.raid or {}, (catalog.legacy and catalog.legacy.dungeon) or {}}) do
+            for _, entry in ipairs(list) do
+                if entry.value == group.dungeon then return entry.label end
+            end
+        end
+    end
+    return title
+end
+
 local function deactivate()
     if active then comm:ClearProtocolState() end
     finder.onPersist = nil
@@ -64,6 +88,9 @@ local function deactivate()
     partyDirty = true
     nextPartyCheck = 0
     soloSince = nil
+    wasInDungeon = false
+    pendingDungeonClose = {}
+    dungeonRevisionWarned = {}
 end
 
 local function saveOwned()
@@ -408,6 +435,7 @@ end
 local frame = CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
 frame:RegisterEvent('PLAYER_ENTERING_WORLD')
+pcall(frame.RegisterEvent, frame, 'ZONE_CHANGED_NEW_AREA')
 pcall(frame.RegisterEvent, frame, 'PLAYER_GUILD_UPDATE')
 frame:RegisterEvent('GUILD_ROSTER_UPDATE')
 frame:RegisterEvent('GROUP_ROSTER_UPDATE')
@@ -689,16 +717,7 @@ local function connect()
                             chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
                         elseif finder:Cancel(group.id) then
                             OldKraken:Fire('GROUP_FINDER_CHANGED')
-                            local title = group.title or group.id
-                            local catalog = OldKraken.ActivityCatalog
-                            if catalog and catalog.IsCanonicalTitle and catalog.IsCanonicalTitle(group.dungeon, title) then
-                                for _, list in ipairs({catalog.dungeon or {}, catalog.raid or {}, (catalog.legacy and catalog.legacy.dungeon) or {}}) do
-                                    for _, entry in ipairs(list) do
-                                        if entry.value == group.dungeon then title = entry.label; break end
-                                    end
-                                end
-                            end
-                            chatInfo(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності.'), title))
+                            chatInfo(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності.'), resolveGroupTitle(group)))
                         end
                     end
                 end
@@ -716,6 +735,7 @@ local function connect()
 
             finder:SyncStep()
             if finder:Prune() then saveOwned() end
+            processPendingDungeonClose()
         end
         C_Timer.NewTicker(3, function()
             local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
@@ -726,8 +746,59 @@ local function connect()
     return true
 end
 
+processPendingDungeonClose = function()
+    if not active or not next(pendingDungeonClose) then return false end
+    if not isInDungeon() then
+        wasInDungeon = false
+        pendingDungeonClose = {}
+        return false
+    end
+    local closedAny = false
+    for id in pairs(pendingDungeonClose) do
+        local group = finder.groups[finder.identity .. '\001' .. id]
+        if not group or group.closed or group.hidden then
+            pendingDungeonClose[id] = nil
+        elseif group.revision >= 2147483647 then
+            pendingDungeonClose[id] = nil
+            if not dungeonRevisionWarned[id] then
+                dungeonRevisionWarned[id] = true
+                chatError(T('Old Kraken: досягнуто межі ревізії групи; створіть новий набір.'))
+            end
+        elseif finder:Cancel(id) then
+            pendingDungeonClose[id] = nil
+            dungeonRevisionWarned[id] = nil
+            closedAny = true
+            chatInfo(string.format(T('|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито після входу в підземелля.'), resolveGroupTitle(group)))
+        end
+    end
+    if closedAny then
+        saveOwned()
+        OldKraken:Fire('GROUP_FINDER_CHANGED')
+    end
+    return closedAny
+end
+
+local function closeOwnedOnDungeonEntry()
+    local inDungeon = isInDungeon()
+    if not inDungeon then
+        wasInDungeon = false
+        pendingDungeonClose = {}
+        return false
+    end
+    if wasInDungeon or not active then return false end
+    wasInDungeon = true
+    for _, group in pairs(finder.groups) do
+        if group.owner == finder.identity and not group.closed and not group.hidden then
+            pendingDungeonClose[group.id] = true
+        end
+    end
+    return processPendingDungeonClose()
+end
+
 function finder:Connect()
-    return connect()
+    local ok = connect()
+    if ok then closeOwnedOnDungeonEntry() end
+    return ok
 end
 
 frame:SetScript('OnEvent', function(_, event)
@@ -738,9 +809,14 @@ frame:SetScript('OnEvent', function(_, event)
         if active then reconcileParty(event == 'GROUP_ROSTER_UPDATE') end
         return
     end
-    connect()
+    if event ~= 'ZONE_CHANGED_NEW_AREA' then connect() end
+    if event == 'PLAYER_ENTERING_WORLD' or event == 'ZONE_CHANGED_NEW_AREA' then
+        closeOwnedOnDungeonEntry()
+    end
 end)
 
 if type(OldKraken.On) == 'function' then
-    OldKraken:On('INITIALIZED', function() connect() end)
+    OldKraken:On('INITIALIZED', function()
+        if connect() then closeOwnedOnDungeonEntry() end
+    end)
 end

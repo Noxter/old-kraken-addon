@@ -123,6 +123,7 @@
 - Ролі беруться з `UnitGetAvailableRoles`/`C_LFGList.GetAvailableRoles` — **ніколи** з таблиці класів (`tests/test_class_roles.py` це фіксує).
 - LFG-probe **read-only**: `C_LFGList`/`C_LFGInfo` лише читаються, `Search`/`CreateListing`/`UpdateListing` не викликаються.
 - Періодичний `QUERY` (синк) + `RequestSync()`; `ClearProtocolState()` викликається при деактивації інтеграції.
+- Автоматичне закриття при вході в підземелля: `GroupFinderIntegration.lua` на `PLAYER_ENTERING_WORLD`/`ZONE_CHANGED_NEW_AREA` перевіряє `IsInInstance()` (`inInstance == true and instanceType == 'party'`), одноразово закриває відкриті оголошення автора через `Finder:Cancel()` (зі збереженням 60-хв `IDLE_GROUP_TTL`, без повторного відкриття при зміні складу та з можливістю ручного `Finder:Reopen()`).
 
 ---
 
