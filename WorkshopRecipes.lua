@@ -36,6 +36,8 @@ local ownItems,ownItemsRevision={},-1
 local scanStatus
 local initialScanStatus = 'Відкрийте свої професії; шукайте назву рецепта, предмета або вставте посилання на предмет.'
 local render, matches
+local activeItemNames, activeSpellNames, activeDisplayNames
+local renderApiCalls = 0
 local function usable(v,t) return not (type(issecretvalue)=='function' and issecretvalue(v)) and type(v)==t end
 local function integer(n,lo,hi) return usable(n,'number') and n==n and n%1==0 and n>=lo and n<=hi end
 local ignoredProfessions={[185]=true,[129]=true,[356]=true,[186]=true,[182]=true,[393]=true}
@@ -391,36 +393,68 @@ local function getItemInfo(id)
     if not id or id<=0 then return false end
     local fn=(C_Item and type(C_Item.GetItemInfo)=='function' and C_Item.GetItemInfo) or (type(GetItemInfo)=='function' and GetItemInfo)
     if not fn then return false end
+    if activeItemNames then renderApiCalls = renderApiCalls + 1 end
     return pcall(fn,id)
 end
 local function clientItemName(id)
     if not id or id<=0 then return nil end
-    if C_Item and type(C_Item.GetItemNameByID)=='function' then
-        local ok,value=pcall(C_Item.GetItemNameByID,id); if ok and safeText(value,1,120) then return value end
+    if activeItemNames then
+        local hit=activeItemNames[id]
+        if hit~=nil then return hit or nil end
     end
-    local ok,value=getItemInfo(id); if ok and safeText(value,1,120) then return value end
-    return nil
+    local resolved
+    if C_Item and type(C_Item.GetItemNameByID)=='function' then
+        if activeItemNames then renderApiCalls = renderApiCalls + 1 end
+        local ok,value=pcall(C_Item.GetItemNameByID,id)
+        if ok and safeText(value,1,120) then resolved=value end
+    end
+    if not resolved then
+        local ok,value=getItemInfo(id)
+        if ok and safeText(value,1,120) then resolved=value end
+    end
+    if activeItemNames then activeItemNames[id]=resolved or false end
+    return resolved
 end
 local function clientSpellName(id)
     if not id or id<=0 then return nil end
+    if activeSpellNames then
+        local hit=activeSpellNames[id]
+        if hit~=nil then return hit or nil end
+    end
+    local resolved
     if C_Spell and type(C_Spell.GetSpellName)=='function' then
-        local ok,value=pcall(C_Spell.GetSpellName,id); if ok and safeText(value,1,120) then return value end
+        if activeSpellNames then renderApiCalls = renderApiCalls + 1 end
+        local ok,value=pcall(C_Spell.GetSpellName,id)
+        if ok and safeText(value,1,120) then resolved=value end
     end
-    if type(GetSpellInfo)=='function' then
-        local ok,value=pcall(GetSpellInfo,id); if ok and safeText(value,1,120) then return value end
+    if not resolved and type(GetSpellInfo)=='function' then
+        if activeSpellNames then renderApiCalls = renderApiCalls + 1 end
+        local ok,value=pcall(GetSpellInfo,id)
+        if ok and safeText(value,1,120) then resolved=value end
     end
-    return nil
+    if activeSpellNames then activeSpellNames[id]=resolved or false end
+    return resolved
 end
 local function displayRecipeName(r)
     if type(r)~='table' then return '' end
-    local localName=r.item>0 and clientItemName(r.item) or clientSpellName(r.recipe)
-    if localName then return localName end
-    local cat=recipeCatalog and recipeCatalog[r.recipe]
-    if type(cat)=='table' then
-        local catText=cat.product~='' and cat.product or cat.name
-        if isAsciiText(catText) then return catText end
+    if activeDisplayNames then
+        local cached=activeDisplayNames[r]
+        if cached~=nil then return cached end
     end
-    return r.product~='' and r.product or r.name
+    local result
+    local localName=r.item>0 and clientItemName(r.item) or clientSpellName(r.recipe)
+    if localName then
+        result=localName
+    else
+        local cat=recipeCatalog and recipeCatalog[r.recipe]
+        if type(cat)=='table' then
+            local catText=cat.product~='' and cat.product or cat.name
+            if isAsciiText(catText) then result=catText end
+        end
+        if not result then result=r.product~='' and r.product or r.name end
+    end
+    if activeDisplayNames then activeDisplayNames[r]=result end
+    return result
 end
 matches=function(r,query)
     if not validRecord(r) then return false end
@@ -1248,7 +1282,12 @@ local function renderBody()
         end
     end
     if byRecipe then for _,entry in pairs(grouped) do list[#list+1]=entry end end
-    table.sort(list,function(a,b) local an,bn=displayRecipeName(a.record),displayRecipeName(b.record); if an~=bn then return an<bn end return a.owner<b.owner end)
+    local sortNames={}
+    for i=1,#list do
+        local entry=list[i]
+        sortNames[entry]=displayRecipeName(entry.record)
+    end
+    table.sort(list,function(a,b) local an,bn=sortNames[a],sortNames[b]; if an~=bn then return an<bn end return a.owner<b.owner end)
     offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
     frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
     frame.count:SetText(T('Знайдено: ')..#list..T(' · результати можуть бути застарілими або неповними'))
@@ -1392,8 +1431,12 @@ local function renderBody()
 end
 render=function()
     local t0 = OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
-    renderBody()
-    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.render', debugprofilestop() - t0) end
+    activeItemNames, activeSpellNames, activeDisplayNames, renderApiCalls = {}, {}, {}, 0
+    local ok, err = pcall(renderBody)
+    local calls = renderApiCalls
+    activeItemNames, activeSpellNames, activeDisplayNames, renderApiCalls = nil, nil, nil, 0
+    if not ok then error(err) end
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('wk.recipes.render', debugprofilestop() - t0, calls) end
 end
 local function switchTab(nextTab)
     if tab==nextTab then return end

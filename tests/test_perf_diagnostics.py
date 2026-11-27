@@ -1167,6 +1167,113 @@ def test_workshop_recipes_first_open_perf_labels():
     ''')
 
 
+def test_workshop_recipes_render_name_cache_and_sort_keys():
+    mod = runpy.run_path(str(ROOT / 'tests/test_workshop_orders.py'))
+    make_client = mod['client']
+    c = make_client('Alice', embedded=True)
+    c.execute('''
+        local itemCalls, spellCalls = 0, 0
+        GetItemInfo = function(id)
+            itemCalls = itemCalls + 1
+            return 'Item ' .. string.format('%03d', 200 - id), nil, 1, 1, 1, 'Trade Goods', 'Parts', 20, nil, 134400, 0, 7, 0, 0, 0
+        end
+        GetSpellInfo = function(id)
+            spellCalls = spellCalls + 1
+            return 'Spell ' .. string.format('%03d', 200 - id), nil, 134400
+        end
+        C_Item = { GetItemInfo = GetItemInfo }
+        C_Spell = nil
+
+        local store = OldKraken.DB.workshop.guilds['Realm\\001Guild'].recipes
+        for ownerIdx = 1, 20 do
+            local owner = string.format('Crafter%02d Mon', ownerIdx)
+            store[owner] = {}
+            for rIdx = 1, 15 do
+                local recipeID = 5000 + rIdx
+                local itemID = (rIdx <= 10) and (8000 + rIdx) or 0
+                store[owner][recipeID] = {
+                    recipe = recipeID, item = itemID, profession = 171,
+                    seen = 1700000000, name = 'Fallback ' .. rIdx, product = '',
+                }
+            end
+        end
+
+        OldKraken.perfEnabled = true
+        OldKraken.perfStats = {}
+        function OldKraken:PerfRecord(label, elapsedMs, itemCount)
+            local s = self.perfStats[label] or { calls = 0, items = 0 }
+            s.calls = s.calls + 1
+            s.items = s.items + (itemCount or 0)
+            self.perfStats[label] = s
+        end
+        debugprofilestop = function() return 10 end
+
+        OldKraken.WorkshopRecipes:Show()
+        -- Flush deferred scanCachedRecords timers
+        for _, fn in ipairs(timers) do fn() end
+
+        itemCalls, spellCalls = 0, 0
+        OldKraken.perfStats = {}
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        -- 10 unique items (20 owners each -> 200 records) + 5 unique spells (20 owners each -> 100 records):
+        -- all 300 records pass filtering, while byRecipe grouping leaves 15 rows for sorting.
+        -- Each unique item/spell must be queried at most once during renderBody().
+        assert(itemCalls <= 10, 'GetItemInfo must be called at most once per unique item, got ' .. itemCalls)
+        assert(spellCalls <= 5, 'GetSpellInfo must be called at most once per unique spell, got ' .. spellCalls)
+        assert(OldKraken.perfStats['wk.recipes.render'].items == itemCalls + spellCalls)
+
+        -- Verify sort order (name ascending, deterministic across repeat renders)
+        local function visibleNames()
+            local out = {}
+            for _, row in ipairs(frames) do
+                if type(row.entry) == 'table' and row.name and row:IsShown() then
+                    out[#out + 1] = row.name:GetText() .. '|' .. row.entry.owner
+                end
+            end
+            return out
+        end
+        local firstOrder = visibleNames()
+        assert(#firstOrder == 10, 'page 1 must show 10 sorted rows')
+        for i = 2, #firstOrder do
+            local prevName = firstOrder[i - 1]:match('^([^|]+)')
+            local curName = firstOrder[i]:match('^([^|]+)')
+            assert(prevName <= curName, 'rows must be sorted ascending by display name')
+        end
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        local secondOrder = visibleNames()
+        for i = 1, #firstOrder do
+            assert(firstOrder[i] == secondOrder[i], 'repeat render must keep identical order')
+        end
+
+        -- Verify owner tie-break when two distinct recipes resolve to the same display name
+        local origSpell = GetSpellInfo
+        GetSpellInfo = function(id)
+            if id == 5011 or id == 5012 then return 'AAA Tie Spell', nil, 134400 end
+            return origSpell(id)
+        end
+        store['Crafter20 Mon'][5011] = { recipe = 5011, item = 0, profession = 171, seen = 1700000001, name = 'T1', product = '' }
+        store['Crafter01 Mon'][5012] = { recipe = 5012, item = 0, profession = 171, seen = 1700000001, name = 'T2', product = '' }
+        -- Force non-grouped view via owner filter or check grouped tie-break when only one owner per recipe
+        for ownerIdx = 1, 19 do store[string.format('Crafter%02d Mon', ownerIdx)][5011] = nil end
+        for ownerIdx = 2, 20 do store[string.format('Crafter%02d Mon', ownerIdx)][5012] = nil end
+        OldKraken.WorkshopRecipes:Show(true)
+        for _, fn in ipairs(timers) do fn() end
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        local tieOrder = visibleNames()
+        assert(tieOrder[1] == 'AAA Tie Spell|Crafter01 Mon' and tieOrder[2] == 'AAA Tie Spell|Crafter20 Mon',
+            'identical display names must tie-break by owner ascending')
+        GetSpellInfo = origSpell
+
+        -- Filter path (matchesFilter) also reuses per-render name cache
+        local f = OldKraken.UIHub.pages.workshop.frame.recipesView
+        f.query:SetText('Spell')
+        f.query.scripts.OnTextChanged(f.query, true)
+        itemCalls, spellCalls = 0, 0
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(itemCalls <= 10 and spellCalls <= 5, 'filtered render must also cache name API calls')
+    ''')
+
+
 if __name__ == '__main__':
     test_core_perf_commands_and_metrics()
     test_comm_hex_codec_and_cache_counters()
@@ -1179,4 +1286,5 @@ if __name__ == '__main__':
     test_comm_traffic_counters_and_commands()
     test_workshop_orders_worelay_suppression()
     test_workshop_recipes_first_open_perf_labels()
+    test_workshop_recipes_render_name_cache_and_sort_keys()
     print('Perf diagnostics and codec/cache checks passed')
