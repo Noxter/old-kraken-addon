@@ -30,10 +30,10 @@ def client(name, realm):
         end
         C_Timer={NewTicker=function(_, fn) timers[#timers+1]=fn end}
         C_ChatInfo={RegisterAddonMessagePrefix=function() return true end,
-            SendAddonMessage=function(prefix,message,channel)
-                outgoing[#outgoing+1]=message; return 0
+            SendAddonMessage=function(prefix,message,channel,target)
+                outgoing[#outgoing+1]={message=message,channel=channel,target=target}; return 0
             end}
-        Enum={SendAddonMessageResult={Success=0,AddonMessageThrottle=1,ChannelThrottle=2,AddOnMessageLockdown=3}}
+        Enum={SendAddonMessageResult={Success=0,InvalidPrefix=1,InvalidMessage=2,AddonMessageThrottle=3,InvalidChatType=4,NotInGroup=5,TargetRequired=6,InvalidChannel=7,ChannelThrottle=8,GeneralError=9,NotInGuild=10,AddOnMessageLockdown=11,TargetOffline=12}}
         function strsplit(_, s) return s:match('^([^%^]*)%^([^%^]*)%^([^%^]*)%^([^%^]*)$') end
     ''')
     for source in sources:
@@ -50,10 +50,15 @@ def flush(sender, recipients):
     outgoing = sender.globals().outgoing
     packets = [outgoing[i] for i in range(1, len(outgoing) + 1)]
     sender.execute('outgoing={}')
-    for packet in packets:
+    sender_name = sender.globals().player + ' ' + sender.globals().realm
+    for pkt in packets:
+        msg, ch, tgt = pkt['message'], pkt['channel'], pkt['target']
         for recipient in recipients:
-            recipient.globals().OldKraken.Communication.OnAddonMessage(
-                recipient.globals().OldKraken.Communication, 'OLDKRKN', packet, 'GUILD', sender.globals().player + ' ' + sender.globals().realm)
+            r_name = recipient.globals().player + ' ' + recipient.globals().realm
+            if ch == 'GUILD' or (ch == 'WHISPER' and tgt == r_name):
+                recipient.globals().OldKraken.Communication.OnAddonMessage(
+                    recipient.globals().OldKraken.Communication, 'OLDKRKN', msg, ch, sender_name)
+    return packets
 
 
 def reload(client):
@@ -143,4 +148,153 @@ bob.execute('''
 ''')
 flush(bob, [alice])
 alice.execute("assert(OldKraken.GroupFinder.requests[second.id]['Bob Other Realm'] == 'tank')")
+
+# Stage 2: WHISPER routing for WRGET / WRPAGE with GUILD fallback for old/unknown clients
+def load_sync_client(name, realm, version):
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    lua.globals().player = name
+    lua.globals().realm = realm
+    lua.globals().client_ver = version
+    lua.execute('''
+        OldKraken={DB={workshop={guilds={}}},WorkshopRecipes={}}
+        frames={}; timers={}; outgoing={}; imported={}; local_records={}
+        function OldKraken:Fire(...) end
+        function print(...) end
+        function UnitName() return player, realm end
+        function GetGuildInfo() return guild_name or 'Guild' end
+        function GetRealmName() return realm end
+        function GetServerTime() return 1700000000 end
+        clock=100; function GetTime() return clock end
+        function IsInGuild() return true end
+        function CreateFrame()
+            local f={events={}}
+            function f:RegisterEvent(event) self.events[event]=true end
+            function f:SetScript(_, fn) self.handler=fn end
+            frames[#frames+1]=f; return f
+        end
+        C_AddOns={GetAddOnMetadata=function(_, key) if key=='Version' then return client_ver end end}
+        C_Timer={NewTicker=function(_, fn) timers[#timers+1]=fn end}
+        send_mode = nil
+        C_ChatInfo={RegisterAddonMessagePrefix=function() return true end,
+            SendAddonMessage=function(prefix,message,channel,target)
+                if send_mode == 'throttle_once' then send_mode = nil; return 3 end
+                if send_mode == 'channel_throttle_once' then send_mode = nil; return 8 end
+                if send_mode == 'target_offline' then return 12 end
+                outgoing[#outgoing+1]={message=message,channel=channel,target=target}; return 0
+            end}
+        Enum={SendAddonMessageResult={Success=0,InvalidPrefix=1,InvalidMessage=2,AddonMessageThrottle=3,InvalidChatType=4,NotInGroup=5,TargetRequired=6,InvalidChannel=7,ChannelThrottle=8,GeneralError=9,NotInGuild=10,AddOnMessageLockdown=11,TargetOffline=12}}
+        function strsplit(_, s) return s:match('^([^%^]*)%^([^%^]*)%^([^%^]*)%^([^%^]*)$') end
+        function OldKraken.WorkshopRecipes:ExportSnapshot() return 1, local_records end
+        function OldKraken.WorkshopRecipes:ValidateSnapshotRecord(r) return type(r)=='table' and type(r.recipe)=='number' end
+        function OldKraken.WorkshopRecipes:ImportSnapshot(owner, recs) imported[owner]=recs; return true end
+    ''')
+    for fname in ('Communication.lua', 'GroupFinder.lua', 'WorkshopSync.lua'):
+        lua.execute((root / fname).read_text(encoding='utf-8'))
+    lua.execute('for _,f in ipairs(frames) do if f.events.PLAYER_LOGIN then f.handler(f,"PLAYER_LOGIN") end end')
+    return lua
+
+s_alice = load_sync_client('Alice', 'Moon', '0.5.8-alpha.2')
+s_bob = load_sync_client('Bob', 'Other Realm', '0.5.8-alpha.2')
+s_carol = load_sync_client('Carol', 'Old', '0.5.7')
+s_obs = load_sync_client('Observer', 'Three', '0.5.8-alpha.2')
+
+s_alice.execute("local_records={{recipe=101,item=201,profession=171,seen=1700000000,name='Flask',product='Flask'}}")
+# Presence exchange so Alice and Bob know each other's 0.5.8-alpha.2, and Carol is 0.5.7
+for peer in (s_alice, s_bob, s_carol):
+    peer.execute("OldKraken.Communication:OnAddonMessage('OLDKRKN','OKP^QUERY','GUILD','Observer Three')")
+flush(s_alice, [s_bob, s_carol, s_obs])
+flush(s_bob, [s_alice, s_carol, s_obs])
+flush(s_carol, [s_alice, s_bob, s_obs])
+
+# 1. New <-> New: WRGET and WRPAGE use WHISPER; Observer receives 0 WRGET/WRPAGE fragments
+s_bob.execute("clock=clock+10; timers[1]()")  # WRQ (GUILD)
+wrq_pkts = flush(s_bob, [s_alice, s_obs])
+assert all(p['channel'] == 'GUILD' for p in wrq_pkts)
+s_alice.execute("clock=clock+10; timers[1]()")  # WRIDX (GUILD)
+wridx_pkts = flush(s_alice, [s_bob, s_obs])
+assert all(p['channel'] == 'GUILD' for p in wridx_pkts)
+s_bob.execute("clock=clock+10; timers[1]()")  # WRGET -> WHISPER Alice Moon
+bob_pkts = flush(s_bob, [s_alice, s_obs])
+wrget_pkts = [p for p in bob_pkts if p['message'].startswith('GF2^WRGET^')]
+assert len(wrget_pkts) == 1 and wrget_pkts[0]['channel'] == 'WHISPER' and wrget_pkts[0]['target'] == 'Alice Moon'
+s_alice.execute("clock=clock+10; timers[1]()")  # WRPAGE -> WHISPER Bob Other Realm
+alice_pkts = flush(s_alice, [s_bob, s_obs])
+wrpage_pkts = [p for p in alice_pkts if p['message'].startswith('GF2^WRPAGE^')]
+assert len(wrpage_pkts) >= 1 and all(p['channel'] == 'WHISPER' and p['target'] == 'Bob Other Realm' for p in wrpage_pkts)
+assert s_bob.eval("imported['Alice Moon'] ~= nil and #imported['Alice Moon'] == 1")
+assert s_obs.eval("OldKraken.Communication.stats.received") == 0 or not s_obs.eval("imported['Alice Moon'] ~= nil")
+# Verify Observer never received any WRGET or WRPAGE traffic at all
+assert (s_obs.eval("OldKraken.Communication.traffic.byKind.WRGET and OldKraken.Communication.traffic.byKind.WRGET.rxFrags or 0") == 0)
+assert (s_obs.eval("OldKraken.Communication.traffic.byKind.WRPAGE and OldKraken.Communication.traffic.byKind.WRPAGE.rxFrags or 0") == 0)
+
+# 2. New <-> Old (0.5.7), Unknown version, and Self ('Alice Moon') -> GUILD
+s_alice.execute("assert(OldKraken.Communication:SendProtocol('WRGET', 'payload-old', 'Carol Old'))")
+old_pkts = flush(s_alice, [s_carol])
+assert len(old_pkts) == 1 and old_pkts[0]['channel'] == 'GUILD' and old_pkts[0]['target'] is None
+s_alice.execute("assert(OldKraken.Communication:SendProtocol('WRGET', 'payload-unk', 'Unknown Player'))")
+unk_pkts = flush(s_alice, [])
+assert len(unk_pkts) == 1 and unk_pkts[0]['channel'] == 'GUILD' and unk_pkts[0]['target'] is None
+s_alice.execute("assert(OldKraken.Communication:SendProtocol('WRGET', 'payload-self', 'Alice Moon'))")
+self_pkts = flush(s_alice, [])
+assert len(self_pkts) == 1 and self_pkts[0]['channel'] == 'GUILD' and self_pkts[0]['target'] is None
+
+# 3. TargetOffline (12) drops WHISPER immediately without GUILD fallback
+s_alice.execute("""
+    send_mode = 'target_offline'
+    assert(OldKraken.Communication:SendProtocol('WRPAGE', 'off-page', 'Bob Other Realm'))
+    clock = clock + 1; OldKraken.Communication:Pump()
+    assert(#OldKraken.Communication.queue == 0)
+    assert(#outgoing == 0)
+    send_mode = nil
+""")
+
+# 4. Throttle (3 / 8) defers and retries on the SAME WHISPER channel and target
+s_alice.execute("""
+    send_mode = 'throttle_once'
+    assert(OldKraken.Communication:SendProtocol('WRPAGE', 'thr-page', 'Bob Other Realm'))
+    clock = clock + 1; OldKraken.Communication:Pump()
+    assert(#OldKraken.Communication.queue == 1 and #outgoing == 0)
+    clock = clock + 10; OldKraken.Communication:Pump()
+    assert(#OldKraken.Communication.queue == 0 and #outgoing == 1)
+    assert(outgoing[1].channel == 'WHISPER' and outgoing[1].target == 'Bob Other Realm')
+    outgoing = {}
+""")
+
+# 5. Mixed channels (WHISPER + GUILD) deduplicate identical GF2 message ID
+s_bob.execute("""
+    local before = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRPAGE^1700000000-999999-1^1^1^504159', 'WHISPER', 'Alice Moon')
+    local mid = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRPAGE^1700000000-999999-1^1^1^504159', 'GUILD', 'Alice Moon')
+    assert(mid == before + 1 and OldKraken.Communication.stats.received == mid)
+""")
+
+# 6. 90-second multipart replay preserves WHISPER channel and target
+s_alice.execute("""
+    local big = string.rep('A', 200)
+    assert(OldKraken.Communication:SendProtocol('WRPAGE', big, 'Bob Other Realm'))
+    assert(#OldKraken.Communication.queue == 3)
+    clock = clock + 1; OldKraken.Communication:Pump()  -- sends part 1
+    assert(#OldKraken.Communication.queue == 2 and #outgoing == 1)
+    assert(outgoing[1].channel == 'WHISPER' and outgoing[1].target == 'Bob Other Realm')
+    outgoing = {}
+    clock = clock + 95; OldKraken.Communication:Pump()  -- triggers 90s replay
+    assert(#OldKraken.Communication.queue == 3)
+    for _, e in ipairs(OldKraken.Communication.queue) do
+        assert(e.channel == 'WHISPER' and e.target == 'Bob Other Realm')
+    end
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    outgoing = {}
+""")
+
+# 7. Guild change drops queued WHISPER GF2 jobs
+s_alice.execute("""
+    assert(OldKraken.Communication:SendProtocol('WRPAGE', 'guild-drop', 'Bob Other Realm'))
+    assert(#OldKraken.Communication.queue == 1 and OldKraken.Communication.queue[1].channel == 'WHISPER')
+    guild_name = 'OtherGuild'
+    clock = clock + 1; OldKraken.Communication:Pump()
+    assert(#OldKraken.Communication.queue == 0 and #outgoing == 0)
+    guild_name = 'Guild'
+""")
+
 print('Two simulated clients passed')

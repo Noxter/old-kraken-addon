@@ -271,7 +271,7 @@ local function runSyncTick()
                     pending.sent=false
                 end
             end
-            if pending and not pending.sent and #comm.queue<=8 and comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)})) then
+            if pending and not pending.sent and #comm.queue<=8 and comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)}),pending.provider) then
                 pending.sent=true; pending.lastRequest=now; pending.stalledAttempts=(pending.stalledAttempts or 0)+1
             end
         end
@@ -288,7 +288,7 @@ local function runSyncTick()
         if now>=job.expires then jobs[jobKey]=nil else
             local fields={job.target,job.owner,string.format('%.0f',job.rev),job.pos,#job.chunks}
             for _,v in ipairs(job.chunks[job.pos]) do fields[#fields+1]=v end
-            if comm:SendProtocol('WRPAGE',codec._pack(fields)) then job.pos=job.pos+1; if job.pos>#job.chunks then jobs[jobKey]=nil end end
+            if comm:SendProtocol('WRPAGE',codec._pack(fields),job.target) then job.pos=job.pos+1; if job.pos>#job.chunks then jobs[jobKey]=nil end end
         end
     end
 end

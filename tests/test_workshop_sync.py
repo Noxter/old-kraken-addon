@@ -25,8 +25,8 @@ def client(name, records):
         end
         C_Timer={NewTicker=function(_,fn) ticker=fn end}
         function OldKraken.Communication:RegisterHandler(kind,fn) handlers[kind]=fn end
-        function OldKraken.Communication:SendProtocol(kind,payload)
-            outgoing[#outgoing+1]={kind=kind,payload=payload}
+        function OldKraken.Communication:SendProtocol(kind,payload,target)
+            outgoing[#outgoing+1]={kind=kind,payload=payload,target=target}
             return true
         end
         function OldKraken.WorkshopRecipes:ExportSnapshot()
@@ -94,10 +94,13 @@ def test_direct_snapshot_round_trip_and_duplicate_protection():
     tick(requester)
     get_packets = requester.globals().drain("WRGET")
     assert len(get_packets) == 1
+    assert get_packets[1]["target"] == "Alice Realm"
     send_packets(requester, owner, get_packets)
 
     tick(owner)
     page_packets = owner.globals().drain("WRPAGE")
+    assert len(page_packets) == 1
+    assert page_packets[1]["target"] == "Bob Realm"
     assert len(page_packets) == 1
     send_packets(owner, requester, page_packets)
 
@@ -280,9 +283,44 @@ def test_index_count_limit_dedup_dequeue_reset_and_zero_full_scans():
     assert len(lua.globals().drain("WRIDX")) == 2000
 
 
+def test_wrget_offline_success_timeout_switches_to_backup_provider():
+    record = {
+        "recipe": 777, "item": 888, "profession": 171,
+        "seen": 1700000000, "name": "Backup Potion", "product": "Backup Potion",
+    }
+    p1 = client("Primary", [record])
+    p2 = client("Backup", [])
+    p2.execute("""
+        OldKraken.DB.workshop.guilds['TestRealm\\001Guild'].recipeDirectSnapshots['Owner Realm'] = {
+            rev = 7,
+            records = { { recipe = 777, item = 888, profession = 171, seen = 1700000000, name = 'Backup Potion', product = 'Backup Potion' } },
+        }
+    """)
+    req = client("Requester", [])
+    req.globals().handlers["WRIDX"]("Primary Realm", "GUILD", pack(req, ["Requester Realm", "Owner Realm", "7", 1]))
+    req.globals().handlers["WRIDX"]("Backup Realm", "GUILD", pack(req, ["Requester Realm", "Owner Realm", "7", 1]))
+    tick(req)
+    first_get = req.globals().drain("WRGET")
+    assert len(first_get) == 1 and first_get[1]["target"] == "Primary Realm"
+    # Simulate Primary offline with Success=0 (no WRPAGE arrives): after 45s stalls, Requester switches to Backup
+    req.execute("now = now + 46; ticker()")
+    retry_get = req.globals().drain("WRGET")
+    assert len(retry_get) == 1 and retry_get[1]["target"] == "Primary Realm"
+    req.execute("now = now + 46; ticker()")
+    backup_get = req.globals().drain("WRGET")
+    assert len(backup_get) == 1 and backup_get[1]["target"] == "Backup Realm"
+    send_packets(req, p2, backup_get)
+    tick(p2)
+    pages = p2.globals().drain("WRPAGE")
+    assert len(pages) == 1 and pages[1]["target"] == "Requester Realm"
+    send_packets(p2, req, pages)
+    assert req.eval("imported['Owner Realm'] ~= nil and #imported['Owner Realm'] == 1")
+
+
 if __name__ == "__main__":
     test_direct_snapshot_round_trip_and_duplicate_protection()
     test_relayed_snapshot_is_not_promoted_to_direct_authority()
     test_invalid_snapshot_index_and_page_are_ignored()
     test_index_count_limit_dedup_dequeue_reset_and_zero_full_scans()
+    test_wrget_offline_success_timeout_switches_to_backup_provider()
     print("Workshop sync checks passed")
