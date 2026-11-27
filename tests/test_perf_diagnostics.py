@@ -854,6 +854,102 @@ def test_comm_traffic_counters_and_commands():
             assert(out:find('WKPROF: txQ=1 txFrag=2', 1, true))
             assert(Comm:HandleCommand('comm traffic reset') == true)
             assert(next(Comm.traffic.byKind) == nil)
+
+            -- 5. txDropReasons breakdown (targetOffline, overflow, noGuild, guildChanged, sendError)
+            printed = {}
+            -- 5a. WRPAGE WHISPER TargetOffline
+            Comm:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'PeerOff')
+            local origSend = C_ChatInfo.SendAddonMessage
+            C_ChatInfo.SendAddonMessage = function(_, _, ch)
+                if ch == 'WHISPER' then return 12 end
+                return 0
+            end
+            assert(Comm:SendProtocol('WRPAGE', 'page-data', 'PeerOff', nil, 'PeerOff') == true)
+            now = now + 2; Comm:Pump()
+            assert(Comm.traffic.byKind.WRPAGE.txDrops == 1)
+            assert(Comm.traffic.byKind.WRPAGE.txDropReasons.targetOffline == 1)
+
+            -- 5a-enum. Explicit Enum.SendAddonMessageResult.TargetOffline takes precedence over numeric 12
+            Enum.SendAddonMessageResult.TargetOffline = 42
+            C_ChatInfo.SendAddonMessage = function(_, _, ch)
+                if ch == 'WHISPER' then return 42 end
+                return 0
+            end
+            assert(Comm:SendProtocol('WRPAGE', 'page-data-2', 'PeerOff', nil, 'PeerOff') == true)
+            now = now + 2; Comm:Pump()
+            assert(Comm.traffic.byKind.WRPAGE.txDrops == 2)
+            assert(Comm.traffic.byKind.WRPAGE.txDropReasons.targetOffline == 2)
+            Enum.SendAddonMessageResult.TargetOffline = nil
+
+            -- 5b. noGuild via QueueMessage
+            local origGuild = GetGuildInfo
+            GetGuildInfo = function() return nil end
+            assert(Comm:QueueMessage('GF2^QUERY^1-1-2^1^1^41') == false)
+            assert(Comm.traffic.byKind.QUERY.txDrops == 1)
+            assert(Comm.traffic.byKind.QUERY.txDropReasons.noGuild == 1)
+            GetGuildInfo = origGuild
+
+            -- 5c. guildChanged while queued
+            assert(Comm:SendProtocol('WRGET', 'req-data', 'PeerOff', nil, 'PeerOff') == true)
+            GetGuildInfo = function() return 'OtherGuild' end
+            now = now + 2; Comm:Pump()
+            assert(Comm.traffic.byKind.WRGET.txDrops == 1)
+            assert(Comm.traffic.byKind.WRGET.txDropReasons.guildChanged == 1)
+            GetGuildInfo = origGuild
+
+            -- 5d. sendError after MAX_ERROR_ATTEMPTS (5)
+            C_ChatInfo.SendAddonMessage = function() return 9 end
+            assert(Comm:SendProtocol('WKQUERY', '') == true)
+            for _ = 1, 5 do now = now + 100; Comm:Pump() end
+            assert(Comm.traffic.byKind.WKQUERY.txDrops == 1)
+            assert(Comm.traffic.byKind.WKQUERY.txDropReasons.sendError == 1)
+            C_ChatInfo.SendAddonMessage = origSend
+
+            -- 5e. overflow via queue full
+            for i = 1, 4096 do Comm.queue[i] = { message = 'x', attempts = 0 } end
+            local okOverflow, errOverflow = Comm:SendProtocol('WRIDX', 'idx')
+            assert(not okOverflow and errOverflow == 'queue full')
+            assert(Comm.traffic.byKind.WRIDX.txDrops == 1)
+            assert(Comm.traffic.byKind.WRIDX.txDropReasons.overflow == 1)
+            for i = #Comm.queue, 1, -1 do Comm.queue[i] = nil end
+
+            -- 5f. targetError (non-offline WHISPER error, e.g. TargetRequired = 6) and tooLong
+            Comm:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'PeerOff')
+            C_ChatInfo.SendAddonMessage = function(_, _, ch)
+                if ch == 'WHISPER' then return 6 end
+                return 0
+            end
+            assert(Comm:SendProtocol('WRGET', 'req-2', 'PeerOff', nil, 'PeerOff') == true)
+            now = now + 2; Comm:Pump()
+            assert(Comm.traffic.byKind.WRGET.txDrops == 2)
+            assert(Comm.traffic.byKind.WRGET.txDropReasons.targetError == 1)
+            C_ChatInfo.SendAddonMessage = origSend
+
+            local longMsg = 'GF2^SYNC^1-1-3^1^1^' .. string.rep('A', 230)
+            local okLong, errLong = Comm:QueueMessage(longMsg)
+            assert(not okLong and errLong == 'tooLong')
+            assert(Comm.traffic.byKind.SYNC.txDrops == 1)
+            assert(Comm.traffic.byKind.SYNC.txDropReasons.tooLong == 1)
+
+            -- Invariant: txDrops == sum(txDropReasons) for every kind
+            for kind, b in pairs(Comm.traffic.byKind) do
+                local sumReasons = 0
+                for _, cnt in pairs(b.txDropReasons or {}) do sumReasons = sumReasons + cnt end
+                assert(b.txDrops == sumReasons, 'txDrops must equal sum of txDropReasons for ' .. tostring(kind))
+            end
+
+            assert(Comm:HandleCommand('comm traffic') == true)
+            local dropOut = table.concat(printed, '\\n')
+            assert(dropOut:find('TX drops:', 1, true), 'must print TX drops summary line')
+            assert(dropOut:find('targetOffline=2', 1, true))
+            assert(dropOut:find('targetError=1', 1, true))
+            assert(dropOut:find('tooLong=1', 1, true))
+            assert(dropOut:find('overflow=1', 1, true))
+            assert(dropOut:find('noGuild=1', 1, true))
+            assert(dropOut:find('guildChanged=1', 1, true))
+            assert(dropOut:find('sendError=1', 1, true))
+            assert(Comm:HandleCommand('comm traffic reset') == true)
+            assert(next(Comm.traffic.byKind) == nil)
             '''
         )
 
