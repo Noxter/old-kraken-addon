@@ -122,7 +122,7 @@ done
 
 ## Автоматизоване покриття
 
-Автоматизований набір запускається локально командою вище на Lua 5.1 runtime (`lupa 2.8`). Станом на 27 листопада 2026 він містить 66 тестових файлів; останній локальний запуск на `alpha` завершився успішно (`66/66` тестових файлів, включно з `test_realm_scope.py`, `test_workshop_migration.py`, `test_version_awareness.py`, `test_group_finder_chat.py`, `test_group_finder_activation.py`, `test_inline_player_profile.py`, `test_blackrock_spire_wings.py`, `test_group_alert_level_range.py`, `test_workshop_pending_learned.py`, `test_workshop_orders_localization_and_picker.py`, `test_chat_layout_switcher.py`, `test_perf_diagnostics.py`, `test_protocol_compat_matrix.py`, `test_workshop_orders_compat.py`):
+Автоматизований набір запускається локально командою вище на Lua 5.1 runtime (`lupa 2.8`). Станом на 26 листопада 2026 він містить 64 тестові файли; останній локальний запуск на `alpha` завершився успішно (`64/64` тестових файлів, включно з `test_realm_scope.py`, `test_workshop_migration.py`, `test_version_awareness.py`, `test_group_finder_chat.py`, `test_group_finder_activation.py`, `test_inline_player_profile.py`, `test_blackrock_spire_wings.py`, `test_group_alert_level_range.py`, `test_workshop_pending_learned.py`, `test_workshop_orders_localization_and_picker.py`, `test_chat_layout_switcher.py`, `test_perf_diagnostics.py`):
 
 | Область | Що перевіряється автоматично |
 |---|---|
