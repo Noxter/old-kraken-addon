@@ -829,6 +829,7 @@ local english = {
     ["Очікують підтвердження"] = "Pending review",
     ["Офлайн"] = "Offline",
     ["|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито через 60 хв без активності."] = "|cff2ec4b6Old Kraken|r: Listing \"%s\" was automatically closed after 60 min of inactivity.",
+    ["|cff2ec4b6Old Kraken|r: набір «%s» автоматично закрито після входу в підземелля."] = "|cff2ec4b6Old Kraken|r: Listing \"%s\" was automatically closed upon entering a dungeon.",
     ["Old Kraken: досягнуто межі ревізії групи; створіть новий набір."] = "Old Kraken: The listing revision limit was reached; create a new listing.",
     ["Old Kraken: оголошення завелике для повторного відкриття. Скоротіть опис або створіть новий набір."] = "Old Kraken: The listing is too large to reopen. Shorten its description or create a new listing.",
     ["Замовлення Майстерні"] = "Workshop Orders",
