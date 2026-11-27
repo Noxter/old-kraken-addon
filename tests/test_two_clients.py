@@ -447,7 +447,7 @@ s_alice.execute("""
 
     -- Burst of GUILD_ROSTER_UPDATE events coalesces into a single debounced C_Timer.After call
     local origNum, origInfo = GetNumGuildMembers, GetGuildRosterInfo
-    GetNumGuildMembers = function() return 2 end
+    GetNumGuildMembers = function() return 2, 1 end
     GetGuildRosterInfo = function(i)
         if i == 1 then return 'Alice Moon', 'Member', 0, 60, 'Warrior', 'Zone', nil, nil, true, '', 'WARRIOR' end
         return nil -- incomplete scan!

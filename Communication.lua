@@ -696,7 +696,8 @@ function Communication:RefreshRosterPresence()
     EnsurePresenceGuild(self)
     if self.presenceGuild == '' or not next(self.rosterPresence) then return false end
     if type(GetNumGuildMembers) ~= 'function' or type(GetGuildRosterInfo) ~= 'function' then return false end
-    local total = tonumber(GetNumGuildMembers()) or 0
+    local total = GetNumGuildMembers()
+    total = tonumber(total) or 0
     if total <= 0 then return false end
     local members = {}
     for i = 1, total do

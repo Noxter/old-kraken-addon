@@ -200,7 +200,7 @@ rosterRows = {
     {'Online Member', 'Member', 1, 60, 'Warrior', 'Orgrimmar', nil, nil, true, '', 'WARRIOR'},
     {'Departed Member', 'Member', 1, 60, 'Mage', 'Orgrimmar', nil, nil, true, '', 'MAGE'},
 }
-function GetNumGuildMembers() return #rosterRows end
+function GetNumGuildMembers() return #rosterRows, 1 end
 function GetGuildRosterInfo(i) return unpack(rosterRows[i]) end
 afterTimers = {}
 C_Timer = {
