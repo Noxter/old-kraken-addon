@@ -1328,6 +1328,8 @@ local function renderBody()
     offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
     frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
     frame.count:SetText(T('Знайдено: ')..#list..T(' · результати можуть бути застарілими або неповними'))
+    local indexReady=indexedRevision==indexRevision
+    if not indexReady then ensureRecipeIndex() end
     local tRows=perf and debugprofilestop() or nil
     for i,row in ipairs(rows) do
         local entry=list[offset*PAGE_SIZE+i]
@@ -1335,9 +1337,12 @@ local function renderBody()
             local r=entry.record; row.entry=entry
             row.icon:SetTexture(recipeIcon(r))
             row.name:SetText(displayRecipeName(r))
-            local rowMasters=byRecipe and Recipes:FindMasters(r.item,r.recipe,r.profession) or nil
+            local needIndex=byRecipe and (r.item or 0)>0 and not indexReady
+            local rowMasters=(byRecipe and not needIndex) and Recipes:FindMasters(r.item,r.recipe,r.profession) or nil
             local totalMasters=byRecipe and math.max(groupCounts[r.recipe] or 1, rowMasters and #rowMasters or 0) or 1
-            if byRecipe and totalMasters>1 then
+            if needIndex then
+                row.meta:SetText(professionNames[r.profession]..' · '..T('|cff9ba9bcОновлення індексу майстрів…|r'))
+            elseif byRecipe and totalMasters>1 then
                 local onCount=0
                 for _,m in ipairs(rowMasters or {}) do if online[m.name] then onCount=onCount+1 end end
                 local onText=onCount>0 and ('|cff68d98c'..onCount..T(' онлайн|r')) or T('|cff9ba9bcофлайн|r')
@@ -1360,7 +1365,8 @@ local function renderBody()
     if r then
         frame.detailIcon:SetTexture(recipeIcon(r))
         frame.detailTitle:SetText(displayRecipeName(r))
-        local masters=Recipes:FindMasters(r.item,r.recipe,r.profession)
+        local detailNeedIndex=(r.item or 0)>0 and not indexReady
+        local masters=not detailNeedIndex and Recipes:FindMasters(r.item,r.recipe,r.profession) or {}
         if not selectRecipe and not viewOwner and mastersOnline then
             local onlineMasters={}
             for _,m in ipairs(masters) do
@@ -1371,6 +1377,7 @@ local function renderBody()
         table.sort(masters,function(a,b) if (online[a.name] and true or false)~=(online[b.name] and true or false) then return online[a.name] and true or false end return a.name<b.name end)
         if viewOwner~=nil then
             selectedRecipeMaster=viewOwner~=identity and viewOwner or nil
+        elseif detailNeedIndex then
         elseif #masters==1 then
             selectedRecipeMaster=masters[1].name~=identity and masters[1].name or nil
         else
@@ -1380,7 +1387,7 @@ local function renderBody()
             end
             if not foundSelected then selectedRecipeMaster=nil end
         end
-        local showWhisper=selectedRecipeMaster~=nil and selectedRecipeMaster~=identity
+        local showWhisper=not detailNeedIndex and selectedRecipeMaster~=nil and selectedRecipeMaster~=identity
         local showOrder=entry.owner~=identity and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(r.profession) or false
         frame.whisper:SetShown(showWhisper)
         frame.order:SetShown(showOrder)
@@ -1394,7 +1401,11 @@ local function renderBody()
                 frame.order:SetWidth(showWhisper and 120 or 240)
             end
         end
-        frame.detailInfo:SetText(professionNames[r.profession]..T(' · Збережено: ')..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and T(' · застаріло') or '')..T('\n\nМайстри: ')..#masters..(#masters==0 and T('\nНемає даних') or ''))
+        if detailNeedIndex then
+            frame.detailInfo:SetText(professionNames[r.profession]..T(' · Збережено: ')..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and T(' · застаріло') or '')..T('\n\nМайстри: оновлення індексу…'))
+        else
+            frame.detailInfo:SetText(professionNames[r.profession]..T(' · Збережено: ')..date('%d.%m.%Y',r.seen)..(GetServerTime()-r.seen>604800 and T(' · застаріло') or '')..T('\n\nМайстри: ')..#masters..(#masters==0 and T('\nНемає даних') or ''))
+        end
         local shownMasters=math.min(#masters,5)
         local colors=OldKraken.UIStyle and OldKraken.UIStyle.Colors
         local selColor=(colors and colors.sel) or {0.102,0.141,0.302,1}
@@ -2037,7 +2048,12 @@ function Recipes:FindMasters(itemID,recipeID,profession)
         end
     end
     if itemID>0 then
-        if indexedRevision~=indexRevision then ensureRecipeIndex() end
+        local stale=indexedRevision~=indexRevision
+        local perf=OldKraken.perfEnabled and type(OldKraken.PerfRecord)=='function'
+        if stale then
+            if perf then OldKraken:PerfRecord('wk.recipes.findMasters.stale', 0) end
+            ensureRecipeIndex()
+        end
         if indexedRevision==indexRevision then
             local owners=not profession and itemIndex[itemID] or (itemProfessionIndex[itemID] and itemProfessionIndex[itemID][profession])
             for name,seen in pairs(owners or {}) do
@@ -2046,15 +2062,19 @@ function Recipes:FindMasters(itemID,recipeID,profession)
                 end
             end
         else
+            local tFallback=perf and type(debugprofilestop)=='function' and debugprofilestop() or nil
+            local scannedRecords=0
             for name,records in pairs(people) do
                 if safeText(name,1,128) and type(records)=='table' then
                     for _,r in pairs(records) do
+                        if perf then scannedRecords=scannedRecords+1 end
                         if validRecord(r) and r.item==itemID and (not profession or r.profession==profession) then
                             found[name]=math.max(found[name] or 0,r.seen)
                         end
                     end
                 end
             end
+            if tFallback then OldKraken:PerfRecord('wk.recipes.findMasters.fallback', debugprofilestop() - tFallback, scannedRecords) end
         end
     end
     local out={}; for name,seen in pairs(found) do out[#out+1]={name=name,seen=seen} end

@@ -1516,6 +1516,146 @@ def test_workshop_recipes_indexes_count_cache_and_masters_perf():
     ''')
 
 
+def test_workshop_recipes_ui_skips_findmasters_fallback_during_rebuild():
+    mod = runpy.run_path(str(ROOT / 'tests/test_workshop_orders.py'))
+    make_client = mod['client']
+    c = make_client('Alice', embedded=True)
+    c.execute('''
+        local timers = {}
+        C_Timer.After = function(_, fn) timers[#timers + 1] = fn end
+        OldKraken.perfEnabled = true
+        OldKraken.perfStats = {}
+        function OldKraken:PerfRecord(label, elapsedMs, itemCount)
+            local s = self.perfStats[label] or { calls = 0, total = 0, items = 0 }
+            s.calls = s.calls + 1
+            s.total = s.total + (elapsedMs or 0)
+            s.items = s.items + (itemCount or 0)
+            self.perfStats[label] = s
+        end
+        debugprofilestop = function() return 10 end
+
+        local store = OldKraken.DB.workshop.guilds['Realm\\001Guild'].recipes
+        store['Alice Mon'] = store['Alice Mon'] or {}
+        store['Bob Mon'] = store['Bob Mon'] or {}
+        store['Alice Mon'][2001] = { recipe = 2001, item = 99001, profession = 164, seen = 1700000010, name = 'BS Sword', product = 'BS Sword' }
+        store['Bob Mon'][2001] = { recipe = 2001, item = 99001, profession = 164, seen = 1700000020, name = 'BS Sword', product = 'BS Sword' }
+
+        local function flushTimers()
+            while #timers > 0 do
+                local batch = timers
+                timers = {}
+                for _, fn in ipairs(batch) do fn() end
+            end
+        end
+
+        local function firstVisibleRow()
+            for _, row in ipairs(frames) do
+                if type(row.entry) == 'table' and row:IsShown() and row.meta then
+                    return row
+                end
+            end
+            return nil
+        end
+
+        -- 1. Open UI, select row, then reset index (scope migration) -> UI must NOT trigger FindMasters fallback scans while rebuilding
+        OldKraken.WorkshopRecipes:Show()
+        flushTimers()
+        local rv = OldKraken.UIHub.pages.workshop.frame.recipesView
+        local row = firstVisibleRow()
+        assert(row ~= nil and row.scripts and row.scripts.OnClick)
+        row.scripts.OnClick(row)
+
+        OldKraken:Fire('WORKSHOP_SCOPE_MIGRATED', 'Realm\\001Guild')
+        OldKraken.perfStats = {}
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(OldKraken.perfStats['wk.recipes.findMasters.stale'] == nil, 'UI render during rebuild must not call stale FindMasters')
+        assert(OldKraken.perfStats['wk.recipes.findMasters.fallback'] == nil, 'UI render during rebuild must not run fallback scan')
+        assert(row.meta:GetText():find('Оновлення індексу майстрів', 1, true), 'row must show temporary updating state')
+        assert(rv.detailInfo:GetText():find('Майстри: оновлення індексу', 1, true), 'detail must show temporary updating state')
+
+        -- 2. Direct FindMasters() call while stale still works for external consumers and records stale/fallback counters
+        OldKraken.perfStats = {}
+        local directMasters = OldKraken.WorkshopRecipes:FindMasters(99001, 2001, 164)
+        assert(#directMasters == 2)
+        assert(OldKraken.perfStats['wk.recipes.findMasters.stale'] and OldKraken.perfStats['wk.recipes.findMasters.stale'].calls == 1)
+        assert(OldKraken.perfStats['wk.recipes.findMasters.fallback'] and OldKraken.perfStats['wk.recipes.findMasters.fallback'].calls == 1)
+        assert(OldKraken.perfStats['wk.recipes.findMasters.fallback'].items >= 2)
+
+        -- 3. Flush index rebuild -> WORKSHOP_INDEX_CHANGED triggers changed('index') -> UI updates with real masters
+        OldKraken.perfStats = {}
+        flushTimers()
+        assert(OldKraken.perfStats['wk.recipes.chg.index'] and OldKraken.perfStats['wk.recipes.chg.index'].calls >= 1)
+        assert(row.meta:GetText():find('2 ', 1, true), 'row must show 2 masters after index rebuild, got: ' .. tostring(row.meta:GetText()))
+        assert(rv.detailInfo:GetText():find('Майстри: 2', 1, true), 'detail must show 2 masters after index rebuild')
+
+        -- Select Bob Mon in detailMasterRows and verify selection survives index rebuild
+        local bobDetailRow
+        for _, mrow in ipairs(rv.detailMasterRows or {}) do
+            if mrow:IsShown() and mrow.masterName == 'Bob Mon' and mrow.scripts and mrow.scripts.OnClick then
+                bobDetailRow = mrow
+                mrow.scripts.OnClick(mrow)
+                break
+            end
+        end
+        assert(bobDetailRow ~= nil, 'Bob Mon must appear in detailMasterRows')
+        assert(rv.whisper:IsShown(), 'whisper button must be shown after selecting Bob Mon')
+
+        -- 4. Add & update via ImportSnapshot (Carol Mon): during rebuild UI shows temporary state, after flush shows 3 masters and preserves Bob Mon selection
+        assert(OldKraken.WorkshopRecipes:ImportSnapshot('Carol Mon', {
+            { recipe = 2001, item = 99001, profession = 164, seen = 1700000030, name = 'BS Sword', product = 'BS Sword' },
+        }, true))
+        OldKraken.perfStats = {}
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(OldKraken.perfStats['wk.recipes.findMasters.fallback'] == nil, 'UI must not fallback-scan after ImportSnapshot add')
+        assert(row.meta:GetText():find('Оновлення індексу майстрів', 1, true))
+        assert(not rv.whisper:IsShown(), 'whisper button must stay hidden while index is updating')
+        flushTimers()
+        assert(row.meta:GetText():find('3 ', 1, true), 'row must show 3 masters after add rebuild')
+        assert(rv.detailInfo:GetText():find('Майстри: 3', 1, true))
+        assert(rv.whisper:IsShown(), 'selectedRecipeMaster (Bob Mon) must be preserved after index rebuild completes')
+        assert(bobDetailRow.bg and bobDetailRow.bg:IsShown(), 'Bob Mon detail row highlight must be preserved after rebuild')
+
+        -- Update Carol Mon seen timestamp via ImportSnapshot
+        assert(OldKraken.WorkshopRecipes:ImportSnapshot('Carol Mon', {
+            { recipe = 2001, item = 99001, profession = 164, seen = 1700000050, name = 'BS Sword', product = 'BS Sword' },
+        }, false, true))
+        flushTimers()
+        assert(rv.detailInfo:GetText():find('Майстри: 3', 1, true))
+
+        -- Select Carol Mon, then tombstone Carol Mon -> selectedRecipeMaster must reset after rebuild completes
+        local carolDetailRow
+        for _, mrow in ipairs(rv.detailMasterRows or {}) do
+            if mrow:IsShown() and mrow.masterName == 'Carol Mon' and mrow.scripts and mrow.scripts.OnClick then
+                carolDetailRow = mrow
+                mrow.scripts.OnClick(mrow)
+                break
+            end
+        end
+        assert(carolDetailRow ~= nil and rv.whisper:IsShown(), 'Carol Mon must be selectable before tombstone')
+
+        -- 5. Tombstone via ImportSnapshot (Carol Mon deleted)
+        assert(OldKraken.WorkshopRecipes:ImportSnapshot('Carol Mon', {
+            { recipe = 2001, item = 99001, profession = 164, seen = 1700000060, name = 'BS Sword', product = 'BS Sword', deleted = true },
+        }, false, true))
+        OldKraken.perfStats = {}
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(OldKraken.perfStats['wk.recipes.findMasters.fallback'] == nil, 'UI must not fallback-scan after tombstone')
+        flushTimers()
+        assert(row.meta:GetText():find('2 ', 1, true), 'row must drop to 2 masters after tombstone rebuild')
+        assert(rv.detailInfo:GetText():find('Майстри: 2', 1, true))
+        assert(not rv.whisper:IsShown(), 'selectedRecipeMaster (Carol Mon) must reset after tombstone removes master')
+
+        -- 6. Guild scope migration / index reset via WORKSHOP_SCOPE_MIGRATED -> UI must not fallback-scan while index rebuilds, then recovers
+        OldKraken:Fire('WORKSHOP_SCOPE_MIGRATED', 'Realm\\001Guild')
+        OldKraken.perfStats = {}
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(OldKraken.perfStats['wk.recipes.findMasters.fallback'] == nil, 'UI must not fallback-scan after scope migration index reset')
+        assert(row.meta:GetText():find('Оновлення індексу майстрів', 1, true))
+        flushTimers()
+        assert(rv.detailInfo:GetText():find('Майстри: 2', 1, true))
+    ''')
+
+
 if __name__ == '__main__':
     test_core_perf_commands_and_metrics()
     test_comm_hex_codec_and_cache_counters()
@@ -1530,4 +1670,5 @@ if __name__ == '__main__':
     test_workshop_recipes_first_open_perf_labels()
     test_workshop_recipes_render_name_cache_and_sort_keys()
     test_workshop_recipes_indexes_count_cache_and_masters_perf()
+    test_workshop_recipes_ui_skips_findmasters_fallback_during_rebuild()
     print('Perf diagnostics and codec/cache checks passed')
