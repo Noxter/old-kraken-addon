@@ -165,4 +165,113 @@ assert(c:GetLocalVersion()=='0.4.1')
 function GetGuildInfo() return 'New Guild' end
 assert(c:GetRosterVersion('Other')==nil)
 ''')
+
+# Integration test: real Communication.lua + GuildRoster.lua (no mock PruneRosterPresence)
+lua3 = LuaRuntime(unpack_returned_tuples=True)
+lua3.execute('''
+OldKraken = {
+    DB = {settings = {roster = {search='', status='all', class='ALL', sort='name', ascending=true}}},
+    UIStyle = {
+        Colors = {brandGold={0.88,0.69,0.32,1}, mutedText={0.63,0.67,0.73}, divider={0.20,0.23,0.29,0.85}, zebra={1,1,1,0.035}, success={0.41,0.86,0.55,1}, warning={1,0.76,0.42,1}, info={0.40,0.70,1,1}, neutral={0.63,0.67,0.73,1}},
+        Window=function() end, Button=function() end, Dropdown=function() end, Panel=function() end, Input=function() end, Font=function() end,
+        Chip=function(parent, text) local c=CreateFrame('Button', nil, parent); c.label=c:CreateFontString(); c.SetLabel=function(self,v) self.label:SetText(v or '') end; c:SetLabel(text); return c end,
+        PillBadge=function(parent, text, kind) local p=CreateFrame('Frame', nil, parent); p.label=p:CreateFontString(); p.SetKind=function(self,k) self.kind=k end; p.SetLabel=function(self,v) self.label:SetText(v or '') end; p:SetKind(kind); p:SetLabel(text); return p end,
+    },
+    On = function() end,
+    Fire = function() end,
+}
+UISpecialFrames = {}; SlashCmdList = {}; UIParent = {}
+function UIDropDownMenu_SetText() end
+function UIDropDownMenu_SetWidth() end
+function UIDropDownMenu_JustifyText() end
+function UIDropDownMenu_Initialize() end
+function UIDropDownMenu_CreateInfo() return {} end
+function UIDropDownMenu_AddButton() end
+function ToggleDropDownMenu() end
+function CloseDropDownMenus() end
+function print() end
+function UnitName() return 'Online Member', 'Realm' end
+function GetRealmName() return 'Realm' end
+function IsInGuild() return true end
+function GetGuildInfo() return 'Guild' end
+function GetServerTime() return 1700000000 end
+function GetTime() return 100 end
+rosterRows = {
+    {'Online Member', 'Member', 1, 60, 'Warrior', 'Orgrimmar', nil, nil, true, '', 'WARRIOR'},
+    {'Departed Member', 'Member', 1, 60, 'Mage', 'Orgrimmar', nil, nil, true, '', 'MAGE'},
+}
+function GetNumGuildMembers() return #rosterRows end
+function GetGuildRosterInfo(i) return unpack(rosterRows[i]) end
+afterTimers = {}
+C_Timer = {
+    After = function(delay, fn) afterTimers[#afterTimers + 1] = {delay = delay, fn = fn} end,
+    NewTicker = function() return {} end,
+}
+C_ChatInfo = {RegisterAddonMessagePrefix = function() return true end, SendAddonMessage = function() return 0 end}
+Enum = {SendAddonMessageResult = {Success = 0, TargetOffline = 12}}
+local methods = {}
+function methods:SetText(v) self.text = v end
+function methods:GetText() return self.text or '' end
+function methods:SetSize(w, h) self.width, self.height = w, h end
+function methods:SetEnabled(v) self.enabled = v end
+function methods:SetTextColor(...) self.textColor = {...} end
+function methods:SetJustifyH(v) self.justifyH = v end
+function methods:RegisterEvent(e) self.events[e] = true end
+function methods:SetScript(name, fn) self.scripts[name] = fn end
+function methods:Show() self.shown = true end
+function methods:Hide() self.shown = false end
+function methods:SetShown(v) self.shown = v end
+function methods:IsShown() return self.shown == true end
+function methods:CreateFontString() return CreateFrame() end
+function methods:CreateTexture() return CreateFrame() end
+local meta = {__index = function(_, key)
+    if key == 'TitleText' or key == 'CloseButton' then return nil end
+    return methods[key] or function() end
+end}
+createdFrames = {}
+function CreateFrame(kind, name, parent, template)
+    local f = setmetatable({events = {}, scripts = {}, parent = parent, kind = kind, template = template}, meta)
+    if name then _G[name] = f end
+    createdFrames[#createdFrames + 1] = f
+    return f
+end
+''')
+lua3.execute((p / 'Communication.lua').read_text(encoding='utf-8'))
+lua3.execute((p / 'GuildRoster.lua').read_text(encoding='utf-8'))
+lua3.execute('''
+local comm = OldKraken.Communication
+local roster = OldKraken.GuildRoster
+comm.ready = true
+comm:OnAddonMessage(comm.PREFIX, 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Departed Member-Realm')
+assert(comm:HasRosterAddon('Departed Member-Realm'))
+
+local commFrame, rosterFrameEvents
+for _, f in ipairs(createdFrames) do
+    if f.events.GUILD_ROSTER_UPDATE and f.events.CHAT_MSG_ADDON then commFrame = f end
+    if f.events.GUILD_ROSTER_UPDATE and not f.events.CHAT_MSG_ADDON then rosterFrameEvents = f end
+end
+assert(commFrame ~= nil and rosterFrameEvents ~= nil)
+
+-- With roster UI never opened (hidden), Departed Member leaves guild -> GUILD_ROSTER_UPDATE prunes via Communication
+rosterRows = {
+    {'Online Member', 'Member', 1, 60, 'Warrior', 'Orgrimmar', nil, nil, true, '', 'WARRIOR'},
+}
+commFrame.scripts.OnEvent(commFrame, 'GUILD_ROSTER_UPDATE')
+rosterFrameEvents.scripts.OnEvent(rosterFrameEvents, 'GUILD_ROSTER_UPDATE')
+assert(not rosterFrameEvents:IsShown(), 'Hidden roster eventFrame must remain hidden')
+assert(#afterTimers == 1)
+afterTimers[1].fn()
+assert(not comm:HasRosterAddon('Departed Member-Realm'), 'Departed member must be pruned even with hidden roster UI')
+assert(comm:HasRosterAddon('Online Member-Realm'), 'Self-presence must be preserved')
+
+-- Regression: open roster UI still refreshes via GuildRoster eventFrame OnUpdate
+roster:Show()
+local loadCalls = 0
+local origLoad = roster.Load
+function roster:Load(...) loadCalls = loadCalls + 1; return origLoad(self, ...) end
+rosterFrameEvents.scripts.OnEvent(rosterFrameEvents, 'GUILD_ROSTER_UPDATE')
+assert(rosterFrameEvents:IsShown(), 'Open roster eventFrame must be shown on GUILD_ROSTER_UPDATE')
+rosterFrameEvents.scripts.OnUpdate(rosterFrameEvents, 0.2)
+assert(loadCalls == 1, 'Open roster must still run Roster:Load() on OnUpdate')
+''')
 print('PASS: Lua 5.1 syntax, both clicks, actions, offline restrictions, row reuse, tooltip signature, addon filters, presence exchange and throttling')

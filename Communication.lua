@@ -688,6 +688,38 @@ function Communication:PruneRosterPresence(members)
     end
     return removed
 end
+
+local rosterPrunePending = false
+local ROSTER_PRUNE_DEBOUNCE_SECONDS = 0.5
+
+function Communication:RefreshRosterPresence()
+    EnsurePresenceGuild(self)
+    if self.presenceGuild == '' or not next(self.rosterPresence) then return false end
+    if type(GetNumGuildMembers) ~= 'function' or type(GetGuildRosterInfo) ~= 'function' then return false end
+    local total = tonumber(GetNumGuildMembers()) or 0
+    if total <= 0 then return false end
+    local members = {}
+    for i = 1, total do
+        local name = GetGuildRosterInfo(i)
+        if Secret(name) or type(name) ~= 'string' or name == '' then return false end
+        members[#members + 1] = name
+    end
+    return self:PruneRosterPresence(members)
+end
+
+function Communication:ScheduleRosterPresencePrune()
+    if not next(self.rosterPresence) then return false end
+    if C_Timer and type(C_Timer.After) == 'function' then
+        if rosterPrunePending then return false end
+        rosterPrunePending = true
+        C_Timer.After(ROSTER_PRUNE_DEBOUNCE_SECONDS, function()
+            rosterPrunePending = false
+            Communication:RefreshRosterPresence()
+        end)
+        return true
+    end
+    return self:RefreshRosterPresence()
+end
 function Communication:GetRosterVersion(name)
     self:HasRosterAddon(name)
     local key = PresenceKey(name)
@@ -1340,6 +1372,7 @@ pcall(frame.RegisterEvent, frame, 'ACTIVE_TALENT_GROUP_CHANGED')
 pcall(frame.RegisterEvent, frame, 'PLAYER_SPECIALIZATION_CHANGED')
 pcall(frame.RegisterEvent, frame, 'PLAYER_ENTERING_WORLD')
 pcall(frame.RegisterEvent, frame, 'PLAYER_REGEN_ENABLED')
+pcall(frame.RegisterEvent, frame, 'GUILD_ROSTER_UPDATE')
 
 local hookedTalentFrames = {}
 local function InstallTalentHooks()
@@ -1396,6 +1429,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
         Communication:CheckVersionNotification()
     elseif event == 'PLAYER_REGEN_ENABLED' then
         Communication:CheckVersionNotification()
+    elseif event == 'GUILD_ROSTER_UPDATE' then
+        Communication:ScheduleRosterPresencePrune()
     elseif event == "CHAT_MSG_ADDON" then
         Communication:OnAddonMessage(...)
     end

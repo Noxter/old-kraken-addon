@@ -424,4 +424,66 @@ s_bob.execute("""
     assert(#outgoing == 0)
 """)
 
+# 10. Independent debounced GUILD_ROSTER_UPDATE presence pruning (no GuildRoster UI needed)
+s_alice.execute("""
+    local afterTimers = {}
+    C_Timer.After = function(delay, fn) afterTimers[#afterTimers + 1] = {delay = delay, fn = fn} end
+
+    local commFrame
+    for _, f in ipairs(frames) do
+        if f.events and f.events.GUILD_ROSTER_UPDATE and f.events.CHAT_MSG_ADDON then
+            commFrame = f
+            break
+        end
+    end
+    assert(commFrame ~= nil, 'Communication frame must register GUILD_ROSTER_UPDATE')
+
+    local hex = OldKraken.GroupFinder._pack({'Alice Moon', 'Bob Other Realm', '1'}):gsub('.', function(c) return string.format('%02X', string.byte(c)) end)
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Bob Other Realm')
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Carol Moon')
+    assert(OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    assert(OldKraken.Communication:HasRosterAddon('Carol Moon'))
+    assert(OldKraken.Communication:HasRosterAddon('Alice Moon'))
+
+    -- Burst of GUILD_ROSTER_UPDATE events coalesces into a single debounced C_Timer.After call
+    local origNum, origInfo = GetNumGuildMembers, GetGuildRosterInfo
+    GetNumGuildMembers = function() return 2 end
+    GetGuildRosterInfo = function(i)
+        if i == 1 then return 'Alice Moon', 'Member', 0, 60, 'Warrior', 'Zone', nil, nil, true, '', 'WARRIOR' end
+        return nil -- incomplete scan!
+    end
+    commFrame.handler(commFrame, 'GUILD_ROSTER_UPDATE')
+    commFrame.handler(commFrame, 'GUILD_ROSTER_UPDATE')
+    commFrame.handler(commFrame, 'GUILD_ROSTER_UPDATE')
+    assert(#afterTimers == 1, 'GUILD_ROSTER_UPDATE burst must debounce to one timer')
+
+    -- Incomplete scan must NOT prune Bob or Carol
+    afterTimers[1].fn()
+    assert(OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    assert(OldKraken.Communication:HasRosterAddon('Carol Moon'))
+
+    -- Complete scan without Bob prunes Bob, keeps Carol and self, and rejects Bob WHISPER
+    afterTimers = {}
+    GetGuildRosterInfo = function(i)
+        if i == 1 then return 'Alice Moon', 'Member', 0, 60, 'Warrior', 'Zone', nil, nil, true, '', 'WARRIOR' end
+        return 'Carol Moon', 'Member', 0, 60, 'Mage', 'Zone', nil, nil, true, '', 'MAGE'
+    end
+    commFrame.handler(commFrame, 'GUILD_ROSTER_UPDATE')
+    assert(#afterTimers == 1)
+    afterTimers[1].fn()
+
+    assert(not OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    assert(OldKraken.Communication:HasRosterAddon('Carol Moon'))
+    assert(OldKraken.Communication:HasRosterAddon('Alice Moon'))
+
+    local beforeRx = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888898-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
+    assert(OldKraken.Communication.stats.received == beforeRx, 'Departed member WHISPER must be rejected')
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888899-1^1^1^' .. hex, 'WHISPER', 'Carol Moon')
+    assert(OldKraken.Communication.stats.received == beforeRx + 1, 'Active member WHISPER must be accepted')
+
+    GetNumGuildMembers, GetGuildRosterInfo = origNum, origInfo
+    C_Timer.After = nil
+""")
+
 print('Two simulated clients passed')
