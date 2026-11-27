@@ -29,7 +29,7 @@ local resultQuery
 local tabStates={}
 local recipeChanged=false
 local indexRevision=0
-local summaryCache,itemIndex={},{}
+local summaryCache,itemIndex,itemProfessionIndex={},{},{}
 local indexedRevision=-1
 local indexJob,searchJob
 local ownItems,ownItemsRevision={},-1
@@ -104,7 +104,7 @@ end
 OldKraken:On('WORKSHOP_SCOPE_MIGRATED',function(migratedProfile)
     if not active or profile~=migratedProfile then return end
     indexRevision=indexRevision+1; indexedRevision=-1
-    summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
+    summaryCache,itemIndex,itemProfessionIndex={},{},{}; indexJob,searchJob=nil,nil
     ownItemsRevision=-1; recipeChanged=true
     local saved=scope.recipeVersions[identity]
     if integer(saved,0,8999999999999999) then
@@ -141,7 +141,7 @@ local function connect()
         if Recipes.CancelPicker then Recipes:CancelPicker() end
         active,identity,profile,scope,people=false,nil,nil,nil,{}; activeQuery=nil; sendQueue={}; pendingLearned,learnAttempts,learnWarned={},{},{}
         tabStates={}
-        indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
+        indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex,itemProfessionIndex={},{},{}; indexJob,searchJob=nil,nil
         if frame then frame:Hide() end; return
     end
     if OldKraken.Database and type(OldKraken.Database.MigrateWorkshopScope)=='function' then
@@ -151,7 +151,7 @@ local function connect()
     if active and identity==name and profile==k then return end
     if Recipes.CancelPicker then Recipes:CancelPicker() end
     tabStates={}
-    indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex={},{}; indexJob,searchJob=nil,nil
+    indexRevision=indexRevision+1; indexedRevision=-1; summaryCache,itemIndex,itemProfessionIndex={},{},{}; indexJob,searchJob=nil,nil
     local db=OldKraken.DB; if type(db.workshop)~='table' then db.workshop={} end
     if type(db.workshop.recipeCatalog)~='table' then db.workshop.recipeCatalog={} end
     recipeCatalog,catalogCursor,catalogPending=db.workshop.recipeCatalog,nil,true
@@ -523,7 +523,7 @@ end
 local function ensureRecipeIndex()
     if indexedRevision==indexRevision or indexJob then return end
     local job={revision=indexRevision}; indexJob=job
-    local summaries,seen,items={},{},{}
+    local summaries,seen,items,itemProfs={},{},{},{}
     scanCachedRecords(function(name,r)
         if validRecord(r) then
             local summary=summaries[r.profession] or {recipes=0,members=0}; summaries[r.profession]=summary
@@ -534,10 +534,13 @@ local function ensureRecipeIndex()
             if r.item>0 then
                 local owners=items[r.item] or {}; items[r.item]=owners
                 owners[name]=math.max(owners[name] or 0,r.seen)
+                local byProf=itemProfs[r.item] or {}; itemProfs[r.item]=byProf
+                local profOwners=byProf[r.profession] or {}; byProf[r.profession]=profOwners
+                profOwners[name]=math.max(profOwners[name] or 0,r.seen)
             end
         end
     end,function()
-        summaryCache,itemIndex=summaries,items; indexedRevision=job.revision; indexJob=nil
+        summaryCache,itemIndex,itemProfessionIndex=summaries,items,itemProfs; indexedRevision=job.revision; indexJob=nil
         OldKraken:Fire('WORKSHOP_INDEX_CHANGED')
     end,function() return indexJob==job end)
 end
@@ -1068,15 +1071,23 @@ itemEvents:SetScript('OnEvent',function(_,_,id,success)
         OldKraken:Fire('WORKSHOP_ITEM_DATA_CHANGED')
     end
 end)
+local masterRecipeCountCache={rev=-1,itemRev=-1,counts={}}
 local function countCachedMasterRecipes(ownerName, profession)
     local bucket=ownerName and people[ownerName]
     if type(bucket)~='table' then return 0 end
+    if masterRecipeCountCache.rev~=indexRevision or masterRecipeCountCache.itemRev~=itemDataRevision then
+        masterRecipeCountCache={rev=indexRevision,itemRev=itemDataRevision,counts={}}
+    end
+    local key=ownerName..'\001'..(profession or 0)
+    local cached=masterRecipeCountCache.counts[key]
+    if cached~=nil then return cached end
     local count=0
     for _,r in pairs(bucket) do
         if validRecord(r) and (not profession or r.profession==profession) and not isBindOnPickup(r) then
             count=count+1
         end
     end
+    masterRecipeCountCache.counts[key]=count
     return count
 end
 local function showItemTooltip(anchor,itemID,recipeID)
@@ -1204,7 +1215,9 @@ local function renderBody()
             frame.onlineOnly:SetText(mastersOnline and T('Лише онлайн: так') or T('Лише онлайн: ні'))
         end
     end
+    local perf=OldKraken.perfEnabled and type(debugprofilestop)=='function' and type(OldKraken.PerfRecord)=='function'
     if mastersView then
+        local tCollect=perf and debugprofilestop() or nil
         local masters={}
         local workshop=OldKraken.Workshop
         if workshop then
@@ -1218,11 +1231,15 @@ local function renderBody()
             if (not viewOwner or entry.name==viewOwner) and (not mastersOnline or entry.name==identity or online[entry.name]==true)
                 and (filter=='' or lower(entry.name):find(filter,1,true)) then list[#list+1]=entry end
         end
+        if tCollect then OldKraken:PerfRecord('wk.recipes.masters.collect', debugprofilestop() - tCollect, #masters) end
+        local tCount=perf and debugprofilestop() or nil
         local hasRecipes={}
         for _,entry in ipairs(list) do
             local k=entry.name..'\001'..(entry.profession or 0)
             if hasRecipes[k]==nil then hasRecipes[k]=countCachedMasterRecipes(entry.name,entry.profession)>0 end
         end
+        if tCount then OldKraken:PerfRecord('wk.recipes.masters.counts', debugprofilestop() - tCount, #list) end
+        local tSort=perf and debugprofilestop() or nil
         table.sort(list,function(a,b)
             local aOnline=a.name==identity or online[a.name]==true; local bOnline=b.name==identity or online[b.name]==true
             if aOnline~=bOnline then return aOnline end
@@ -1232,9 +1249,11 @@ local function renderBody()
             if a.name~=b.name then return a.name<b.name end
             return (professionNames[a.profession] or '')<(professionNames[b.profession] or '')
         end)
+        if tSort then OldKraken:PerfRecord('wk.recipes.masters.sort', debugprofilestop() - tSort, #list) end
         offset=math.max(0,math.min(offset,math.max(0,math.ceil(#list/PAGE_SIZE)-1)))
         frame.page:SetText((offset+1)..' / '..math.max(1,math.ceil(#list/PAGE_SIZE)))
         frame.count:SetText(T('Майстрів: ')..#list..T(' · рівень і дата за останніми доступними даними'))
+        local tRows=perf and debugprofilestop() or nil
         for i,row in ipairs(rows) do
             local entry=list[offset*PAGE_SIZE+i]
             if entry then
@@ -1252,6 +1271,8 @@ local function renderBody()
                 row:Show()
             else row.entry=nil; row:UnlockHighlight(); row:Hide() end
         end
+        if tRows then OldKraken:PerfRecord('wk.recipes.masters.rows', debugprofilestop() - tRows, #rows) end
+        local tDetail=perf and debugprofilestop() or nil
         frame.detailIcon:SetShown(selectedMaster~=nil); frame.order:Hide()
         hideDetailMasterRows()
         frame.whisper:SetShown(selectedMaster~=nil and selectedMaster.name~=identity and online[selectedMaster.name]==true)
@@ -1269,9 +1290,10 @@ local function renderBody()
         else
             frame.detailTitle:SetText(T('Оберіть майстра')); frame.detailInfo:SetText(T('Виберіть майстра зі списку.')); frame.detailReagents:SetText(''); hideReagentRows()
         end
-        resizeInfo(); return
+        resizeInfo()
+        if tDetail then OldKraken:PerfRecord('wk.recipes.masters.detail', debugprofilestop() - tDetail) end
+        return
     end
-    local perf=OldKraken.perfEnabled and type(debugprofilestop)=='function' and type(OldKraken.PerfRecord)=='function'
     local tFilter=perf and debugprofilestop() or nil
     local filterScanned=0
     local list,grouped,groupCounts={},{},{}
@@ -1281,7 +1303,7 @@ local function renderBody()
         if validRecord(entry.record) and (not viewOwner or entry.owner==viewOwner) and (not professionContext or entry.record.profession==professionContext)
             and (not selectRecipe or ((pickerProfession==0 or entry.record.profession==pickerProfession) and OldKraken.WorkshopOrders and OldKraken.WorkshopOrders:SupportsProfession(entry.record.profession)))
             and not isBindOnPickup(entry.record)
-            and (not showTypeFilter or matchesRecipeType(classifyRecipe(entry.record),selectedType))
+            and (not showTypeFilter or selectedType=='all' or matchesRecipeType(classifyRecipe(entry.record),selectedType))
             and (selectRecipe or viewOwner or not mastersOnline or entry.owner==identity or online[entry.owner]==true)
             and matchesFilter(entry.record,filter) then
             if byRecipe then
@@ -2009,19 +2031,25 @@ function Recipes:FindMasters(itemID,recipeID,profession)
     if recipeID>0 then
         for name,records in pairs(people) do
             local r=type(records)=='table' and records[recipeID]
-            if safeText(name,1,128) and validRecord(r) and (not profession or r.profession==profession) then found[name]=r.seen end
+            if safeText(name,1,128) and validRecord(r) and (not profession or r.profession==profession) then
+                found[name]=math.max(found[name] or 0,r.seen)
+            end
         end
     end
     if itemID>0 then
-        ensureRecipeIndex()
-        for name,seen in pairs(itemIndex[itemID] or {}) do
-            if not profession then
-                found[name]=math.max(found[name] or 0,seen)
-            else
-                local records=people[name]
-                if type(records)=='table' then
+        if indexedRevision~=indexRevision then ensureRecipeIndex() end
+        if indexedRevision==indexRevision then
+            local owners=not profession and itemIndex[itemID] or (itemProfessionIndex[itemID] and itemProfessionIndex[itemID][profession])
+            for name,seen in pairs(owners or {}) do
+                if safeText(name,1,128) then
+                    found[name]=math.max(found[name] or 0,seen)
+                end
+            end
+        else
+            for name,records in pairs(people) do
+                if safeText(name,1,128) and type(records)=='table' then
                     for _,r in pairs(records) do
-                        if validRecord(r) and r.item==itemID and r.profession==profession then
+                        if validRecord(r) and r.item==itemID and (not profession or r.profession==profession) then
                             found[name]=math.max(found[name] or 0,r.seen)
                         end
                     end
