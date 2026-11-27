@@ -160,7 +160,7 @@ def test_presence_and_spec_across_checkpoints():
     assert any(p['message'].startswith('ACK^') for p in pkts_ack)
 
     for ref in CHECKPOINTS:
-        ver = '0.5.7' if ref == 'origin/main' else ref.lstrip('v')
+        ver = ref.lstrip('v')
         old_c = make_comm_client('Bob', 'Other', ref, ver)
         new_c = make_comm_client('Alice', 'Moon', None, '0.5.8-alpha.2')
         new_c.execute("OldKraken.Communication:RequestRosterPresence()")
@@ -196,7 +196,7 @@ def test_presence_and_spec_across_checkpoints():
 
 def test_group_finder_and_guild_events_bidirectional():
     for ref in CHECKPOINTS:
-        ver = '0.5.7' if ref == 'origin/main' else ref.lstrip('v')
+        ver = ref.lstrip('v')
         old_c = make_comm_client('Bob', 'Other', ref, ver)
         new_c = make_comm_client('Alice', 'Moon', None, '0.5.8-alpha.2')
 
@@ -259,7 +259,7 @@ def test_group_finder_and_guild_events_bidirectional():
 
 def test_wrq_cadence_across_checkpoints():
     for ref in list(CHECKPOINTS) + [None]:
-        ver = '0.5.8-alpha.2' if ref is None else ('0.5.7' if ref == 'origin/main' else ref.lstrip('v'))
+        ver = '0.5.8-alpha.2' if ref is None else ref.lstrip('v')
         c = make_comm_client('Bob', 'Other', ref, ver)
 
         # Initial tick (nextQuery starts at 0) emits WRQ
@@ -294,7 +294,7 @@ def test_wrq_cadence_across_checkpoints():
 
 def test_workshop_recipes_and_sync_bidirectional():
     for ref in CHECKPOINTS:
-        ver = '0.5.7' if ref == 'origin/main' else ref.lstrip('v')
+        ver = ref.lstrip('v')
         old_c = make_comm_client('Bob', 'Other', ref, ver)
         new_c = make_comm_client('Alice', 'Moon', None, '0.5.8-alpha.2')
 
