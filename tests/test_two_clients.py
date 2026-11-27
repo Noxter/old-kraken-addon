@@ -297,4 +297,72 @@ s_alice.execute("""
     guild_name = 'Guild'
 """)
 
+# 8. WHISPER sender validation: reject unknown/stale-guild/invalid, accept confirmed GUILD presence
+s_alice.execute("""
+    -- Re-establish Bob's GUILD presence after test #7's guild switch
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Bob Other Realm')
+    assert(OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    local wrgetPayload = OldKraken.GroupFinder._pack({'Alice Moon', 'Alice Moon', '1'})
+    local hex = wrgetPayload:gsub('.', function(c) return string.format('%02X', string.byte(c)) end)
+
+    -- 8a. Unknown sender is rejected before RecordRosterPresence and triggers no WRPAGE
+    local beforeRx = OldKraken.Communication.stats.received
+    local beforeFrags = (OldKraken.Communication.traffic.byKind.WRGET and OldKraken.Communication.traffic.byKind.WRGET.rxFrags) or 0
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888888-1^1^1^' .. hex, 'WHISPER', 'Stranger Other')
+    assert(not OldKraken.Communication:HasRosterAddon('Stranger Other'))
+    assert(OldKraken.Communication.stats.received == beforeRx)
+    local afterFrags = (OldKraken.Communication.traffic.byKind.WRGET and OldKraken.Communication.traffic.byKind.WRGET.rxFrags) or 0
+    assert(afterFrags == beforeFrags)
+    clock = clock + 10; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    for _, p in ipairs(outgoing) do assert(not p.message:match('^GF2%^WRPAGE%^')) end
+    outgoing = {}
+
+    -- 8b. Known sender with confirmed GUILD presence is accepted and receives WHISPER WRPAGE
+    beforeRx = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888890-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
+    assert(OldKraken.Communication.stats.received == beforeRx + 1)
+    clock = clock + 10; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    local sentWrpage = false
+    for _, p in ipairs(outgoing) do
+        if p.message:match('^GF2%^WRPAGE%^') then
+            assert(p.channel == 'WHISPER' and p.target == 'Bob Other Realm')
+            sentWrpage = true
+        end
+    end
+    assert(sentWrpage)
+    outgoing = {}
+
+    -- 8c. Guild change clears presence; stale sender is rejected on WHISPER until re-seen on GUILD
+    guild_name = 'OtherGuild'
+    assert(not OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    guild_name = 'Guild'
+    beforeRx = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888891-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
+    assert(OldKraken.Communication.stats.received == beforeRx)
+
+    -- 8d. Invalid/empty/oversized sender names and self without guild are rejected
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888892-1^1^1^' .. hex, 'WHISPER', '')
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888893-1^1^1^' .. hex, 'WHISPER', string.rep('A', 129))
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888894-1^1^1^' .. hex, 'WHISPER', 123)
+    guild_name = ''
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888895-1^1^1^' .. hex, 'WHISPER', 'Alice Moon')
+    guild_name = 'Guild'
+    assert(OldKraken.Communication.stats.received == beforeRx)
+
+    -- 8e. GUILD messages continue to work and record presence
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Bob Other Realm')
+    assert(OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888896-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
+    assert(OldKraken.Communication.stats.received == beforeRx + 1)
+    outgoing = {}
+""")
+s_bob.execute("""
+    local beforeRx = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRPAGE^1700000000-888889-1^1^1^504159', 'WHISPER', 'Stranger Other')
+    assert(not OldKraken.Communication:HasRosterAddon('Stranger Other'))
+    assert(OldKraken.Communication.stats.received == beforeRx)
+""")
+
 print('Two simulated clients passed')

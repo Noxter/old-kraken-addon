@@ -1198,6 +1198,8 @@ function Communication:OnAddonMessage(prefix, message, channel, sender)
         if channel ~= "WHISPER" or message:sub(1, 4) ~= "GF2^" then return end
         local kind = message:match("^GF2%^([A-Z]+)%^")
         if not UNICAST_KINDS[kind] then return end
+        if type(sender) ~= "string" or sender == "" or #sender > 128 then return end
+        if not self:HasRosterAddon(sender) or self.presenceGuild == '' then return end
     end
     local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     receiveAddonMessage(self, message, sender)
