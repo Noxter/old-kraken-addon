@@ -44,7 +44,7 @@
 - `Pump` (тікер **0,7 с**) бере найменший пріоритет, `break` на 0.
 - **Правило порядку: «знімок ніколи не має обганяти рішення, яке на нього посилається»** — `GROUP_SNAPSHOTS = {ANNOUNCE, UPDATE, SYNC, CANCEL, BUMP}` переставляються перед рішенням через `job.recordKey` (перші два запакованих поля). Не ламай це.
 - Черга обмежена: пріоритет 0 → до `MAX_QUEUE`, інакше до `BACKGROUND_LIMIT`. Переповнення → `stats.backpressure++`, `false, 'queue full'`.
-- **Дедуп:** `pendingTransmissions[guild\001kind\001payload]` — повторна постановка того самого payload повертає наявний id.
+- **Дедуп:** `pendingTransmissions[guild\001kind\001channel\001dest\001payload]` — повторна постановка того самого payload у той самий канал/адресат повертає наявний id.
 - **Backoff:** при невдачі `backoff = min(60, backoff==0 and 2 or backoff*2)` + джиттер; для жорстких помилок відправки (`entryError`) передача припиняється після `MAX_ERROR_ATTEMPTS = 5` спроб, тоді як шляхи `deferEntry` (API недоступний / тротлінг) ліміту спроб не мають. (`README.md` у розділі про чергу каже «обмеження 50 … не більше п'яти спроб» — застаріло лише обмеження черги 50.)
 - **Replay multipart:** якщо передача триває ≥ **90 с** — усі частини знімаються, `startedAt` скидається, повний набір ставиться в чергу знову (`stats.restarted++`).
 - **Тротлінг на боці виклику:** модулі ставлять у чергу лише коли `#comm.queue <= 8` (перевіряй це у своєму коді, якщо додаєш новий масовий відправник).
@@ -260,10 +260,10 @@ cd ~/Projects/old-kraken-alpha
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-- **64 файли** `tests/test_*.py`.
+- **66 файлів** `tests/test_*.py`.
 - Рантайм: `lupa==2.8`, `from lupa.lua51 import LuaRuntime` — **Lua 5.1**.
 - **Середовище Python:** рекомендований ізольований варіант — `.venv` з `lupa==2.8` (див. `TESTING.md`). Як альтернатива на поточній робочій машині `lupa 2.8` також встановлено в user-site `~/.local/lib/python3.14/site-packages/`; `lua`/`lua5.1`/`luac` у системі **немає**. Якщо агент запускає тести в ізольованій пісочниці без `.venv`, `~/.local` може бути недоступним (`ModuleNotFoundError: No module named 'lupa'`) — у такому разі цикл тестів треба запускати поза пісочницею (`BypassSandbox: true`).
-- **Немає pytest/unittest/conftest/Makefile/requirements** — це прості скрипти з Lua-`assert` усередині `lua.execute('''…''')`, успіх = `print('PASS: …')`.
+- **Переважно автономні скрипти:** більшість тестів — прості скрипти з Lua-`assert` усередині `lua.execute('''…''')` (успіх = `print('PASS: …')`); окремі файли (наприклад, `tests/test_phase2_specs.py`) використовують стандартний `unittest` без pytest/conftest.
 - Тести **не парсять TOC** — вантажать `*.lua` вручну в потрібному порядку. Тому **нових файлів у TOC недостатньо** — якщо файл має тестуватися, додай його в порядок завантаження у відповідному тесті.
 - Перевірка синтаксису без `luac`: `lua.execute('assert(loadstring(...))', src)` — `tests/test_roster_invite.py` проганяє так **усі** `*.lua`.
 - Двохклієнтна симуляція: `tests/test_two_clients.py` (два `LuaRuntime`, `flush(sender, recipients)`, `reload(client)` зі збереженням `OldKraken.DB`).
