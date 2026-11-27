@@ -96,6 +96,28 @@ assert(row.cellHovers[7].fullText:find('Не вдалося порівняти',
 OldKraken.Communication.GetRosterVersion = origGetVersion
 OldKraken.Communication.CompareVersions = origCompare
 OldKraken.GuildRoster:Render()
+
+-- Partial GuildRoster:Load() (one nil member name) must NOT invoke PruneRosterPresence
+local pruneCalls = 0
+function OldKraken.Communication:PruneRosterPresence(members) pruneCalls = pruneCalls + 1 end
+local origGetNum, origGetInfo = GetNumGuildMembers, GetGuildRosterInfo
+function GetNumGuildMembers() return 2 end
+function GetGuildRosterInfo(i)
+    if i == 1 then return 'Online Member', 'Member', 0, 60, 'Warrior', 'Orgrimmar', nil, nil, true, '', 'WARRIOR' end
+    return nil
+end
+OldKraken.GuildRoster:Load()
+assert(pruneCalls == 0, 'Incomplete roster scan must not invoke PruneRosterPresence')
+
+-- Complete GuildRoster:Load() invokes PruneRosterPresence
+function GetGuildRosterInfo(i)
+    if i == 1 then return 'Online Member', 'Member', 0, 60, 'Warrior', 'Orgrimmar', nil, nil, true, '', 'WARRIOR' end
+    return 'Active Member', 'Member', 0, 60, 'Mage', 'Orgrimmar', nil, nil, true, '', 'MAGE'
+end
+OldKraken.GuildRoster:Load()
+assert(pruneCalls == 1, 'Complete roster scan must invoke PruneRosterPresence')
+GetNumGuildMembers, GetGuildRosterInfo = origGetNum, origGetInfo
+OldKraken.Communication.PruneRosterPresence = nil
 ''')
 lua2=LuaRuntime(unpack_returned_tuples=True)
 lua2.execute('''

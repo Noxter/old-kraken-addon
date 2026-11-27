@@ -2376,9 +2376,9 @@ peopleEvents:SetScript('OnEvent', function(_, event)
                         pendingPartyPeopleTimer = false
                         if peopleRefreshSeq == scheduledSeq then
                             refreshPeopleMode(true)
-                            pruneOfflineApplications()
-                            scheduleRefresh()
                         end
+                        pruneOfflineApplications()
+                        scheduleRefresh()
                     end)
                 end
                 return

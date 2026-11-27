@@ -1391,6 +1391,7 @@ function Roster:Load()
     total = tonumber(total) or 0
 
     rosterData = {}
+    local completeScan = total > 0
 
     for index = 1, total do
         local name, rankName, rankIndex, level, className, zone,
@@ -1428,7 +1429,14 @@ function Roster:Load()
                 isOnline = isOnline == true,
                 lastOnline = lastOnline,
             }
+        else
+            completeScan = false
         end
+    end
+
+    local comm = OldKraken.Communication
+    if comm and type(comm.PruneRosterPresence) == 'function' and completeScan and #rosterData == total then
+        comm:PruneRosterPresence(rosterData)
     end
 
     self:Render()

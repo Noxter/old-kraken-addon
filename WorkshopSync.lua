@@ -243,6 +243,32 @@ end)
 local listener=CreateFrame('Frame')
 for _,event in ipairs({'PLAYER_LOGIN','PLAYER_GUILD_UPDATE','GUILD_ROSTER_UPDATE'}) do pcall(listener.RegisterEvent,listener,event) end
 listener:SetScript('OnEvent',connect)
+local function failoverPending(owner,pending,now)
+    pending.failed=pending.failed or {}
+    pending.failed[pending.provider]=true
+    local nextProvider,backup=pickBackup(pending,owner)
+    if nextProvider then
+        pending.provider=nextProvider; pending.rev=backup.rev; pending.count=backup.count
+        pending.parts={}; pending.partPayloads={}; pending.received=0; pending.recordCount=0; pending.total=nil
+        pending.sent=false; pending.jobID=nil; pending.stalledAttempts=0; pending.lastProgress=now; pending.lastNewProgress=now
+        return true
+    end
+    incoming[owner]=nil
+    if nextQuery>now+60 then nextQuery=now+60 end
+    return false
+end
+if type(OldKraken.On)=='function' then
+    OldKraken:On('COMM_WHISPER_DROPPED',function(kind,target,_,dropID)
+        if not active or kind~='WRGET' or type(target)~='string' or target=='' then return end
+        local now=GetTime()
+        for owner,pending in pairs(incoming) do
+            if pending.sent and pending.provider==target and pending.jobID==dropID then
+                failoverPending(owner,pending,now)
+                break
+            end
+        end
+    end)
+end
 local function runSyncTick()
     connect(); if not active then return end
     local now=GetTime()
@@ -255,24 +281,16 @@ local function runSyncTick()
                 local stalledNoNew=(now-(pending.lastNewProgress or pending.lastProgress))>=45
                 local stalledNoActivity=(now-pending.lastProgress)>=45
                 if (pending.stalledAttempts or 0)>=MAX_STALL_ATTEMPTS and (stalledNoActivity or (hasBackup and stalledNoNew)) then
-                    pending.failed=pending.failed or {}
-                    pending.failed[pending.provider]=true
-                    local nextProvider,backup=pickBackup(pending,owner)
-                    if nextProvider then
-                        pending.provider=nextProvider; pending.rev=backup.rev; pending.count=backup.count
-                        pending.parts={}; pending.partPayloads={}; pending.received=0; pending.recordCount=0; pending.total=nil
-                        pending.sent=false; pending.stalledAttempts=0; pending.lastProgress=now; pending.lastNewProgress=now
-                    else
-                        incoming[owner]=nil
-                        pending=nil
-                        if nextQuery>now+60 then nextQuery=now+60 end
-                    end
+                    if not failoverPending(owner,pending,now) then pending=nil end
                 else
-                    pending.sent=false
+                    pending.sent=false; pending.jobID=nil
                 end
             end
-            if pending and not pending.sent and #comm.queue<=8 and comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)}),pending.provider) then
-                pending.sent=true; pending.lastRequest=now; pending.stalledAttempts=(pending.stalledAttempts or 0)+1
+            if pending and not pending.sent and #comm.queue<=8 then
+                local ok,jobID=comm:SendProtocol('WRGET',codec._pack({pending.provider,owner,string.format('%.0f',pending.rev)}),pending.provider)
+                if ok then
+                    pending.sent=true; pending.jobID=jobID; pending.lastRequest=now; pending.stalledAttempts=(pending.stalledAttempts or 0)+1
+                end
             end
         end
     end

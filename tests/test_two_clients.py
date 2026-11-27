@@ -156,9 +156,10 @@ def load_sync_client(name, realm, version):
     lua.globals().realm = realm
     lua.globals().client_ver = version
     lua.execute('''
-        OldKraken={DB={workshop={guilds={}}},WorkshopRecipes={}}
+        OldKraken={DB={workshop={guilds={}}},WorkshopRecipes={},listeners={}}
+        function OldKraken:On(n,fn) self.listeners[n]=self.listeners[n] or {}; table.insert(self.listeners[n],fn) end
+        function OldKraken:Fire(n,...) for _,fn in ipairs(self.listeners[n] or {}) do fn(...) end end
         frames={}; timers={}; outgoing={}; imported={}; local_records={}
-        function OldKraken:Fire(...) end
         function print(...) end
         function UnitName() return player, realm end
         function GetGuildInfo() return guild_name or 'Guild' end
@@ -180,6 +181,7 @@ def load_sync_client(name, realm, version):
                 if send_mode == 'throttle_once' then send_mode = nil; return 3 end
                 if send_mode == 'channel_throttle_once' then send_mode = nil; return 8 end
                 if send_mode == 'target_offline' then return 12 end
+                if send_mode == 'drop_next_only' then send_mode = nil; return 12 end
                 outgoing[#outgoing+1]={message=message,channel=channel,target=target}; return 0
             end}
         Enum={SendAddonMessageResult={Success=0,InvalidPrefix=1,InvalidMessage=2,AddonMessageThrottle=3,InvalidChatType=4,NotInGroup=5,TargetRequired=6,InvalidChannel=7,ChannelThrottle=8,GeneralError=9,NotInGuild=10,AddOnMessageLockdown=11,TargetOffline=12}}
@@ -357,12 +359,69 @@ s_alice.execute("""
     OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888896-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
     assert(OldKraken.Communication.stats.received == beforeRx + 1)
     outgoing = {}
+
+    -- 8f. PruneRosterPresence invalidates a member who left the guild and blocks subsequent WHISPER
+    assert(OldKraken.Communication:PruneRosterPresence({{name = 'Alice Moon'}}))
+    assert(not OldKraken.Communication:HasRosterAddon('Bob Other Realm'))
+    beforeRx = OldKraken.Communication.stats.received
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRGET^1700000000-888897-1^1^1^' .. hex, 'WHISPER', 'Bob Other Realm')
+    assert(OldKraken.Communication.stats.received == beforeRx)
 """)
 s_bob.execute("""
     local beforeRx = OldKraken.Communication.stats.received
     OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRPAGE^1700000000-888889-1^1^1^504159', 'WHISPER', 'Stranger Other')
     assert(not OldKraken.Communication:HasRosterAddon('Stranger Other'))
     assert(OldKraken.Communication.stats.received == beforeRx)
+""")
+
+# 9. Job-correlated COMM_WHISPER_DROPPED: only the dropped WRGET fails over; second pending from same provider is untouched
+s_bob.execute("""
+    clock = clock + 700; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    outgoing = {}
+
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Shared Provider')
+    OldKraken.Communication:OnAddonMessage('OLDKRKN', 'OKP^HERE^0.5.8-alpha.2', 'GUILD', 'Backup Provider')
+    local function sendWRIDX(id, owner, provider)
+        local raw = OldKraken.GroupFinder._pack({'Bob Other Realm', owner, '2', '1'})
+        local h = raw:gsub('.', function(c) return string.format('%02X', string.byte(c)) end)
+        OldKraken.Communication:OnAddonMessage('OLDKRKN', 'GF2^WRIDX^' .. id .. '^1^1^' .. h, 'GUILD', provider)
+    end
+    sendWRIDX('1700000000-777771-1', 'Crafter A', 'Shared Provider')
+    sendWRIDX('1700000000-777772-1', 'Crafter A', 'Backup Provider')
+    sendWRIDX('1700000000-777773-1', 'Crafter B', 'Shared Provider')
+    sendWRIDX('1700000000-777774-1', 'Crafter B', 'Backup Provider')
+
+    local droppedID
+    OldKraken:On('COMM_WHISPER_DROPPED', function(kind, target, _, jobID)
+        if kind == 'WRGET' and not droppedID then droppedID = jobID end
+    end)
+
+    -- First WRGET in queue fails with TargetOffline (12); second WRGET succeeds (0)
+    send_mode = 'drop_next_only'
+    clock = clock + 1; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    assert(droppedID ~= nil)
+    assert(#outgoing == 1)
+    local keptOwner = OldKraken.GroupFinder._unpackFields((outgoing[1].message:match('%^([0-9A-F]+)$'):gsub('%x%x', function(p) return string.char(tonumber(p, 16)) end)), 3)[2]
+    local droppedOwner = (keptOwner == 'Crafter A') and 'Crafter B' or 'Crafter A'
+    assert(outgoing[1].channel == 'WHISPER' and outgoing[1].target == 'Shared Provider')
+    outgoing = {}
+
+    -- Next tick (+1s): ONLY droppedOwner switches to Backup Provider; keptOwner stays pending on Shared Provider
+    clock = clock + 1; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    assert(#outgoing == 1)
+    assert(outgoing[1].channel == 'WHISPER' and outgoing[1].target == 'Backup Provider')
+    local switchedOwner = OldKraken.GroupFinder._unpackFields((outgoing[1].message:match('%^([0-9A-F]+)$'):gsub('%x%x', function(p) return string.char(tonumber(p, 16)) end)), 3)[2]
+    assert(switchedOwner == droppedOwner)
+    outgoing = {}
+
+    -- Re-firing the already-handled droppedID must not cause a second/infinite failover
+    OldKraken:Fire('COMM_WHISPER_DROPPED', 'WRGET', 'Shared Provider', '12', droppedID)
+    clock = clock + 1; timers[1]()
+    while #OldKraken.Communication.queue > 0 do clock = clock + 1; OldKraken.Communication:Pump() end
+    assert(#outgoing == 0)
 """)
 
 print('Two simulated clients passed')
