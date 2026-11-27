@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.5.9-alpha.1
+
 ## 0.5.8
 - **Minimap & LibDBIcon-1.0:** додано підтримку `LibDBIcon-1.0` / `LibDataBroker-1.1` (`OptionalDeps`), центрування fallback-іконки та синхронізацію `minimapAngle` і `minimap.minimapPos` при перетягуванні (`Minimap.lua`).
 - **Майстерня та ростер:** вилучено збиральні (`186, 182, 393`) і вторинні (`185, 129, 356`) професії з активного UI та нової обробки даних; старі записи залишаються інертними, `Workshop.lua` фільтрує їх через `LEGACY_IGNORED_PROFESSIONS`, а `WorkshopRecipes.lua` / `WorkshopOrders.lua` відхиляють їх на прийомі.
