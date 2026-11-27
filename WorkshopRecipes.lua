@@ -1221,9 +1221,13 @@ local function renderBody()
         local masters={}
         local workshop=OldKraken.Workshop
         if workshop then
-            for id in pairs(professionNames) do
-                if not professionContext or professionContext==id then
-                    for _,entry in ipairs(workshop:GetProfessionMasters(id)) do entry.profession=id; masters[#masters+1]=entry end
+            if type(workshop.GetAllProfessionMasters)=='function' then
+                masters=workshop:GetAllProfessionMasters(professionContext or professionNames)
+            else
+                for id in pairs(professionNames) do
+                    if not professionContext or professionContext==id then
+                        for _,entry in ipairs(workshop:GetProfessionMasters(id)) do entry.profession=id; masters[#masters+1]=entry end
+                    end
                 end
             end
         end
