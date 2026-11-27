@@ -392,4 +392,136 @@ assert(c.pendingTransmissions[first.key]==nil and c.pendingTransmissions[second.
 assert(c:SendProtocol('JOIN','bad') and c.pendingTransmissions[first.key]~=first)
 ''')
 
+# Async WHISPER bounce via CHAT_MSG_SYSTEM: counted credits, manual /w isolation, order independence, pruning, and localized ERR_CHAT_PLAYER_NOT_FOUND_S
+scenario('''
+ERR_CHAT_PLAYER_NOT_FOUND_S = "No player named '%s' is currently playing."
+local dropped = {}
+local origFire = OldKraken.Fire
+OldKraken.Fire = function(self, ev, ...)
+    if ev == 'COMM_WHISPER_DROPPED' then dropped[#dropped + 1] = { ... } end
+    if origFire then return origFire(self, ev, ...) end
+end
+local origGetVer = c.GetRosterVersion
+c.GetRosterVersion = function(_, name) if name == 'Rainira Moonveil' then return '0.5.9-alpha.1' end end
+
+-- 1. Queued (unsent) addon WHISPER for Rainira Moonveil + manual /w bounce -> must NOT drop addon job
+assert(c:SendProtocol('WRPAGE', string.rep('x', 200), 'Rainira Moonveil'))
+local queuedBefore = #c.queue
+assert(queuedBefore > 1)
+assert(not c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing."), 'manual /w before any addon send must not drop addon job')
+assert(#c.queue == queuedBefore and #dropped == 0)
+
+-- 2. Addon sends 1 fragment -> bounce drops remaining fragments, counts txDrops once, and ignores duplicate bounce
+c:Pump()
+assert(#sent == 1)
+assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing."))
+assert(#c.queue == 0, 'remaining WRPAGE fragments for bounced target must be dropped')
+assert(#dropped == 1 and dropped[1][1] == 'WRPAGE' and dropped[1][2] == 'Rainira Moonveil' and dropped[1][3] == 'targetOffline')
+assert(c.traffic.byKind.WRPAGE.txDrops == 1)
+assert(c.traffic.byKind.WRPAGE.txDropReasons.targetOffline == 1)
+
+-- Duplicate bounce on a later tick (e.g. manual /w on same target while confirmedOfflineTargets is active) must NOT double-count or suppress
+now = now + 1
+assert(not c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing."), 'manual /w after bounce credit consumed must not be swallowed')
+assert(c.traffic.byKind.WRPAGE.txDrops == 1)
+
+-- 3. Queuing another WRPAGE for the confirmed-offline target drops without calling SendAddonMessage
+assert(c:SendProtocol('WRPAGE', 'short', 'Rainira Moonveil'))
+c:Pump()
+assert(#sent == 1, 'must not call SendAddonMessage for confirmed-offline target')
+assert(#c.queue == 0)
+assert(c.traffic.byKind.WRPAGE.txDrops == 2)
+
+-- 4. After TTL expires (now + 15), expired entries are physically pruned and a new addon send succeeds normally
+now = now + 15
+assert(c:SendProtocol('WRPAGE', 'fresh', 'Rainira Moonveil'))
+c:Pump()
+assert(#sent == 2, 'after TTL expires and state is pruned, addon WHISPER must send normally')
+now = now + 5
+assert(not c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing."), 'expired pending send must be pruned and not match manual /w')
+
+-- 5. Compromise behavior within active 3s pending window: 1st bounce consumes the 1 pending credit, 2nd bounce is not swallowed
+now = now + 15
+assert(c:SendProtocol('WRPAGE', 'win', 'Rainira Moonveil'))
+c:Pump()
+now = now + 1
+assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == true, 'within 3s window, 1st bounce consumes 1 credit')
+now = now + 1
+assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == false, 'after 1 credit is consumed, subsequent manual /w is not swallowed')
+
+-- 6. Multiple pending credits for the same target (2 sends -> 2 credits; 3rd bounce returns false)
+now = now + 15
+assert(c:SendProtocol('WRPAGE', 'm1', 'Rainira Moonveil'))
+assert(c:SendProtocol('WRPAGE', 'm2', 'Rainira Moonveil'))
+c:Pump()
+c:Pump()
+assert(#c.queue == 0)
+local dropsBefore = c.traffic.byKind.WRPAGE.txDrops
+assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == true)
+now = now + 1
+assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == true)
+now = now + 1
+assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == false)
+assert(c.traffic.byKind.WRPAGE.txDrops == dropsBefore, 'no extra txDrops when queue was already empty')
+
+OldKraken.Fire = origFire
+c.GetRosterVersion = origGetVer
+''')
+
+filter_lua = LuaRuntime(unpack_returned_tuples=True)
+filter_lua.execute('''
+chatFilters = {}
+function ChatFrame_AddMessageEventFilter(ev, fn) chatFilters[ev] = fn end
+ERR_CHAT_PLAYER_NOT_FOUND_S = "Гравець [%s] (офлайн) +."
+function CreateFrame() return {RegisterEvent=function() end, SetScript=function() end} end
+function UnitName() return 'Tester' end
+function IsInGuild() return true end
+function GetGuildInfo() return 'Guild' end
+function GetServerTime() return 1234567890 end
+fnow = 100
+function GetTime() return fnow end
+function strsplit(d, s) return s:match('^([^%^]*)%^([^%^]*)%^([^%^]*)%^([^%^]*)$') end
+Enum = {SendAddonMessageResult = { Success=0 }}
+C_ChatInfo = { SendAddonMessage=function() return 0 end }
+''')
+filter_lua.execute((Path(__file__).resolve().parents[1] / 'Communication.lua').read_text(encoding='utf-8'))
+filter_lua.execute('''
+local c = OldKraken.Communication
+c.ready = true
+c.GetRosterVersion = function(_, name) if name == 'Rainira Moonveil' then return '0.5.9-alpha.1' end end
+assert(type(chatFilters.CHAT_MSG_SYSTEM) == 'function')
+
+-- Filter runs BEFORE OnSystemMessage (localized ERR_CHAT_PLAYER_NOT_FOUND_S with regex special chars):
+-- suppresses both ChatFrame calls in the same frame, drops remaining queue once, and OnSystemMessage does not double-count
+assert(c:SendProtocol('WRPAGE', string.rep('x', 200), 'Rainira Moonveil'))
+c:Pump()
+assert(#c.queue > 1)
+assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == true)
+assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == true)
+assert(c:OnSystemMessage("Гравець [Rainira Moonveil] (офлайн) +.") == true)
+assert(#c.queue == 0)
+assert(c.traffic.byKind.WRPAGE.txDrops == 1, 'filter + OnSystemMessage on same frame must not double-count txDrops')
+
+-- Reverse order: OnSystemMessage runs BEFORE ChatFrame filter on the same frame
+fnow = fnow + 15
+assert(c:SendProtocol('WRPAGE', string.rep('y', 200), 'Rainira Moonveil'))
+c:Pump()
+assert(#c.queue > 1)
+assert(c:OnSystemMessage("Гравець [Rainira Moonveil] (офлайн) +.") == true)
+assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == true)
+assert(#c.queue == 0)
+assert(c.traffic.byKind.WRPAGE.txDrops == 2, 'reverse order on same frame must drop once')
+
+-- Next frame: manual /w on the SAME target must NOT be suppressed by ChatFrame filter
+fnow = fnow + 1
+assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == false)
+
+-- Successful addon WHISPER followed by expired RTT window: manual /w on same target must NOT be suppressed
+fnow = fnow + 15
+assert(c:SendProtocol('WRPAGE', 'ok', 'Rainira Moonveil'))
+c:Pump()
+fnow = fnow + 4
+assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == false)
+''')
+
 print('Transport reliability regression checks passed')
