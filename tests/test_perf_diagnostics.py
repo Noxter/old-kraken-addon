@@ -1656,6 +1656,148 @@ def test_workshop_recipes_ui_skips_findmasters_fallback_during_rebuild():
     ''')
 
 
+def test_workshop_get_all_profession_masters_equivalence():
+    mod = runpy.run_path(str(ROOT / 'tests/test_workshop_orders.py'))
+    make_client = mod['client']
+    c = make_client('Alice', embedded=True)
+    c.execute('''
+        local origAfter = C_Timer.After
+        local origGetTime = GetTime
+        local baseTime = origGetTime()
+        C_Timer.After = function(_, fn) fn() end
+        GetTime = function() return baseTime + 60 end
+        local scope = OldKraken.DB.workshop.guilds['Realm\\001Guild']
+        local recs = scope.records
+        -- Direct record with two professions
+        recs['Alice Mon'] = {
+            timestamp = 1700000100,
+            relayed = false,
+            list = {
+                { id = 164, rank = 300, maximum = 300 },
+                { id = 171, rank = 250, maximum = 300 },
+            },
+        }
+        -- Relayed record with 1 profession
+        recs['Bob Mon'] = {
+            timestamp = 1700000200,
+            relayed = true,
+            list = {
+                { id = 202, rank = 275, maximum = 300 },
+            },
+        }
+        -- Empty record (blocks native fallback via recordBlocksNative)
+        recs['Empty Mon'] = { timestamp = 1700000300, list = {} }
+        -- Legacy filtered record (allows native fallback via recordBlocksNative)
+        recs['Legacy Mon'] = { timestamp = 1700000400, list = {}, legacyFiltered = true }
+
+        -- Native professions: Carol Mon has no record (fallback allowed), Empty Mon & Legacy Mon must be blocked,
+        -- Alice Mon must NOT get native=true for 164 (already in records) and must be blocked by her record for 197
+        local origClub = C_Club
+        C_Club = {
+            GetGuildClubId = function() return 1 end,
+            GetClubMembers = function() return { 1, 2, 3, 4 } end,
+            GetMemberInfo = function(_, id)
+                if id == 1 then return { name = 'Carol Mon', profession1ID = 164, profession2ID = 333 }
+                elseif id == 2 then return { name = 'Empty Mon', profession1ID = 164 }
+                elseif id == 3 then return { name = 'Legacy Mon', profession1ID = 202 }
+                elseif id == 4 then return { name = 'Alice Mon', profession1ID = 164, profession2ID = 197 }
+                end
+            end,
+        }
+        assert(OldKraken.Workshop:RefreshNativeProfessions(), 'RefreshNativeProfessions must populate nativeProfessions')
+
+        local profIDs = { 164, 171, 182, 186, 197, 202, 333, 393, 755, 773 }
+        local profSet = {}
+        for _, id in ipairs(profIDs) do profSet[id] = true end
+
+        -- 1. Equivalence: GetAllProfessionMasters(profSet) vs per-id GetProfessionMasters(id)
+        local bulk = OldKraken.Workshop:GetAllProfessionMasters(profSet)
+        local byProf = {}
+        for _, entry in ipairs(bulk) do
+            byProf[entry.profession] = byProf[entry.profession] or {}
+            byProf[entry.profession][#byProf[entry.profession] + 1] = entry
+        end
+        for _, id in ipairs(profIDs) do
+            local expected = OldKraken.Workshop:GetProfessionMasters(id)
+            local actual = byProf[id] or {}
+            table.sort(actual, function(a, b) return a.name < b.name end)
+            assert(#actual == #expected, 'count mismatch for prof ' .. id .. ': ' .. #actual .. ' vs ' .. #expected)
+            for i = 1, #expected do
+                local e, a = expected[i], actual[i]
+                assert(a.name == e.name and a.profession == id)
+                assert(a.rank == e.rank and a.maximum == e.maximum and a.timestamp == e.timestamp)
+                assert(a.relayed == e.relayed and a.native == e.native)
+            end
+        end
+
+        -- Verify blocked vs allowed native fallbacks explicitly
+        local foundLegacy = false
+        for _, entry in ipairs(bulk) do
+            assert(entry.name ~= 'Empty Mon', 'empty record must block native fallback')
+            if entry.name == 'Legacy Mon' and entry.profession == 202 and entry.native == true then foundLegacy = true end
+            assert(not (entry.name == 'Alice Mon' and entry.profession == 197), 'existing record must block native fallback for Alice Mon')
+        end
+        assert(foundLegacy, 'legacyFiltered empty record must allow native fallback')
+
+        -- 2. Single-ID filter & default (nil) call
+        local single164 = OldKraken.Workshop:GetAllProfessionMasters(164)
+        table.sort(single164, function(a, b) return a.name < b.name end)
+        local exp164 = OldKraken.Workshop:GetProfessionMasters(164)
+        assert(#single164 == #exp164 and single164[1].name == 'Alice Mon' and single164[2].name == 'Carol Mon' and single164[2].native == true)
+        local allDefault = OldKraken.Workshop:GetAllProfessionMasters()
+        assert(#allDefault == #bulk)
+
+        -- 3. mastersView UI uses GetAllProfessionMasters instead of per-profession GetProfessionMasters,
+        --    and preserves filters (online-only, name search) and exact display order
+        local singleCalls = 0
+        local origSingle = OldKraken.Workshop.GetProfessionMasters
+        OldKraken.Workshop.GetProfessionMasters = function(self, id)
+            singleCalls = singleCalls + 1
+            return origSingle(self, id)
+        end
+        OldKraken.WorkshopRecipes:Show()
+        OldKraken.WorkshopRecipes:SelectTab('masters')
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        assert(singleCalls == 0, 'mastersView must use bulk GetAllProfessionMasters, got singleCalls=' .. singleCalls)
+
+        local function visibleMasters()
+            local out = {}
+            for _, row in ipairs(frames) do
+                if type(row.entry) == 'table' and row:IsShown() and row.meta then
+                    out[#out + 1] = row.entry.name .. ':' .. tostring(row.entry.profession)
+                end
+            end
+            return out
+        end
+        local orderBulk = visibleMasters()
+        local expectedOrder = { 'Alice Mon:171', 'Alice Mon:164', 'Bob Mon:202', 'Carol Mon:333', 'Carol Mon:164', 'Legacy Mon:202' }
+        assert(#orderBulk == #expectedOrder, 'must show 6 master-profession rows')
+        for i = 1, #expectedOrder do
+            assert(orderBulk[i] == expectedOrder[i], 'row ' .. i .. ' expected ' .. expectedOrder[i] .. ', got ' .. tostring(orderBulk[i]))
+        end
+
+        -- Name filter
+        local rv = OldKraken.UIHub.pages.workshop.frame.recipesView
+        rv.query:SetText('bob')
+        rv.query.scripts.OnTextChanged(rv.query, true)
+        OldKraken.WorkshopRecipes:RefreshPanel()
+        local filteredBob = visibleMasters()
+        assert(#filteredBob == 1 and filteredBob[1] == 'Bob Mon:202')
+
+        -- Online-only filter
+        rv.query:SetText('')
+        rv.query.scripts.OnTextChanged(rv.query, true)
+        rv.onlineOnly.scripts.OnClick(rv.onlineOnly)
+        local onlineOnlyRows = visibleMasters()
+        assert(#onlineOnlyRows == 2 and onlineOnlyRows[1]:find('^Alice Mon:') and onlineOnlyRows[2]:find('^Alice Mon:'))
+
+        OldKraken.Workshop.GetProfessionMasters = origSingle
+        C_Club = origClub
+        C_Timer.After = origAfter
+        GetTime = origGetTime
+    ''')
+
+
 if __name__ == '__main__':
     test_core_perf_commands_and_metrics()
     test_comm_hex_codec_and_cache_counters()
@@ -1671,4 +1813,5 @@ if __name__ == '__main__':
     test_workshop_recipes_render_name_cache_and_sort_keys()
     test_workshop_recipes_indexes_count_cache_and_masters_perf()
     test_workshop_recipes_ui_skips_findmasters_fallback_during_rebuild()
+    test_workshop_get_all_profession_masters_equivalence()
     print('Perf diagnostics and codec/cache checks passed')

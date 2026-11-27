@@ -308,6 +308,53 @@ function Workshop:GetProfessionMasters(id)
     return result
 end
 
+function Workshop:GetAllProfessionMasters(targetIDs)
+    if not active then return {} end
+    local wanted
+    if type(targetIDs)=='number' then
+        if not byID[targetIDs] then return {} end
+        wanted={[targetIDs]=true}
+    elseif type(targetIDs)=='table' then
+        wanted=targetIDs
+    else
+        wanted=byID
+    end
+    local found={}
+    for name,record in pairs(records) do
+        if usable(name,'string') and usable(record,'table') and usable(record.list,'table') then
+            for _,p in ipairs(record.list) do
+                local pid=usable(p,'table') and p.id
+                if pid and byID[pid] and wanted[pid] then
+                    local byMaster=found[pid]
+                    if not byMaster then byMaster={}; found[pid]=byMaster end
+                    if not byMaster[name] then
+                        byMaster[name]={name=name,profession=pid,rank=integer(p.rank,1,9999),maximum=integer(p.maximum,1,9999),timestamp=record.timestamp,relayed=record.relayed==true}
+                    end
+                end
+            end
+        end
+    end
+    for name,list in pairs(nativeProfessions) do
+        if usable(name,'string') and usable(list,'table') and not recordBlocksNative(records[name]) then
+            for _,p in ipairs(list) do
+                local pid=usable(p,'table') and p.id
+                if pid and byID[pid] and wanted[pid] then
+                    local byMaster=found[pid]
+                    if not byMaster then byMaster={}; found[pid]=byMaster end
+                    if not byMaster[name] then
+                        byMaster[name]={name=name,profession=pid,native=true}
+                    end
+                end
+            end
+        end
+    end
+    local result={}
+    for _,byMaster in pairs(found) do
+        for _,entry in pairs(byMaster) do result[#result+1]=entry end
+    end
+    return result
+end
+
 local function updateOwn()
     local list=scan(); scanState=list~=nil
     if not list then dropCandidate=nil; changed(); return false end
