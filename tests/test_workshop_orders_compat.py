@@ -131,7 +131,7 @@ def flush(sender, recipients):
 def test_alpha_to_old_decoders():
     alpha_sender = client('Alice', ref=None)
     v040_recv = client('Bob', ref='v0.4.0')
-    v057_recv = client('Carol', ref='v0.5.7')
+    v057_recv = client('Carol', ref='origin/main')
     tick(alpha_sender); tick(v040_recv); tick(v057_recv)
 
     # 1. Create order on alpha with rewardSilver = 0 -> v0.4.0 rejects, 0.5.7 accepts
@@ -183,7 +183,7 @@ def test_alpha_to_old_decoders():
 
 def test_old_encoders_to_alpha():
     v040_sender = client('Bob', ref='v0.4.0')
-    v057_sender = client('Carol', ref='v0.5.7')
+    v057_sender = client('Carol', ref='origin/main')
     alpha_recv = client('Alice', ref=None)
     tick(v040_sender); tick(v057_sender); tick(alpha_recv)
 
