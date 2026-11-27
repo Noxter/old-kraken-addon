@@ -10,7 +10,7 @@
 
 ## 6. Транспорт: `Communication.lua`
 
-Уся міжклієнтська комунікація йде **тільки** через гільдійний канал (`'GUILD'`). Жодних `PARTY`/`RAID`/`WHISPER`/`CHANNEL`.
+Уся широкомовна комунікація йде через гільдійний канал (`'GUILD'`). Для адресних типів `UNICAST_KINDS` (`WRGET`, `WRPAGE`) у `0.5.8-alpha.2+` використовується `'WHISPER'`, якщо підтверджена версія адресата `>= 0.5.8-alpha.2` (`WHISPER_MIN_VERSION`) і він не є поточним персонажем; для старіших клієнтів, невідомих версій або `self` зберігається фолбек у `'GUILD'`. На прийомі `'WHISPER'` приймає лише `GF2^` із `UNICAST_KINDS` від відправників, які вже мають підтверджену `GUILD`-присутність у поточній гільдії (`HasRosterAddon(sender)`). Детальну матрицю сумісності між версіями див. у `docs/PROTOCOL_COMPATIBILITY.md`. Жодних `PARTY`/`RAID`/`CHANNEL`.
 
 ### Кадр
 
@@ -44,7 +44,7 @@
 - `Pump` (тікер **0,7 с**) бере найменший пріоритет, `break` на 0.
 - **Правило порядку: «знімок ніколи не має обганяти рішення, яке на нього посилається»** — `GROUP_SNAPSHOTS = {ANNOUNCE, UPDATE, SYNC, CANCEL, BUMP}` переставляються перед рішенням через `job.recordKey` (перші два запакованих поля). Не ламай це.
 - Черга обмежена: пріоритет 0 → до `MAX_QUEUE`, інакше до `BACKGROUND_LIMIT`. Переповнення → `stats.backpressure++`, `false, 'queue full'`.
-- **Дедуп:** `pendingTransmissions[guild\001kind\001payload]` — повторна постановка того самого payload повертає наявний id.
+- **Дедуп:** `pendingTransmissions[guild\001kind\001channel\001dest\001payload]` — повторна постановка того самого payload у той самий канал/адресат повертає наявний id.
 - **Backoff:** при невдачі `backoff = min(60, backoff==0 and 2 or backoff*2)` + джиттер; для жорстких помилок відправки (`entryError`) передача припиняється після `MAX_ERROR_ATTEMPTS = 5` спроб, тоді як шляхи `deferEntry` (API недоступний / тротлінг) ліміту спроб не мають. (`README.md` у розділі про чергу каже «обмеження 50 … не більше п'яти спроб» — застаріло лише обмеження черги 50.)
 - **Replay multipart:** якщо передача триває ≥ **90 с** — усі частини знімаються, `startedAt` скидається, повний набір ставиться в чергу знову (`stats.restarted++`).
 - **Тротлінг на боці виклику:** модулі ставлять у чергу лише коли `#comm.queue <= 8` (перевіряй це у своєму коді, якщо додаєш новий масовий відправник).
@@ -58,7 +58,7 @@
 
 ### Типи повідомлень: закритий whitelist
 
-`VALID_TYPES` — **закритий перелік**; `RegisterHandler` відхиляє невідомий kind, нефункцію і дублікат. **37 типів.**
+`VALID_TYPES` — **закритий перелік**; `RegisterHandler` відхиляє невідомий kind, нефункцію і дублікат. **36 типів.**
 
 Додаєш новий тип — обов'язково:
 1. дописати в `VALID_TYPES`;
@@ -196,9 +196,9 @@
 - Пулінг рядків: 500 членів → ≤ 21 рядок; події ростера коалесцуються; скан професій — чанки по 25.
 - Це ж файл-хост команд `/okr` (див. §11).
 
-### Minimap (`Minimap.lua`, 217 рядків)
+### Minimap (`Minimap.lua`, 300 рядків)
 
-Кнопка аддона на мінікарті; кут зберігається в `DB.settings.minimapAngle`.
+Кнопка аддона на мінікарті: за наявності `LibStub`, `LibDataBroker-1.1` і `LibDBIcon-1.0` (через `OptionalDeps` у `OldKraken.toc`) реєструється як LDB `launcher` у `DB.settings.minimap` (з міграцією `minimapAngle -> minimap.minimapPos` і відкладеним прикріпленням `groupIndicator` після `Show()` через `ensureLibDBIconButton()`). Якщо бібліотек немає або `Register` завершується помилкою, створюється власна кнопка-фолбек (`DB.settings.minimapAngle`).
 
 ### ActivityCatalog (`ActivityCatalog.lua`, 120 рядків)
 
@@ -260,10 +260,10 @@ cd ~/Projects/old-kraken-alpha
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-- **64 файли** `tests/test_*.py`.
+- **66 файлів** `tests/test_*.py`.
 - Рантайм: `lupa==2.8`, `from lupa.lua51 import LuaRuntime` — **Lua 5.1**.
-- **`.venv` не потрібен**: `lupa 2.8` встановлено в user-site `~/.local/lib/python3.14/site-packages/`; `lua`/`lua5.1`/`luac` у системі **немає**. Якщо агент запускає тести в ізольованій пісочниці, `~/.local` може бути недоступним (`ModuleNotFoundError: No module named 'lupa'`) — у такому разі цикл тестів треба запускати поза пісочницею (`BypassSandbox: true`).
-- **Немає pytest/unittest/conftest/Makefile/requirements** — це прості скрипти з Lua-`assert` усередині `lua.execute('''…''')`, успіх = `print('PASS: …')`.
+- **Середовище Python:** рекомендований ізольований варіант — `.venv` з `lupa==2.8` (див. `TESTING.md`). Як альтернатива на поточній робочій машині `lupa 2.8` також встановлено в user-site `~/.local/lib/python3.14/site-packages/`; `lua`/`lua5.1`/`luac` у системі **немає**. Якщо агент запускає тести в ізольованій пісочниці без `.venv`, `~/.local` може бути недоступним (`ModuleNotFoundError: No module named 'lupa'`) — у такому разі цикл тестів треба запускати поза пісочницею (`BypassSandbox: true`).
+- **Переважно автономні скрипти:** більшість тестів — прості скрипти з Lua-`assert` усередині `lua.execute('''…''')` (успіх = `print('PASS: …')`); окремі файли (наприклад, `tests/test_phase2_specs.py`) використовують стандартний `unittest` без pytest/conftest.
 - Тести **не парсять TOC** — вантажать `*.lua` вручну в потрібному порядку. Тому **нових файлів у TOC недостатньо** — якщо файл має тестуватися, додай його в порядок завантаження у відповідному тесті.
 - Перевірка синтаксису без `luac`: `lua.execute('assert(loadstring(...))', src)` — `tests/test_roster_invite.py` проганяє так **усі** `*.lua`.
 - Двохклієнтна симуляція: `tests/test_two_clients.py` (два `LuaRuntime`, `flush(sender, recipients)`, `reload(client)` зі збереженням `OldKraken.DB`).

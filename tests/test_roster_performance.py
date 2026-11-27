@@ -48,6 +48,55 @@ OldKraken.DB.settings.roster.search='Member 500'
 roster:Render()
 assert(scroll.offset==0 and #visible()==1 and visible()[1].member.name=='Member 500')
 OldKraken.DB.settings.roster.search='no results'; roster:Render(); assert(#visible()==0)
+-- Roster render breakdown records roster.filter, roster.sort, roster.visible and roster.render with item counts
+local perfLog = {}
+local origPerfEnabled = OldKraken.perfEnabled
+local origDebugProfilestop = debugprofilestop
+local origPerfRecord = OldKraken.PerfRecord
+OldKraken.perfEnabled = true
+debugprofilestop = function() return 0 end
+OldKraken.PerfRecord = function(_, label, _, count) perfLog[label] = {calls = (perfLog[label] and perfLog[label].calls or 0) + 1, items = (perfLog[label] and perfLog[label].items or 0) + (count or 0)} end
+OldKraken.DB.settings.roster.search = ''
+roster:Render()
+local fullVisibleCount = #visible()
+OldKraken.DB.settings.roster.search = 'Member 500'
+roster:Render()
+assert(perfLog['roster.filter'].calls == 2 and perfLog['roster.filter'].items == 1000)
+assert(perfLog['roster.sort'].calls == 2 and perfLog['roster.sort'].items == 501)
+assert(perfLog['roster.visible'].calls == 2 and perfLog['roster.visible'].items == fullVisibleCount + 1)
+assert(perfLog['roster.render'].calls == 2)
+-- Sub-row scroll via OnVerticalScroll skips redundant row updates; crossing row boundary or resizing redraws
+local prevGFirst, prevGCount, prevGTotal = _G.lastVisibleFirst, _G.lastVisibleCount, _G.lastVisibleTotal
+_G.lastVisibleFirst, _G.lastVisibleCount, _G.lastVisibleTotal = 'sentinel', 'sentinel', 'sentinel'
+OldKraken.DB.settings.roster.search = ''
+roster:Render()
+local visCallsBefore = perfLog['roster.visible'].calls
+local visItemsBefore = perfLog['roster.visible'].items
+scroll.offset = 5
+scroll.scripts.OnVerticalScroll(scroll, 5)
+scroll.offset = 10
+scroll.scripts.OnVerticalScroll(scroll, 10)
+assert(perfLog['roster.visible'].calls == visCallsBefore + 2 and perfLog['roster.visible'].items == visItemsBefore, 'sub-row scroll must skip row repopulation')
+scroll:SetVerticalScroll(40)
+assert(perfLog['roster.visible'].calls == visCallsBefore + 3 and perfLog['roster.visible'].items > visItemsBefore, 'crossing row boundary must redraw rows')
+local itemsAfterScroll = perfLog['roster.visible'].items
+scroll.scripts.OnSizeChanged(scroll, 860, 440)
+assert(perfLog['roster.visible'].items > itemsAfterScroll, 'OnSizeChanged must force redraw')
+-- Opening and closing profile invalidates visible cache without touching globals
+local firstRow = visible()[1]
+firstRow.cellHovers[1].scripts.OnClick(firstRow.cellHovers[1], 'LeftButton')
+assert(OldKrakenRosterFrame.profilePanel:IsShown())
+roster:Render()
+local itemsWithProfile = perfLog['roster.visible'].items
+OldKrakenRosterFrame.profilePanel.backButton.scripts.OnClick(OldKrakenRosterFrame.profilePanel.backButton)
+assert(not OldKrakenRosterFrame.profilePanel:IsShown())
+assert(perfLog['roster.visible'].items > itemsWithProfile, 'closing profile must redraw visible rows')
+scroll:SetVerticalScroll(0)
+assert(_G.lastVisibleFirst == 'sentinel' and _G.lastVisibleCount == 'sentinel' and _G.lastVisibleTotal == 'sentinel', 'visible cache must stay local')
+_G.lastVisibleFirst, _G.lastVisibleCount, _G.lastVisibleTotal = prevGFirst, prevGCount, prevGTotal
+OldKraken.perfEnabled = origPerfEnabled
+debugprofilestop = origDebugProfilestop
+OldKraken.PerfRecord = origPerfRecord
 -- Bursty roster/presence notifications cause one reload, not 500 reloads.
 local loads,renders=0,0
 local oldLoad,oldRender=roster.Load,roster.Render
@@ -95,10 +144,49 @@ end
 assert(scanned==500)
 OldKraken.Workshop:RefreshNativeProfessions(); assert(scanned==500 and #timers==0)
 assert(OldKraken.Workshop:GetMemberProfessions('Member 500')[1].id==171)
--- Verify crafting -> gathering -> secondary sorting in GetMemberProfessions
+-- Verify legacy gathering/secondary IDs are filtered out while preserving crafting professions in WKPROF
 handlers.WKPROF('Mixed Guy','GUILD',OldKraken.GroupFinder._pack({1700000000,4,185,300,300,182,225,300,333,250,300,171,300,300}))
 local sortedProfs = OldKraken.Workshop:GetMemberProfessions('Mixed Guy')
-assert(#sortedProfs == 4 and sortedProfs[1].id == 171 and sortedProfs[2].id == 333 and sortedProfs[3].id == 182 and sortedProfs[4].id == 185)
+assert(#sortedProfs == 2 and sortedProfs[1].id == 171 and sortedProfs[2].id == 333)
+-- Verify all 6 legacy IDs individually and mixed with crafting
+for _, legacyID in ipairs({186, 182, 393, 185, 129, 356}) do
+    local who = 'Legacy ' .. legacyID
+    handlers.WKPROF(who,'GUILD',OldKraken.GroupFinder._pack({1700000001,2,legacyID,300,300,164,250,300}))
+    local p = OldKraken.Workshop:GetMemberProfessions(who)
+    assert(#p == 1 and p[1].id == 164)
+end
+-- Legacy-only WKPROF must not hide native crafting professions
+handlers.WKPROF('Member 500','GUILD',OldKraken.GroupFinder._pack({1700000002,2,185,300,300,186,300,300}))
+local nativeFallback = OldKraken.Workshop:GetMemberProfessions('Member 500')
+assert(#nativeFallback == 1 and nativeFallback[1].id == 171 and nativeFallback[1].native == true)
+assert(OldKraken.DB.workshop.guilds['Realm\\001Guild'].records['Member 500'].legacyFiltered == true)
+local masters171 = OldKraken.Workshop:GetProfessionMasters(171)
+local found500 = false
+for _, m in ipairs(masters171) do if m.name == 'Member 500' and m.native then found500 = true end end
+assert(found500)
+-- Authentic empty WKPROF (n=0) still overrides native professions
+handlers.WKPROF('Member 499','GUILD',OldKraken.GroupFinder._pack({1700000003,0}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Member 499') == 0)
+-- Invalid WKPROF payloads (unknown ID, duplicate ID, invalid rank/maximum) are rejected completely
+handlers.WKPROF('Bad Unknown','GUILD',OldKraken.GroupFinder._pack({1700000004,2,999999,300,300,171,300,300}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Unknown') == 0)
+handlers.WKPROF('Bad Dup','GUILD',OldKraken.GroupFinder._pack({1700000004,2,171,300,300,171,300,300}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Dup') == 0)
+handlers.WKPROF('Bad Rank','GUILD',OldKraken.GroupFinder._pack({1700000004,1,171,0,300}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Rank') == 0)
+handlers.WKPROF('Bad Max','GUILD',OldKraken.GroupFinder._pack({1700000004,1,171,300,10000}))
+assert(#OldKraken.Workshop:GetMemberProfessions('Bad Max') == 0)
+-- Pre-existing SavedVariables records with legacy IDs still yield crafting professions safely
+local wsRecords = OldKraken.DB.workshop.guilds['Realm\\001Guild'].records
+wsRecords['Saved Mixed'] = {timestamp=1700000005, list={{id=185,rank=300,maximum=300},{id=186,rank=300,maximum=300},{id=202,rank=290,maximum=300}}}
+local savedMixed = OldKraken.Workshop:GetMemberProfessions('Saved Mixed')
+assert(#savedMixed == 1 and savedMixed[1].id == 202 and savedMixed[1].rank == 290)
+wsRecords['Member 498'] = {timestamp=1700000006, list={{id=185,rank=300,maximum=300},{id=186,rank=300,maximum=300}}}
+local savedLegacyOnly = OldKraken.Workshop:GetMemberProfessions('Member 498')
+assert(#savedLegacyOnly == 1 and savedLegacyOnly[1].id == 171 and savedLegacyOnly[1].native == true)
+local found498 = false
+for _, m in ipairs(OldKraken.Workshop:GetProfessionMasters(171)) do if m.name == 'Member 498' and m.native then found498 = true end end
+assert(found498)
 ''')
 for name in ['StatusOnline','StatusOffline']:
     asset=ROOT/'Media'/f'{name}.tga'

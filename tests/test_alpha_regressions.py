@@ -308,9 +308,11 @@ store['Tester']={[101]={recipe=101,item=5555,profession=333,seen=100,name='Bar',
 store['Miriel']={[101]={recipe=101,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
 store['Tofur']={[202]={recipe=202,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
 store['Veira']={[202]={recipe=202,item=5555,profession=333,seen=100,name='Bar',product='',reagents={}}}
-store['Miner']={[303]={recipe=303,item=5555,profession=186,seen=100,name='Bar',product='',reagents={}}}
+store['Smith']={[303]={recipe=303,item=5555,profession=164,seen=100,name='Bar',product='',reagents={}}}
+store['LegacyGather']={[304]={recipe=304,item=5555,profession=186,seen=100,name='Bar',product='',reagents={}}}
 assert(#recipes:FindMasters(5555,101,333)==4)
-assert(#recipes:FindMasters(5555,303,186)==1)
+assert(#recipes:FindMasters(5555,303,164)==1)
+assert(#recipes:FindMasters(5555,304,186)==0)
 assert(#recipes:FindMasters(5555,101)==5)
 """)
 

@@ -30,6 +30,8 @@ Communication.stats.deduplicated, Communication.stats.backpressure, Communicatio
 local PRIORITY = {JOIN=0,RESPONSE=0,CANCEL=0,CEVRSVP=0,CVCANCEL=0,
     WOREQ=0,WOACT=0,WOPAY=0,WOPAYR=0,WORESULT=0,WORESR=0,
     ANNOUNCE=1,UPDATE=1,BUMP=1,WORDER=1,CVNEW=1,CVSTATE=1,CEVENT=1}
+local WHISPER_MIN_VERSION = "0.5.8-alpha.2"
+local UNICAST_KINDS = { WRGET = true, WRPAGE = true }
 local PART_BYTES = 80
 local MAX_PARTS = 32
 local MAX_ASSEMBLIES = 1024
@@ -66,7 +68,7 @@ end
 
 local function Prune(now)
     if now<nextPrune then return end
-    nextPrune=now+1
+    nextPrune=now+5
     if assemblyCount == 0 and completedCount == 0 then return end
     for k, v in pairs(assemblies) do
         if now - v.time > CACHE_TTL then
@@ -123,7 +125,7 @@ local function messageTrafficKind(message)
     return 'OTHER'
 end
 
-local function recordTraffic(self, kind, field, delta)
+local function trafficBucket(self, kind)
     if not self.traffic then self.traffic = newTrafficState() end
     local byKind = self.traffic.byKind
     local b = byKind[kind]
@@ -136,6 +138,11 @@ local function recordTraffic(self, kind, field, delta)
         }
         byKind[kind] = b
     end
+    return b
+end
+
+local function recordTraffic(self, kind, field, delta)
+    local b = trafficBucket(self, kind)
     b[field] = b[field] + (delta or 1)
 end
 
@@ -179,7 +186,25 @@ local function releaseReplayReservation(self,job)
     job.replayReserved=0
 end
 
-function Communication:SendProtocol(kind, payload)
+local function resolveChannel(self, kind, target)
+    if not UNICAST_KINDS[kind] or type(target) ~= 'string' or target == '' or #target > 128 or target:find('[%z\1-\31\127]') then
+        return 'GUILD', nil
+    end
+    local a, b
+    if type(UnitName) == 'function' then
+        a, b = UnitName('player')
+    end
+    local me = (type(a) == 'string' and a ~= '') and ((type(b) == 'string' and b ~= '') and (a .. ' ' .. b) or a) or nil
+    if me and target == me then return 'GUILD', nil end
+    local ver = self.GetRosterVersion and self:GetRosterVersion(target)
+    local cmp = type(ver) == 'string' and ver ~= '' and self.CompareVersions and self:CompareVersions(ver, WHISPER_MIN_VERSION)
+    if cmp and cmp >= 0 then
+        return 'WHISPER', target
+    end
+    return 'GUILD', nil
+end
+
+function Communication:SendProtocol(kind, payload, target)
     if not VALID_TYPES[kind] or type(payload) ~= "string" or #payload > PART_BYTES * MAX_PARTS then
         return false, "invalid payload or type"
     end
@@ -189,7 +214,8 @@ function Communication:SendProtocol(kind, payload)
     local guild=GetGuildInfo and GetGuildInfo('player')
     if type(guild)~='string' or guild=='' then return false,'transport unavailable' end
     if #self.queue==0 then self.pendingTransmissions={} end
-    local pendingKey=guild..'\001'..kind..'\001'..payload
+    local channel, dest = resolveChannel(self, kind, target)
+    local pendingKey=guild..'\001'..kind..'\001'..channel..'\001'..(dest or '')..'\001'..payload
     local pending=self.pendingTransmissions[pendingKey]
     if pending then self.stats.deduplicated=self.stats.deduplicated+1; recordTraffic(self, kind, 'txDedup', 1); return true,pending.id end
     local priority=PRIORITY[kind] or 2
@@ -206,10 +232,10 @@ function Communication:SendProtocol(kind, payload)
         messages[part] = message
     end
     local job={key=pendingKey,id=id,kind=kind,messages=messages,remaining=count,priority=priority,
-        recordKey=groupRecordKey(kind,payload),snapshot=GROUP_SNAPSHOTS[kind]}
+        recordKey=groupRecordKey(kind,payload),snapshot=GROUP_SNAPSHOTS[kind],channel=channel,target=dest}
     local originalCount = #self.queue
     for part, message in ipairs(messages) do
-        if not self:QueueMessage(message,job,part) then
+        if not self:QueueMessage(message,job,part,channel,dest) then
             while #self.queue > originalCount do table.remove(self.queue) end
             recordTraffic(self, kind, 'txDrops', 1)
             return false, "transport unavailable"
@@ -319,7 +345,7 @@ function Communication:PrintStatus()
         T("; відкинуто: ") .. self.stats.dropped .. T("; некоректних: ") .. self.stats.invalid)
 end
 
-function Communication:QueueMessage(message,job,part)
+function Communication:QueueMessage(message,job,part,channel,target)
     if type(message) ~= "string" or message == "" then
         return false
     end
@@ -342,7 +368,9 @@ function Communication:QueueMessage(message,job,part)
             return false
         end
     end
-    self.queue[#self.queue + 1] = { message = message, attempts = 0, guild = guild,job=job,part=part,priority=job and job.priority or 1 }
+    local sendChannel = (job and job.channel) or channel or 'GUILD'
+    local sendTarget = (job and job.target) or target
+    self.queue[#self.queue + 1] = { message = message, attempts = 0, guild = guild,job=job,part=part,priority=job and job.priority or 1,channel=sendChannel,target=sendTarget }
     if not job then recordTraffic(self, messageTrafficKind(message), 'txLogical', 1) end
     return true
 end
@@ -450,9 +478,12 @@ local function runPump(self)
         end
         releaseReplayReservation(self,job)
         job.remaining=#job.messages; job.startedAt=nil
+        local replayChannel = job.channel or entry.channel or 'GUILD'
+        local replayTarget = job.target or entry.target
         for part,message in ipairs(job.messages) do
             local state=errors[part]
             self.queue[#self.queue+1]={message=message,attempts=0,guild=entry.guild,job=job,part=part,priority=job.priority,
+                channel=replayChannel,target=replayTarget,
                 errorAttempts=state and state[1],errorBackoff=state and state[2],nextTryAt=state and state[3]}
         end
         self.stats.restarted=self.stats.restarted+1
@@ -461,15 +492,40 @@ local function runPump(self)
     end
     local chatInfo=C_ChatInfo
     if not chatInfo or type(chatInfo.SendAddonMessage)~='function' then deferEntry(self,entry,'API unavailable'); return end
-    local ok,result=pcall(chatInfo.SendAddonMessage,self.PREFIX,entry.message,'GUILD')
+    local sendChannel = entry.channel or (job and job.channel) or 'GUILD'
+    local sendTarget = entry.target or (job and job.target)
+    local ok,result
+    if sendChannel == 'WHISPER' and type(sendTarget) == 'string' and sendTarget ~= '' then
+        ok,result=pcall(chatInfo.SendAddonMessage,self.PREFIX,entry.message,'WHISPER',sendTarget)
+    else
+        sendChannel = 'GUILD'
+        ok,result=pcall(chatInfo.SendAddonMessage,self.PREFIX,entry.message,'GUILD')
+    end
     if not ok then entryError(self,index,entry,tostring(result),now); return end
     local results=Enum and Enum.SendAddonMessageResult
     local success=result==nil or (results and results.Success~=nil and result==results.Success) or (not results and result==0)
     if not success then
-        local throttle=results and ((results.AddonMessageThrottle~=nil and result==results.AddonMessageThrottle)
+        local throttle=(results and ((results.AddonMessageThrottle~=nil and result==results.AddonMessageThrottle)
             or (results.ChannelThrottle~=nil and result==results.ChannelThrottle)
-            or (results.AddOnMessageLockdown~=nil and result==results.AddOnMessageLockdown))
-        if throttle then deferEntry(self,entry,tostring(result)) else entryError(self,index,entry,tostring(result),now) end
+            or (results.AddOnMessageLockdown~=nil and result==results.AddOnMessageLockdown)))
+            or result==3 or result==8 or result==11
+        if throttle then
+            deferEntry(self,entry,tostring(result))
+        else
+            local targetError = sendChannel=='WHISPER' and ((results and ((results.TargetOffline~=nil and result==results.TargetOffline)
+                or (results.TargetRequired~=nil and result==results.TargetRequired)
+                or (results.InvalidChatType~=nil and result==results.InvalidChatType)
+                or (results.InvalidChannel~=nil and result==results.InvalidChannel)))
+                or result==12 or result==6 or result==4 or result==7)
+            if targetError then
+                local dropKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
+                local dropID = entry.job and entry.job.id
+                dropEntryOrJob(self,index,entry,tostring(result),false)
+                if OldKraken and type(OldKraken.Fire) == 'function' then
+                    OldKraken:Fire('COMM_WHISPER_DROPPED', dropKind, sendTarget, tostring(result), dropID)
+                end
+            else entryError(self,index,entry,tostring(result),now) end
+        end
         return
     end
     local sentKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
@@ -540,6 +596,22 @@ function Communication:CompareVersions(left, right)
     return 0
 end
 Communication.UPDATE_URL = 'https://www.curseforge.com/wow/addons/old-kraken'
+Communication.COMPATIBILITY_GATE_ENABLED = false
+Communication.MIN_SUPPORTED_VERSION = nil
+
+function Communication:GetCompatibilityGateState()
+    local localVersion = self:GetLocalVersion()
+    local minVersion = self.MIN_SUPPORTED_VERSION
+    if self.COMPATIBILITY_GATE_ENABLED ~= true or type(minVersion) ~= 'string' or minVersion == '' then
+        return {blocked = false, localVersion = localVersion, minVersion = minVersion}
+    end
+    local cmp = self:CompareVersions(localVersion, minVersion)
+    return {
+        blocked = cmp == -1,
+        localVersion = localVersion,
+        minVersion = minVersion,
+    }
+end
 function Communication:IsStableVersion(version)
     local parts = VersionParts(version)
     return parts ~= nil and parts[4] == 3
@@ -585,6 +657,69 @@ function Communication:HasRosterAddon(name)
     EnsurePresenceGuild(self)
     local key = PresenceKey(name)
     return IsSelfPresenceKey(key) or self.rosterPresence[key] == true
+end
+function Communication:PruneRosterPresence(members)
+    EnsurePresenceGuild(self)
+    if self.presenceGuild == '' or type(members) ~= 'table' or #members == 0 then return false end
+    local activeKeys = {}
+    for i = 1, #members do
+        local entry = members[i]
+        local key = PresenceKey(type(entry) == 'table' and entry.name or entry)
+        if key ~= '' then activeKeys[key] = true end
+    end
+    if not next(activeKeys) then return false end
+    local removed = false
+    for key in pairs(self.rosterPresence) do
+        if not activeKeys[key] and not IsSelfPresenceKey(key) then
+            self.rosterPresence[key] = nil
+            self.rosterVersions[key] = nil
+            self.rosterSpecs[key] = nil
+            removed = true
+        end
+    end
+    if removed then
+        for sender in pairs(seenSenders) do
+            local key = PresenceKey(sender)
+            if key ~= '' and not activeKeys[key] and not IsSelfPresenceKey(key) then
+                seenSenders[sender] = nil
+            end
+        end
+        if OldKraken.Fire then OldKraken:Fire('ROSTER_ADDON_CHANGED') end
+    end
+    return removed
+end
+
+local rosterPrunePending = false
+local ROSTER_PRUNE_DEBOUNCE_SECONDS = 0.5
+
+function Communication:RefreshRosterPresence()
+    EnsurePresenceGuild(self)
+    if self.presenceGuild == '' or not next(self.rosterPresence) then return false end
+    if type(GetNumGuildMembers) ~= 'function' or type(GetGuildRosterInfo) ~= 'function' then return false end
+    local total = GetNumGuildMembers()
+    total = tonumber(total) or 0
+    if total <= 0 then return false end
+    local members = {}
+    for i = 1, total do
+        local name = GetGuildRosterInfo(i)
+        if Secret(name) or type(name) ~= 'string' or name == '' then return false end
+        members[#members + 1] = name
+    end
+    return self:PruneRosterPresence(members)
+end
+
+function Communication:ScheduleRosterPresencePrune()
+    if not next(self.rosterPresence) then return false end
+    if C_Timer and type(C_Timer.After) == 'function' then
+        if rosterPrunePending then return false end
+        rosterPrunePending = true
+        C_Timer.After(ROSTER_PRUNE_DEBOUNCE_SECONDS, function()
+            rosterPrunePending = false
+            Communication:RefreshRosterPresence()
+        end)
+        return true
+    end
+    return self:RefreshRosterPresence()
 end
 function Communication:GetRosterVersion(name)
     self:HasRosterAddon(name)
@@ -941,17 +1076,25 @@ local function recordCompleted(key, now, kind, filtered)
 end
 
 local function receiveAddonMessage(self, message, sender)
-    local rxKind = messageTrafficKind(message)
-    local rxBytes = #message
     if type(sender) ~= "string" or sender == "" or #sender > 128 then
         return
     end
+    local rxBytes = #message
+    local isGF2 = message:sub(1, 4) == "GF2^"
+    local kind, id, part, count, encoded, rxKind
+    if isGF2 then
+        kind, id, part, count, encoded = message:match("^GF2%^([A-Z]+)%^(%d+%-%d+%-%d+)%^(%d+)%^(%d+)%^([0-9A-F]*)$")
+        rxKind = (kind and VALID_TYPES[kind]) and kind or 'INVALID'
+    else
+        rxKind = messageTrafficKind(message)
+    end
 
-    recordTraffic(self, rxKind, 'rxFrags', 1)
-    recordTraffic(self, rxKind, 'rxBytes', rxBytes)
+    local tb = trafficBucket(self, rxKind)
+    tb.rxFrags = tb.rxFrags + 1
+    tb.rxBytes = tb.rxBytes + rxBytes
 
-    if #message > 240 then
-        recordTraffic(self, rxKind, 'rxDropped', 1)
+    if rxBytes > 240 then
+        tb.rxDropped = tb.rxDropped + 1
         if message:sub(1, 10) == 'OKP^SPEC2^' then return end
         self.stats.invalid = self.stats.invalid + 1
         return
@@ -962,7 +1105,7 @@ local function receiveAddonMessage(self, message, sender)
         self:RecordRosterPresence(sender)
         if self.presenceGuild ~= '' then seenSenders[sender] = true end
     end
-    if message == 'OKP^QUERY' then
+    if not isGF2 and message == 'OKP^QUERY' then
         recordTraffic(self, rxKind, 'rxLogical', 1)
         self:SendLocalSpec(true)
         local now = GetTime()
@@ -1021,8 +1164,7 @@ local function receiveAddonMessage(self, message, sender)
         return
     end
 
-    if message:sub(1, 4) == "GF2^" then
-        local kind, id, part, count, encoded = message:match("^GF2%^([A-Z]+)%^(%d+%-%d+%-%d+)%^(%d+)%^(%d+)%^([0-9A-F]*)$")
+    if isGF2 then
         part, count = tonumber(part), tonumber(count)
         local encLen = encoded and #encoded or -1
         if not kind or not VALID_TYPES[kind] or #id > 32 or not part or not count
@@ -1134,8 +1276,15 @@ local function receiveAddonMessage(self, message, sender)
 end
 
 function Communication:OnAddonMessage(prefix, message, channel, sender)
-    if not IsOurMessagePrefix(prefix) or channel ~= "GUILD" or type(message) ~= "string" then
+    if not IsOurMessagePrefix(prefix) or type(message) ~= "string" then
         return
+    end
+    if channel ~= "GUILD" then
+        if channel ~= "WHISPER" or message:sub(1, 4) ~= "GF2^" then return end
+        local kind = message:match("^GF2%^([A-Z]+)%^")
+        if not UNICAST_KINDS[kind] then return end
+        if type(sender) ~= "string" or sender == "" or #sender > 128 then return end
+        if not self:HasRosterAddon(sender) or self.presenceGuild == '' then return end
     end
     local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     receiveAddonMessage(self, message, sender)
@@ -1224,6 +1373,7 @@ pcall(frame.RegisterEvent, frame, 'ACTIVE_TALENT_GROUP_CHANGED')
 pcall(frame.RegisterEvent, frame, 'PLAYER_SPECIALIZATION_CHANGED')
 pcall(frame.RegisterEvent, frame, 'PLAYER_ENTERING_WORLD')
 pcall(frame.RegisterEvent, frame, 'PLAYER_REGEN_ENABLED')
+pcall(frame.RegisterEvent, frame, 'GUILD_ROSTER_UPDATE')
 
 local hookedTalentFrames = {}
 local function InstallTalentHooks()
@@ -1280,6 +1430,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
         Communication:CheckVersionNotification()
     elseif event == 'PLAYER_REGEN_ENABLED' then
         Communication:CheckVersionNotification()
+    elseif event == 'GUILD_ROSTER_UPDATE' then
+        Communication:ScheduleRosterPresencePrune()
     elseif event == "CHAT_MSG_ADDON" then
         Communication:OnAddonMessage(...)
     end

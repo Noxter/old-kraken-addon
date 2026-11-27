@@ -36,7 +36,7 @@ def setup_env(lang='ukUA', workshop_loaded=True, in_guild=True):
         profs = {
             ['Alice Tester'] = {
                 { id = 171, rank = 275, maximum = 300, relayed = false },
-                { id = 182, native = true },
+                { id = 164, native = true },
             },
             ['Bob Tester'] = {},
         }
@@ -146,8 +146,7 @@ def setup_env(lang='ukUA', workshop_loaded=True, in_guild=True):
             OldKraken.Workshop = {
                 IsActive = function() return _ws_active end,
                 GetMemberProfessions = function(_, n) return _ws_active and (profs[n] or {}) or {} end,
-                ProfessionInfo = function(_, id) return id == 171 and 'Алхімія' or 'Травництво', 136240 end,
-                IsGatheringProfession = function(_, id) return id == 182 end,
+                ProfessionInfo = function(_, id) return id == 171 and 'Алхімія' or 'Ковальство', 136240 end,
                 RefreshNativeProfessions = function() end,
             }
             OldKraken.WorkshopRecipes = {
@@ -181,12 +180,30 @@ lua.execute('''
     -- Set non-zero scroll offset before opening profile
     rf.scrollFrame:SetVerticalScroll(80)
 
-    -- Find Alice row (rendered in contentFrame children)
-    local aliceRow
+    -- Find Alice row and an empty-profession Member row (rendered in contentFrame children)
+    local aliceRow, emptyProfRow
     for _, f in ipairs(frames) do
-        if f.professions and f.member and f.member.name == 'Alice Tester' then aliceRow = f; break end
+        if f.professions and f.member then
+            if f.member.name == 'Alice Tester' then aliceRow = f
+            elseif f.member.name == 'Member 1' then emptyProfRow = f end
+        end
     end
-    assert(aliceRow ~= nil)
+    assert(aliceRow ~= nil and #aliceRow.professions == 2)
+    assert(emptyProfRow ~= nil and emptyProfRow.cells[6]:IsShown() and emptyProfRow.cells[6].text == '—')
+    -- Hovering profession icons renders tooltip without nil-function errors
+    local tooltipLines, tooltipShown = {}, false
+    GameTooltip = {
+        SetOwner = function() tooltipLines = {}; tooltipShown = false end,
+        SetText = function(_, txt) tooltipLines[#tooltipLines + 1] = txt end,
+        AddLine = function(_, txt) tooltipLines[#tooltipLines + 1] = txt end,
+        Show = function() tooltipShown = true end,
+        Hide = function() tooltipShown = false end,
+    }
+    aliceRow.professions[1].scripts.OnEnter(aliceRow.professions[1])
+    assert(tooltipShown and #tooltipLines >= 2)
+    aliceRow.professions[2].scripts.OnEnter(aliceRow.professions[2])
+    assert(tooltipShown and #tooltipLines >= 2)
+    GameTooltip = nil
     -- Left-click on cellHover[1] opens profile
     aliceRow.cellHovers[1].scripts.OnClick(aliceRow.cellHovers[1], 'LeftButton')
     assert(rf.profilePanel:IsShown() and rf.profilePanel.member.name == 'Alice Tester')

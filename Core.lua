@@ -2,7 +2,7 @@ local ADDON_NAME = ...
 
 OldKraken = OldKraken or {}
 OldKraken.name = ADDON_NAME
-OldKraken.version = "0.5.7"
+OldKraken.version = "0.5.8-alpha.2"
 local metadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
 if type(metadata)=='function' and type(ADDON_NAME)=='string' then
     local ok,version=pcall(metadata,ADDON_NAME,'Version')
@@ -1258,7 +1258,7 @@ end
 OldKraken.perfEnabled = false
 OldKraken.perfStats = {}
 
-function OldKraken:PerfRecord(label, elapsedMs)
+function OldKraken:PerfRecord(label, elapsedMs, itemCount)
     if type(label) ~= 'string' or type(elapsedMs) ~= 'number' or elapsedMs ~= elapsedMs or elapsedMs < 0 then
         return
     end
@@ -1273,6 +1273,9 @@ function OldKraken:PerfRecord(label, elapsedMs)
     if elapsedMs >= 5 then s.over5 = s.over5 + 1 end
     if elapsedMs >= 10 then s.over10 = s.over10 + 1 end
     if elapsedMs >= 50 then s.over50 = s.over50 + 1 end
+    if type(itemCount) == 'number' and itemCount == itemCount and itemCount >= 0 then
+        s.items = (s.items or 0) + itemCount
+    end
 end
 
 local function addonProfilerMetric(metricName)
@@ -1328,9 +1331,10 @@ function OldKraken:PerfReport()
     end)
     for _, item in ipairs(list) do
         local s = item.stat
+        local itemPart = s.items and string.format(", items=%d (avg=%.1f)", s.items, s.items / s.calls) or ""
         self:Print(string.format(
-            "  %s: calls=%d, total=%.2fms, avg=%.2fms, max=%.2fms (>5:%d >10:%d >50:%d)",
-            item.label, s.calls, s.total, s.total / s.calls, s.max, s.over5, s.over10, s.over50
+            "  %s: calls=%d, total=%.2fms, avg=%.2fms, max=%.2fms (>5:%d >10:%d >50:%d)%s",
+            item.label, s.calls, s.total, s.total / s.calls, s.max, s.over5, s.over10, s.over50, itemPart
         ))
     end
 end

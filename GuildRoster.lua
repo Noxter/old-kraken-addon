@@ -279,43 +279,45 @@ local function SortMembers(a, b)
         return a.isOnline
     end
 
-    local key = settings.sort
+    local key, asc = settings.sort, settings.ascending
     local left, right
 
     if key == "name" then
-        left = string.lower(a.name or "")
-        right = string.lower(b.name or "")
+        left = a.nameLower or string.lower(a.name or "")
+        right = b.nameLower or string.lower(b.name or "")
     elseif key == "class" then
         left = a.class or a.classFile or ""
         right = b.class or b.classFile or ""
     elseif key == "rank" then
-        left = tonumber(a.rankIndex) or 0
-        right = tonumber(b.rankIndex) or 0
+        left = a.rankIndex or 0
+        right = b.rankIndex or 0
     elseif key == "zone" then
         if not a.isOnline then
             local aa, bb = a.lastOnline, b.lastOnline
             if (aa ~= nil) ~= (bb ~= nil) then return aa ~= nil end
             if aa and bb then
-                for _, unit in ipairs({'years', 'months', 'days', 'hours'}) do
-                    if aa[unit] ~= bb[unit] then
-                        if settings.ascending then return aa[unit] < bb[unit] end
-                        return aa[unit] > bb[unit]
-                    end
+                local av, bv = aa.years, bb.years
+                if av == bv then av, bv = aa.months, bb.months end
+                if av == bv then av, bv = aa.days, bb.days end
+                if av == bv then av, bv = aa.hours, bb.hours end
+                if av ~= bv then
+                    if asc then return av < bv end
+                    return av > bv
                 end
             end
         end
-        left = string.lower(a.zone or "")
-        right = string.lower(b.zone or "")
+        left = a.zoneLower or string.lower(a.zone or "")
+        right = b.zoneLower or string.lower(b.zone or "")
     else
-        left = tonumber(a.level) or 0
-        right = tonumber(b.level) or 0
+        left = a.level or 0
+        right = b.level or 0
     end
 
     if left == right then
-        return string.lower(a.name or "") < string.lower(b.name or "")
+        return (a.nameLower or string.lower(a.name or "")) < (b.nameLower or string.lower(b.name or ""))
     end
 
-    if settings.ascending then
+    if asc then
         return left < right
     end
     return left > right
@@ -572,8 +574,8 @@ local function CreateRosterWindow(parent)
     CreateColumnHeader(frame, T("РАНГ"), "rank", 240, 70)
     CreateColumnHeader(frame, T("РІВ."), "level", 320, 44)
     CreateColumnHeader(frame, T("КЛАС"), "class", 374, 80)
-    CreateColumnHeader(frame, T("ЛОКАЦІЯ"), "zone", 464, 160)
-    CreateColumnHeader(frame, T("ПРОФЕСІЇ"), nil, 634, 110)
+    CreateColumnHeader(frame, T("ЛОКАЦІЯ"), "zone", 464, 200)
+    CreateColumnHeader(frame, T("ПРОФЕСІЇ"), nil, 674, 70)
     frame.addonHeader = CreateColumnHeader(frame, T("АДДОН"), nil, 754, 130)
 
     local headerDivider = frame:CreateTexture(nil, "ARTWORK")
@@ -634,7 +636,7 @@ local function CreateRosterWindow(parent)
     local previousScroll = scroll:GetScript('OnVerticalScroll')
     scroll:SetScript('OnVerticalScroll', function(self, offset)
         if previousScroll then previousScroll(self, offset) end
-        if not drawing then Roster:RenderVisible() end
+        if not drawing then Roster:RenderVisible(true) end
     end)
     local previousResize = scroll:GetScript('OnSizeChanged')
     scroll:SetScript('OnSizeChanged', function(self, width, height)
@@ -663,9 +665,9 @@ local function CreateRosterWindow(parent)
 
         if OldKraken.UIStyle.Panel then
             OldKraken.UIStyle.Panel(panel, 14, -50, 872, 108)
-            OldKraken.UIStyle.Panel(panel, 14, -172, 426, 194)
-            OldKraken.UIStyle.Panel(panel, 460, -172, 426, 194)
-            OldKraken.UIStyle.Panel(panel, 14, -380, 872, 74)
+            OldKraken.UIStyle.Panel(panel, 14, -172, 426, 138)
+            OldKraken.UIStyle.Panel(panel, 460, -172, 426, 138)
+            OldKraken.UIStyle.Panel(panel, 14, -324, 872, 74)
         end
 
         local nameText = panel:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
@@ -733,26 +735,31 @@ local function CreateRosterWindow(parent)
         panel.profEmpty = profEmpty
 
         panel.profRows = {}
-        for i = 1, 5 do
+        local rowHoverCol = colors.actionBlue or {0.24, 0.38, 0.75, 0.24}
+        for i = 1, 2 do
             local prow = CreateFrame('Button', nil, panel)
-            prow:SetSize(390, 26)
-            prow:SetPoint('TOPLEFT', panel, 'TOPLEFT', 478, -216 - (i - 1) * 28)
+            prow:SetSize(390, 32)
+            prow:SetPoint('TOPLEFT', panel, 'TOPLEFT', 478, -218 - (i - 1) * 38)
+            local phighlight = prow:CreateTexture(nil, 'HIGHLIGHT')
+            phighlight:SetAllPoints(prow)
+            phighlight:SetColorTexture(rowHoverCol[1], rowHoverCol[2], rowHoverCol[3], 0.16)
+            prow:SetHighlightTexture(phighlight)
             prow.icon = prow:CreateTexture(nil, 'ARTWORK')
-            prow.icon:SetSize(20, 20)
-            prow.icon:SetPoint('LEFT', prow, 'LEFT', 0, 0)
+            prow.icon:SetSize(24, 24)
+            prow.icon:SetPoint('LEFT', prow, 'LEFT', 2, 0)
             prow.text = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-            prow.text:SetPoint('LEFT', prow.icon, 'RIGHT', 8, 0)
-            prow.text:SetWidth(195)
+            prow.text:SetPoint('LEFT', prow.icon, 'RIGHT', 10, 0)
+            prow.text:SetWidth(190)
             prow.text:SetJustifyH('LEFT')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.text, 13) end
             prow.value = prow:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-            prow.value:SetPoint('RIGHT', prow, 'RIGHT', -2, 0)
-            prow.value:SetWidth(165)
+            prow.value:SetPoint('RIGHT', prow, 'RIGHT', -4, 0)
+            prow.value:SetWidth(160)
             prow.value:SetJustifyH('RIGHT')
             if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(prow.value, 13) end
             if colors.mutedText then prow.value:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
             prow:SetScript('OnClick', function(self)
-                if self.memberName and self.professionID and not self.isGathering and OldKraken.WorkshopRecipes then
+                if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
                     local targetMember = panel.member
                     OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName, self.professionID, function()
                         Roster:Show()
@@ -768,7 +775,7 @@ local function CreateRosterWindow(parent)
             local b = CreateFrame('Button', nil, panel, 'UIPanelButtonTemplate')
             OldKraken.UIStyle.Button(b, variant, {rounded = true})
             b:SetSize(width, 34)
-            b:SetPoint('TOPLEFT', panel, 'TOPLEFT', x, -400)
+            b:SetPoint('TOPLEFT', panel, 'TOPLEFT', x, -344)
             b:SetText(label)
             b:SetScript('OnClick', onClick)
             return b
@@ -928,21 +935,13 @@ RenderMemberProfile = function(member)
         panel.profEmpty:Show()
     else
         panel.profEmpty:Hide()
-        local isGathering = function(id)
-            return OldKraken.Workshop and OldKraken.Workshop.IsGatheringProfession and OldKraken.Workshop:IsGatheringProfession(id)
-        end
-        local isSecondary = function(id)
-            return OldKraken.Workshop and OldKraken.Workshop.IsSecondaryProfession and OldKraken.Workshop:IsSecondaryProfession(id)
-        end
-        for i = 1, math.min(5, #professions) do
+        for i = 1, math.min(2, #professions) do
             local p = professions[i]
             local prow = panel.profRows[i]
             local pname, picon = OldKraken.Workshop:ProfessionInfo(p.id)
-            local nonCraft = isGathering(p.id) or isSecondary(p.id)
-            if not nonCraft and not firstCraftID then firstCraftID = p.id end
+            if not firstCraftID then firstCraftID = p.id end
             prow.memberName = member.name
             prow.professionID = p.id
-            prow.isGathering = nonCraft
             prow.icon:SetTexture(picon or 134400)
             local detail = p.native and T('Із ігрового ростера') or (p.rank and (tostring(p.rank) .. '/' .. tostring(p.maximum or '?')) or '')
             prow.text:SetText(pname)
@@ -962,11 +961,11 @@ RenderMemberProfile = function(member)
     if type(panel.orderButton.SetShown) == 'function' then panel.orderButton:SetShown(not selfMember) end
     if type(panel.recipesButton.ClearAllPoints) == 'function' then
         panel.recipesButton:ClearAllPoints()
-        panel.recipesButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 32 or 350, -400)
+        panel.recipesButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 32 or 350, -344)
     end
     if type(panel.copyButton.ClearAllPoints) == 'function' then
         panel.copyButton:ClearAllPoints()
-        panel.copyButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 222 or 730, -400)
+        panel.copyButton:SetPoint('TOPLEFT', panel, 'TOPLEFT', selfMember and 222 or 730, -344)
     end
 end
 
@@ -1034,8 +1033,8 @@ local function CreateRow(index, parent)
         { x = 240, width = 70 },
         { x = 320, width = 44 },
         { x = 374, width = 80 },
-        { x = 464, width = 160 },
-        { x = 634, width = 110 },
+        { x = 464, width = 200 },
+        { x = 674, width = 70 },
         { x = 766, width = 104 },
     }
 
@@ -1083,16 +1082,13 @@ local function CreateRow(index, parent)
         row.cellHovers[cellIndex] = hover
     end
 
-    local function isGathering(id)
-        return OldKraken.Workshop and OldKraken.Workshop.IsGatheringProfession and OldKraken.Workshop:IsGatheringProfession(id)
-    end
     row.professions = {}
-    for i=1,5 do
+    for i=1,2 do
         local icon=CreateFrame('Button',nil,row)
-        icon:SetSize(18,18); icon:SetPoint('LEFT',row,'LEFT',634+(i-1)*22,0)
+        icon:SetSize(20,20); icon:SetPoint('LEFT',row,'LEFT',674+(i-1)*24,0)
         icon.texture=icon:CreateTexture(nil,'ARTWORK'); icon.texture:SetAllPoints(icon)
         icon:SetScript('OnClick',function(self)
-            if self.memberName and self.professionID and not isGathering(self.professionID) and OldKraken.WorkshopRecipes then
+            if self.memberName and self.professionID and OldKraken.WorkshopRecipes then
                 OldKraken.WorkshopRecipes:ShowMemberProfession(self.memberName,self.professionID)
             end
         end)
@@ -1106,9 +1102,7 @@ local function CreateRow(index, parent)
                 if self.relayed then GameTooltip:AddLine(T('Отримано через гільдію'),1,1,1) end
                 if type(self.updated)=='number' and type(GetServerTime)=='function' and GetServerTime()-self.updated>604800 then GameTooltip:AddLine(T('Дані застарілі'),1,0.7,0.25) end
             end
-            if not isGathering(self.professionID) then
-                GameTooltip:AddLine(T('Натисніть, щоб переглянути збережені рецепти.'),0.6,0.9,1,true)
-            end
+            GameTooltip:AddLine(T('Натисніть, щоб переглянути збережені рецепти.'),0.6,0.9,1,true)
             GameTooltip:Show()
         end)
         icon:SetScript('OnLeave',function() if GameTooltip then GameTooltip:Hide() end end)
@@ -1174,6 +1168,8 @@ local function UpdateSummary()
     end
 end
 
+local lastVisibleFirst, lastVisibleCount, lastVisibleTotal
+
 local function runRender(self)
     if not GetSettings() then
         return
@@ -1183,19 +1179,25 @@ local function runRender(self)
         CreateRosterWindow()
     end
 
+    local perf = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and type(OldKraken.PerfRecord) == 'function'
+    local tFilter = perf and debugprofilestop() or nil
     filteredData = {}
     for _, member in ipairs(rosterData) do
         if MatchesFilters(member) then
             filteredData[#filteredData + 1] = member
         end
     end
+    if tFilter then OldKraken:PerfRecord('roster.filter', debugprofilestop() - tFilter, #rosterData) end
+    local tSort = perf and debugprofilestop() or nil
     table.sort(filteredData, SortMembers)
+    if tSort then OldKraken:PerfRecord('roster.sort', debugprofilestop() - tSort, #filteredData) end
 
     UpdateSummary()
     UpdateFilterButtonLabels()
     UpdateSortHeaders()
 
     if selectedProfileName then
+        lastVisibleFirst, lastVisibleCount, lastVisibleTotal = nil, nil, nil
         local found
         for _, member in ipairs(rosterData) do
             if member.name == selectedProfileName then
@@ -1220,25 +1222,33 @@ function Roster:Render()
     if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.render', debugprofilestop() - t0) end
 end
 
-function Roster:RenderVisible()
+function Roster:RenderVisible(scrollOnly)
     if not rosterFrame or drawing then return end
+    local t0 = OldKraken and OldKraken.perfEnabled and type(debugprofilestop) == 'function' and debugprofilestop() or nil
     drawing = true
     local content = rosterFrame.contentFrame
     local scroll = rosterFrame.scrollFrame
     local viewport = tonumber((scroll:GetHeight())) or 440
     if viewport <= 0 then viewport = 440 end
-    local fullHeight = #filteredData * ROW_HEIGHT
+    local total = #filteredData
+    local fullHeight = total * ROW_HEIGHT
     content:SetHeight(math.max(1, fullHeight))
     local scrollBar = _G.OldKrakenRosterScrollFrameScrollBar
     if type(scrollBar) == 'table' and scrollBar.SetShown then
         scrollBar:SetShown(fullHeight > viewport)
     end
-    if rosterFrame.emptyText then rosterFrame.emptyText:SetShown(#filteredData == 0) end
-    if rosterFrame.emptyReset then rosterFrame.emptyReset:SetShown(#filteredData == 0) end
-    local offset = math.max(0, math.min(tonumber((scroll:GetVerticalScroll())) or 0, math.max(0, #filteredData * ROW_HEIGHT - viewport)))
+    if rosterFrame.emptyText then rosterFrame.emptyText:SetShown(total == 0) end
+    if rosterFrame.emptyReset then rosterFrame.emptyReset:SetShown(total == 0) end
+    local offset = math.max(0, math.min(tonumber((scroll:GetVerticalScroll())) or 0, math.max(0, total * ROW_HEIGHT - viewport)))
     if offset ~= (tonumber((scroll:GetVerticalScroll())) or 0) then scroll:SetVerticalScroll(offset) end
     local first = math.floor(offset / ROW_HEIGHT) + 1
-    local count = math.max(0, math.min(math.ceil(viewport / ROW_HEIGHT) + 1, #filteredData - first + 1))
+    local count = math.max(0, math.min(math.ceil(viewport / ROW_HEIGHT) + 1, total - first + 1))
+    if scrollOnly and first == lastVisibleFirst and count == lastVisibleCount and total == lastVisibleTotal then
+        drawing = false
+        if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.visible', debugprofilestop() - t0, 0) end
+        return
+    end
+    lastVisibleFirst, lastVisibleCount, lastVisibleTotal = first, count, total
     local comm = OldKraken.Communication
     local localVersion = comm and comm.GetLocalVersion and comm:GetLocalVersion()
     for index = 1, count do
@@ -1320,7 +1330,6 @@ function Roster:RenderVisible()
         local zoneText = SafeText(member.zone)
         local locationText = offlineText and (T('Офлайн') .. ' · ' .. offlineText) or zoneText
         cells[5]:SetText(locationText)
-        cells[6]:Hide()
         row.onlineDot:SetTexture(member.isOnline and 'Interface\\AddOns\\OldKraken\\Media\\StatusOnline.tga' or 'Interface\\AddOns\\OldKraken\\Media\\StatusOffline.tga')
         row.cellHovers[1].fullText = SafeText(member.name)
         row.cellHovers[2].fullText = SafeText(member.rank)
@@ -1337,12 +1346,6 @@ function Roster:RenderVisible()
             cells[4]:SetTextColor(1, 1, 1)
         end
 
-        if member.isOnline then
-            cells[6]:SetTextColor(0.25, 1, 0.25)
-        else
-            cells[6]:SetTextColor(0.55, 0.55, 0.55)
-        end
-
         row:Show()
         if row.versionBadge then
             if version then
@@ -1352,6 +1355,14 @@ function Roster:RenderVisible()
             end
         end
         local professions=OldKraken.Workshop and OldKraken.Workshop:GetMemberProfessions(member.name) or {}
+        if #professions==0 then
+            local muted = OldKraken.UIStyle.Colors and OldKraken.UIStyle.Colors.mutedText
+            cells[6]:SetText('—')
+            if muted then cells[6]:SetTextColor(muted[1], muted[2], muted[3]) else cells[6]:SetTextColor(0.55, 0.55, 0.55) end
+            cells[6]:Show()
+        else
+            cells[6]:Hide()
+        end
         for i,icon in ipairs(row.professions) do
             local profession=professions[i]
             if profession then
@@ -1367,6 +1378,7 @@ function Roster:RenderVisible()
         rowFrames[index]:Hide()
     end
     drawing = false
+    if t0 and OldKraken.PerfRecord then OldKraken:PerfRecord('roster.visible', debugprofilestop() - t0, count) end
 end
 
 local function Pack(...) return {n = select('#', ...), ...} end
@@ -1379,6 +1391,7 @@ function Roster:Load()
     total = tonumber(total) or 0
 
     rosterData = {}
+    local completeScan = total > 0
 
     for index = 1, total do
         local name, rankName, rankIndex, level, className, zone,
@@ -1405,16 +1418,25 @@ function Roster:Load()
             end
             rosterData[#rosterData + 1] = {
                 name = name,
+                nameLower = string.lower(name),
                 rank = rankName,
                 rankIndex = tonumber(rankIndex) or 0,
                 level = tonumber(level) or 0,
                 class = className or classFileName,
                 classFile = classFileName,
                 zone = zone,
+                zoneLower = string.lower(zone or ""),
                 isOnline = isOnline == true,
                 lastOnline = lastOnline,
             }
+        else
+            completeScan = false
         end
+    end
+
+    local comm = OldKraken.Communication
+    if comm and type(comm.PruneRosterPresence) == 'function' and completeScan and #rosterData == total then
+        comm:PruneRosterPresence(rosterData)
     end
 
     self:Render()

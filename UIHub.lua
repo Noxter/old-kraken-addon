@@ -310,6 +310,50 @@ local function createWindow()
     Hub.contentRule:SetSize(PAGE_WIDTH, 1)
     Hub.contentRule:SetColorTexture(unpack(colors.panelEdge))
     Hub.contentRule:Hide()
+
+    local gateOverlay = CreateFrame('Frame', nil, Hub.content)
+    gateOverlay:SetSize(CONTENT_WIDTH, CONTENT_HEIGHT)
+    gateOverlay:SetPoint('TOPLEFT', Hub.content, 'TOPLEFT', 0, 0)
+    if type(gateOverlay.EnableMouse) == 'function' then gateOverlay:EnableMouse(true) end
+    if type(gateOverlay.SetFrameLevel) == 'function' and type(Hub.content.GetFrameLevel) == 'function' then
+        gateOverlay:SetFrameLevel((Hub.content:GetFrameLevel() or 1) + 10)
+    end
+    OldKraken.UIStyle.Panel(gateOverlay, PAD_X, -(PAD_TOP + TITLE_HEIGHT + 16), PAGE_WIDTH, 180)
+    local gateTitle = gateOverlay:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
+    gateTitle:SetPoint('TOPLEFT', gateOverlay, 'TOPLEFT', PAD_X + 20, -(PAD_TOP + TITLE_HEIGHT + 36))
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(gateTitle, 16, true) end
+    gateTitle:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3])
+    gateTitle:SetText(T('Версія аддона застаріла'))
+    gateOverlay.title = gateTitle
+
+    local gateReason = gateOverlay:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
+    gateReason:SetPoint('TOPLEFT', gateTitle, 'BOTTOMLEFT', 0, -10)
+    gateReason:SetWidth(PAGE_WIDTH - 40)
+    gateReason:SetJustifyH('LEFT')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(gateReason, 13) end
+    gateReason:SetText(T('Для продовження роботи в інтерфейсі оновіть Old Kraken на CurseForge.'))
+    gateOverlay.reason = gateReason
+
+    local gateVersions = gateOverlay:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    gateVersions:SetPoint('TOPLEFT', gateReason, 'BOTTOMLEFT', 0, -10)
+    gateVersions:SetWidth(PAGE_WIDTH - 40)
+    gateVersions:SetJustifyH('LEFT')
+    if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(gateVersions, 12) end
+    if colors and colors.mutedText then gateVersions:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
+    gateOverlay.versionsText = gateVersions
+
+    local gateButton = CreateFrame('Button', nil, gateOverlay, 'UIPanelButtonTemplate')
+    OldKraken.UIStyle.Button(gateButton, nil, {rounded = true})
+    gateButton:SetSize(290, 30)
+    gateButton:SetPoint('TOPLEFT', gateVersions, 'BOTTOMLEFT', 0, -16)
+    gateButton:SetText(T('Скопіювати посилання на оновлення'))
+    gateButton:SetScript('OnClick', function()
+        if type(Hub.ShowUpdateLink) == 'function' then Hub:ShowUpdateLink(gateOverlay.minVersion) end
+    end)
+    gateOverlay.updateButton = gateButton
+    gateOverlay:Hide()
+    Hub.gateOverlay = gateOverlay
+
     Hub.frame = frame
     applyScale(savedScale())
     for _, page in ipairs(Hub.pageOrder) do createPageButton(page) end
@@ -370,6 +414,30 @@ function Hub:ShowPage(key)
     assert(page, 'Unknown UI page: ' .. tostring(key))
 
     if not self.frame then createWindow() end
+    local comm = OldKraken.Communication
+    local gate = comm and type(comm.GetCompatibilityGateState) == 'function' and comm:GetCompatibilityGateState()
+    if gate and gate.blocked then
+        self.currentPage = key
+        self.contentTitle:SetText(T('Оновлення Old Kraken'))
+        for _, item in ipairs(self.pageOrder) do
+            if item.frame then item.frame:Hide() end
+        end
+        updateButtons()
+        if self.gateOverlay then
+            self.gateOverlay.minVersion = gate.minVersion
+            self.gateOverlay.versionsText:SetText(string.format(
+                T('Ваша версія: %s · Мінімально підтримувана: %s'),
+                tostring(gate.localVersion or 'unknown'),
+                tostring(gate.minVersion or '')
+            ))
+            self.gateOverlay:Show()
+        end
+        applyScale(savedScale())
+        self.frame:Show()
+        return self.gateOverlay
+    end
+    if self.gateOverlay then self.gateOverlay:Hide() end
+
     if not page.frame then
         page.frame = page.create(self.content)
         assert(page.frame, 'UI page factory returned no frame: ' .. key)

@@ -37,6 +37,43 @@ local function splitMiddleDot(text)
     return parts
 end
 
+local EVENT_PREFIXES = {
+    '[Old Kraken] Івент: ',
+    '[Old Kraken] Event: ',
+    '[Old Kraken] Новий івент: ',
+    '[Old Kraken] New event: ',
+}
+local EVENT_TAILS = {
+    ' — /okr',
+    ' — запис у вкладці «Івенти» (/okr).',
+    ' — sign up under Events (/okr).',
+}
+
+local function formatEventAnnouncement(message)
+    local body
+    for _, prefix in ipairs(EVENT_PREFIXES) do
+        if message:sub(1, #prefix) == prefix then
+            body = message:sub(#prefix + 1)
+            break
+        end
+    end
+    if not body or body == '' then return nil end
+    for _, tail in ipairs(EVENT_TAILS) do
+        if body:sub(-#tail) == tail then
+            body = body:sub(1, #body - #tail)
+            break
+        end
+    end
+    if body == '' then return nil end
+    local parts = splitMiddleDot(body)
+    local out = { TEAL .. '[Old Kraken] ' .. MUTED .. T('Івент:') .. ' |r' .. GOLD .. parts[1] .. '|r' }
+    for i = 2, #parts do
+        out[#out + 1] = MUTED .. ' · |r' .. CREAM .. parts[i] .. '|r'
+    end
+    local link = TEAL .. '|Holdkraken:events|h' .. T('[Відкрити івенти]') .. '|h|r'
+    return table.concat(out) .. ' ' .. link
+end
+
 local function formatAnnouncement(message)
     local link = TEAL .. '|Holdkraken:groups|h' .. T('[Відкрити групи]') .. '|h|r'
     if message:find('LFG ', 1, true) then
@@ -57,7 +94,7 @@ local function formatAnnouncement(message)
     if message:sub(1, #ukrainian) == ukrainian or message:sub(1, #english) == english then
         return GOLD .. message .. '|r ' .. link
     end
-    return nil
+    return formatEventAnnouncement(message)
 end
 
 local function highlightGroupChat(_, event, message, ...)
@@ -78,6 +115,9 @@ local function registerLinkHook()
             if link == 'oldkraken:groups' and OldKraken and OldKraken.GroupFinder
                 and type(OldKraken.GroupFinder.Show) == 'function' then
                 OldKraken.GroupFinder:Show('all')
+            elseif link == 'oldkraken:events' and OldKraken and OldKraken.GuildEvents
+                and type(OldKraken.GuildEvents.Show) == 'function' then
+                OldKraken.GuildEvents:Show()
             end
         end)
     end

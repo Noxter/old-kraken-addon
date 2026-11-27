@@ -226,4 +226,86 @@ lua_combat.execute('''
     assert(#GetChatPrints() == 1, 'Deferred chat notice must fire after leaving combat')
 ''')
 
+# 9. Dormant Compatibility Gate: disabled by default, enabled < / == / > threshold, invalid local, ShowPage/Toggle, ShowUpdateLink, OKP^
+lua_gate = make_runtime('0.5.4')
+lua_gate.execute('''
+    local comm, hub = OldKraken.Communication, OldKraken.UIHub
+    assert(comm.COMPATIBILITY_GATE_ENABLED == false, 'Gate must be disabled by default')
+    assert(comm.MIN_SUPPORTED_VERSION == nil, 'MIN_SUPPORTED_VERSION must be nil by default')
+    local state0 = comm:GetCompatibilityGateState()
+    assert(state0.blocked == false and state0.localVersion == '0.5.4' and state0.minVersion == nil)
+
+    local settingsFrame = hub:ShowPage('settings')
+    assert(settingsFrame and settingsFrame:IsShown(), 'Settings page must show when gate is disabled')
+    assert(hub.gateOverlay and not hub.gateOverlay:IsShown(), 'Gate overlay must stay hidden when disabled')
+
+    -- Enable gate with minVersion = '0.6.0' -> 0.5.4 < 0.6.0 must block UI
+    comm.COMPATIBILITY_GATE_ENABLED = true
+    comm.MIN_SUPPORTED_VERSION = '0.6.0'
+    local stateBlocked = comm:GetCompatibilityGateState()
+    assert(stateBlocked.blocked == true and stateBlocked.minVersion == '0.6.0')
+
+    -- Repeat ShowPage('settings') after blocking must hide previously opened page and show gateOverlay
+    hub:ShowPage('settings')
+    assert(not settingsFrame:IsShown(), 'Previously shown page must be hidden when blocked')
+    assert(hub.gateOverlay:IsShown(), 'Gate overlay must be shown when blocked')
+    assert(hub.gateOverlay.versionsText:GetText():find('0.5.4', 1, true), 'Versions text must include local version')
+    assert(hub.gateOverlay.versionsText:GetText():find('0.6.0', 1, true), 'Versions text must include min version')
+
+    -- Register a second page and ensure ShowPage & Toggle cannot bypass gate
+    local customPageCreated = false
+    hub:RegisterPage('custom', 'Custom', '06', function()
+        customPageCreated = true
+        return CreateFrame('Frame')
+    end)
+    hub:ShowPage('custom')
+    assert(not customPageCreated and hub.gateOverlay:IsShown(), 'Blocked ShowPage must not create/show new page')
+    hub:Toggle('custom')
+    assert(not hub.frame:IsShown(), 'Toggle on shown blocked frame hides frame')
+    hub:Toggle('settings')
+    assert(hub.frame:IsShown() and not settingsFrame:IsShown() and hub.gateOverlay:IsShown(), 'Toggle reopen must stay blocked')
+
+    -- Update button opens existing ShowUpdateLink with CurseForge URL
+    hub.gateOverlay.updateButton.scripts.OnClick(hub.gateOverlay.updateButton)
+    assert(hub.updateBox and hub.updateBox:IsShown(), 'Gate update button must open updateBox')
+    assert(hub.updateBox.input:GetText() == 'https://www.curseforge.com/wow/addons/old-kraken')
+
+    -- OKP^ presence/version exchange still works while UI gate is active
+    comm:OnAddonMessage(comm.PREFIX, 'OKP^HERE^0.6.0', 'GUILD', 'NewPeer')
+    assert(comm:HasRosterAddon('NewPeer') and comm:GetRosterVersion('NewPeer') == '0.6.0', 'OKP^HERE^ must still work when gate is blocked')
+
+    -- Dynamic re-check when gate is disabled again -> ShowPage hides overlay and restores UI
+    comm.COMPATIBILITY_GATE_ENABLED = false
+    hub:ShowPage('settings')
+    assert(not hub.gateOverlay:IsShown() and settingsFrame:IsShown(), 'Re-disabling gate must restore normal UI')
+''')
+
+for local_ver, expected_blocked in (('0.6.0', False), ('0.6.1', False), ('unknown', False), ('invalid-ver', False)):
+    lua_case = make_runtime(local_ver)
+    lua_case.globals()._expected_blocked = expected_blocked
+    lua_case.execute('''
+        local comm, hub = OldKraken.Communication, OldKraken.UIHub
+        comm.COMPATIBILITY_GATE_ENABLED = true
+        comm.MIN_SUPPORTED_VERSION = '0.6.0'
+        local st = comm:GetCompatibilityGateState()
+        assert(st.blocked == _expected_blocked, 'Unexpected gate state for ' .. tostring(_local_version))
+        local page = hub:ShowPage('settings')
+        assert(page and page:IsShown() and not hub.gateOverlay:IsShown(), 'Allowed/invalid version must open settings without overlay')
+    ''')
+
+# 10. Alpha threshold and nil/invalid MIN_SUPPORTED_VERSION fail-open checks
+lua_alpha_gate = make_runtime('0.5.8-alpha.1')
+lua_alpha_gate.execute('''
+    local comm, hub = OldKraken.Communication, OldKraken.UIHub
+    comm.COMPATIBILITY_GATE_ENABLED = true
+    comm.MIN_SUPPORTED_VERSION = nil
+    assert(comm:GetCompatibilityGateState().blocked == false, 'nil MIN_SUPPORTED_VERSION must not block')
+    comm.MIN_SUPPORTED_VERSION = '0.6'
+    assert(comm:GetCompatibilityGateState().blocked == false, 'Invalid MIN_SUPPORTED_VERSION must not block')
+    comm.MIN_SUPPORTED_VERSION = '0.5.8-alpha.2'
+    assert(comm:GetCompatibilityGateState().blocked == true, '0.5.8-alpha.1 < 0.5.8-alpha.2 must block')
+    hub:ShowPage('settings')
+    assert(hub.gateOverlay:IsShown(), 'Gate overlay must show for alpha threshold')
+''')
+
 print('Version awareness checks passed')

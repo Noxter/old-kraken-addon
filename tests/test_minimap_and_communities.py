@@ -140,4 +140,225 @@ lua_def.execute('''
     assert(OldKrakenCommunitiesButton.points[1][2] == CommunitiesFrame)
 ''')
 
+# 4. LibDataBroker-1.1 + LibDBIcon-1.0: deferred button creation when hide=true, visibility sync, groupIndicator, click/tooltip, angle migration
+lua_ldb = LuaRuntime(unpack_returned_tuples=True)
+lua_ldb.execute('''
+    listeners = {}
+    rosterToggles = 0
+    finderToggles = 0
+    ldbObjects = {}
+    libDBIconCalls = {}
+    libDBIconShown = true
+    createdLdbButton = nil
+    local function makeLdbButton()
+        return {
+            textures = {},
+            CreateTexture = function(self)
+                local t = {
+                    SetTexture = function(s, path) s.texture = path end,
+                    SetPoint = function() end,
+                    SetSize = function() end,
+                    Show = function(s) s.shown = true end,
+                    Hide = function(s) s.shown = false end,
+                }
+                self.textures[#self.textures + 1] = t
+                return t
+            end,
+        }
+    end
+    local broker = {
+        NewDataObject = function(_, name, obj)
+            ldbObjects[name] = obj
+            return obj
+        end,
+    }
+    local libIcon = {
+        Register = function(_, name, obj, dbTable)
+            libDBIconCalls[#libDBIconCalls + 1] = { op = 'Register', name = name, obj = obj, db = dbTable }
+            libDBIconShown = not dbTable.hide
+            if not dbTable.hide then createdLdbButton = makeLdbButton() end
+        end,
+        Show = function(_, name)
+            libDBIconCalls[#libDBIconCalls + 1] = { op = 'Show', name = name }
+            libDBIconShown = true
+            if not createdLdbButton then createdLdbButton = makeLdbButton() end
+        end,
+        Hide = function(_, name)
+            libDBIconCalls[#libDBIconCalls + 1] = { op = 'Hide', name = name }
+            libDBIconShown = false
+        end,
+        GetMinimapButton = function() return createdLdbButton end,
+    }
+    LibStub = setmetatable({}, {
+        __call = function(_, name)
+            if name == 'LibDataBroker-1.1' then return broker end
+            if name == 'LibDBIcon-1.0' then return libIcon end
+            return nil
+        end,
+    })
+    function CreateFrame() return { RegisterEvent = function() end, SetScript = function() end } end
+    function UnitLevel() return 25 end
+    Minimap = nil
+    OldKraken = {
+        DB = { settings = { minimapAngle = 180, showMinimapButton = false } },
+        UIStyle = {
+            Colors = { window = {0.025, 0.035, 0.055, 1}, brandGold = {0.88, 0.69, 0.32, 1} },
+            EmblemPath = function() return 'Interface\\\\AddOns\\\\OldKraken\\\\Media\\\\OldKrakenKraken.tga' end,
+        },
+        GuildRoster = { Toggle = function() rosterToggles = rosterToggles + 1 end },
+        GroupFinder = {
+            active = true,
+            identity = 'Me',
+            groups = {
+                g1 = {
+                    owner = 'Other', closed = false, hidden = false,
+                    members = {'Other'}, maxSize = 5, minLevel = 20, maxLevel = 30,
+                },
+            },
+            CanPerformRole = function() return true end,
+            RoleAvailable = function() return true end,
+            Toggle = function() finderToggles = finderToggles + 1 end,
+        },
+    }
+    function OldKraken:On(ev, fn)
+        listeners[ev] = listeners[ev] or {}
+        listeners[ev][#listeners[ev] + 1] = fn
+    end
+    function OldKraken:Fire(ev, ...)
+        for _, fn in ipairs(listeners[ev] or {}) do fn(...) end
+    end
+''')
+lua_ldb.execute(MINIMAP)
+lua_ldb.execute('''
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKrakenMinimapButton == nil, 'must not create fallback button when LibDBIcon is available')
+    assert(ldbObjects.OldKraken ~= nil, 'must register LibDataBroker launcher object')
+    assert(ldbObjects.OldKraken.type == 'launcher')
+    assert(OldKraken.DB.settings.minimap.minimapPos == 180, 'must migrate minimapAngle into minimap.minimapPos')
+    assert(OldKraken.DB.settings.minimap.hide == true and libDBIconShown == false)
+    assert(createdLdbButton == nil, 'button is deferred while hide=true')
+
+    OldKraken.DB.settings.showMinimapButton = true
+    OldKraken:Fire('MINIMAP_BUTTON_SETTING')
+    assert(OldKraken.DB.settings.minimap.hide == false and libDBIconShown == true)
+    assert(createdLdbButton ~= nil and createdLdbButton.groupIndicator ~= nil, 'must attach groupIndicator after deferred Show')
+    assert(createdLdbButton.groupIndicator.shown == true, 'must immediately show groupIndicator when matching groups exist')
+
+    OldKraken.DB.settings.showMinimapButton = false
+    OldKraken:Fire('MINIMAP_BUTTON_SETTING')
+    assert(OldKraken.DB.settings.minimap.hide == true and libDBIconShown == false)
+
+    ldbObjects.OldKraken.OnClick(nil, 'LeftButton')
+    ldbObjects.OldKraken.OnClick(nil, 'RightButton')
+    assert(rosterToggles == 1 and finderToggles == 1)
+
+    local tipLines = {}
+    local tip = {
+        SetText = function(_, text) tipLines[#tipLines + 1] = text end,
+        AddLine = function(_, text) tipLines[#tipLines + 1] = text end,
+    }
+    ldbObjects.OldKraken.OnTooltipShow(tip)
+    assert(#tipLines >= 5, 'OnTooltipShow must populate tooltip lines including matching groups')
+''')
+
+# 5. LibDBIcon:Register error safely falls back to standalone button
+lua_err = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_err.execute('''
+    LibStub = setmetatable({}, {
+        __call = function(_, name)
+            if name == 'LibDataBroker-1.1' then
+                return { NewDataObject = function(_, _, obj) return obj end }
+            end
+            if name == 'LibDBIcon-1.0' then
+                return { Register = function() error('duplicate registration') end }
+            end
+            return nil
+        end,
+    })
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKrakenMinimapButton ~= nil, 'must fall back to own button when LibDBIcon:Register errors')
+''')
+
+# 6. Legacy profile migration when minimapPos and minimapAngle differ
+# 6a. Fallback mode (no LibDBIcon): legacy minimapAngle wins once and syncs minimap.minimapPos
+lua_legacy_fb = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_legacy_fb.execute('''
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 45 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKraken.DB.settings.minimap.minimapPos == 120, 'legacy fallback profile must sync minimapAngle -> minimapPos')
+    assert(OldKraken.DB.settings.minimapPositionSynced == true)
+    local pt = OldKrakenMinimapButton.points[1]
+    local expectedX = math.cos(math.rad(120)) * (140 / 2 + 5)
+    local expectedY = math.sin(math.rad(120)) * (140 / 2 + 5)
+    assert(math.abs(pt[4] - expectedX) < 1e-6 and math.abs(pt[5] - expectedY) < 1e-6)
+''')
+
+# 6b. Already-synced profile (e.g. LibDBIcon updated minimapPos after migration): fallback must NOT overwrite minimapPos
+lua_synced_fb = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_synced_fb.execute('''
+    OldKraken.DB.settings.minimapPositionSynced = true
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 200 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKraken.DB.settings.minimap.minimapPos == 200, 'already-synced profile must preserve minimapPos')
+    local pt = OldKrakenMinimapButton.points[1]
+    local expectedX = math.cos(math.rad(200)) * (140 / 2 + 5)
+    local expectedY = math.sin(math.rad(200)) * (140 / 2 + 5)
+    assert(math.abs(pt[4] - expectedX) < 1e-6 and math.abs(pt[5] - expectedY) < 1e-6)
+''')
+
+# 6c. Legacy LibDBIcon mode: minimapPos wins once and syncs minimapAngle
+lua_legacy_ldb = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_legacy_ldb.execute('''
+    local registeredDb
+    LibStub = setmetatable({}, {
+        __call = function(_, name)
+            if name == 'LibDataBroker-1.1' then
+                return { NewDataObject = function(_, _, obj) return obj end }
+            end
+            if name == 'LibDBIcon-1.0' then
+                return {
+                    Register = function(_, _, _, dbTable) registeredDb = dbTable end,
+                    GetMinimapButton = function() return nil end,
+                }
+            end
+            return nil
+        end,
+    })
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 45 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(registeredDb ~= nil and registeredDb.minimapPos == 45, 'legacy LibDBIcon profile must preserve minimapPos')
+    assert(OldKraken.DB.settings.minimapAngle == 45, 'legacy LibDBIcon profile must sync minimapPos -> minimapAngle')
+    assert(OldKraken.DB.settings.minimapPositionSynced == true)
+''')
+
+# 6d. Legacy profile when LibDBIcon:Register() errors: fallback must choose minimapAngle and set minimapPositionSynced
+lua_legacy_err = run_minimap_env(preloaded_communities=False, show_minimap=True)
+lua_legacy_err.execute('''
+    LibStub = setmetatable({}, {
+        __call = function(_, name)
+            if name == 'LibDataBroker-1.1' then
+                return { NewDataObject = function(_, _, obj) return obj end }
+            end
+            if name == 'LibDBIcon-1.0' then
+                return { Register = function() error('duplicate registration') end }
+            end
+            return nil
+        end,
+    })
+    OldKraken.DB.settings.minimapAngle = 120
+    OldKraken.DB.settings.minimap = { minimapPos = 45 }
+    OldKraken:Fire('INITIALIZED', OldKraken.DB)
+    assert(OldKrakenMinimapButton ~= nil, 'must fall back to own button when LibDBIcon:Register errors')
+    assert(OldKraken.DB.settings.minimapAngle == 120, 'fallback after LibDBIcon error must keep minimapAngle')
+    assert(OldKraken.DB.settings.minimap.minimapPos == 120, 'fallback after LibDBIcon error must sync minimapAngle -> minimapPos')
+    assert(OldKraken.DB.settings.minimapPositionSynced == true)
+    local pt = OldKrakenMinimapButton.points[1]
+    local expectedX = math.cos(math.rad(120)) * (140 / 2 + 5)
+    local expectedY = math.sin(math.rad(120)) * (140 / 2 + 5)
+    assert(math.abs(pt[4] - expectedX) < 1e-6 and math.abs(pt[5] - expectedY) < 1e-6)
+''')
+
 print('Minimap and Communities checks passed')

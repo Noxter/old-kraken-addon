@@ -13,17 +13,13 @@ local professions = {
     {id=171, name='Алхімія'}, {id=164, name='Ковальство'},
     {id=165, name='Шкірництво'}, {id=197, name='Кравецтво'},
     {id=202, name='Інженерія'}, {id=333, name='Зачарування'},
-    {id=186, name='Гірництво'}, {id=182, name='Травництво'},
-    {id=393, name='Свіжування'}, {id=185, name='Кулінарія'},
-    {id=129, name='Перша допомога'}, {id=356, name='Риболовля'},
 }
 local byID, orderByID = {}, {}
 for i,entry in ipairs(professions) do byID[entry.id]=entry; orderByID[entry.id]=i end
+local LEGACY_IGNORED_PROFESSIONS = {[186]=true, [182]=true, [393]=true, [185]=true, [129]=true, [356]=true}
 local professionArt={
     [171]={136240,'Alchemy'}, [164]={136241,'Blacksmithing'}, [165]={136247,'Leatherworking'},
     [197]={136249,'Tailoring'}, [202]={136243,'Engineering'}, [333]={136244,'Enchanting'},
-    [186]={136248,'Mining'}, [182]={136246,'Herbalism'}, [393]={134366,'Skinning'},
-    [185]={133971,'Cooking'}, [129]={135966,'FirstAid'}, [356]={136245,'Fishing'},
 }
 local active, identity, profile, store, records = false, nil, nil, nil, {}
 local nativeProfessions={}
@@ -112,13 +108,15 @@ local function decode(payload)
     if not f or #f<2 then return nil end
     local timestamp,n=tonumber(f[1]),tonumber(f[2])
     if not integer(timestamp,1,GetServerTime()+600) or not integer(n,0,12) or #f~=2+n*3 then return nil end
-    local found,list={},{}
+    local found,list,legacyFiltered={}, {}, false
     for i=1,n do
         local id,rank,maximum=tonumber(f[i*3]),tonumber(f[i*3+1]),tonumber(f[i*3+2])
-        if not integer(id,1,1000000) or not byID[id] or found[id] or not integer(rank,1,9999) or not integer(maximum,1,9999) then return nil end
-        found[id]=true; list[#list+1]={id=id,rank=rank,maximum=maximum}
+        if not integer(id,1,1000000) or (not byID[id] and not LEGACY_IGNORED_PROFESSIONS[id]) or found[id] or not integer(rank,1,9999) or not integer(maximum,1,9999) then return nil end
+        found[id]=true
+        if byID[id] then list[#list+1]={id=id,rank=rank,maximum=maximum}
+        else legacyFiltered=true end
     end
-    return {timestamp=timestamp,list=list}
+    return {timestamp=timestamp,list=list,legacyFiltered=(#list==0 and legacyFiltered) or nil}
 end
 local function receiveProfession(owner,payload,relayed)
     local value=decode(payload); if not value or owner==identity then return end
@@ -257,6 +255,14 @@ end
 function Workshop:IsActive()
     return active == true
 end
+local function recordBlocksNative(record)
+    if not usable(record,'table') or not usable(record.list,'table') then return false end
+    if #record.list==0 then return record.legacyFiltered~=true end
+    for _,p in ipairs(record.list) do
+        if usable(p,'table') and byID[p.id] then return true end
+    end
+    return false
+end
 function Workshop:GetMemberProfessions(name)
     if not active or not usable(name,'string') then return {} end
     local record=records[name]; local result={}
@@ -264,7 +270,8 @@ function Workshop:GetMemberProfessions(name)
         for _,p in ipairs(record.list) do
             if usable(p,'table') and byID[p.id] then result[#result+1]={id=p.id,rank=p.rank,maximum=p.maximum,timestamp=record.timestamp,relayed=record.relayed==true} end
         end
-    elseif nativeProfessions[name] then
+    end
+    if #result==0 and not recordBlocksNative(record) and nativeProfessions[name] then
         for _,p in ipairs(nativeProfessions[name]) do result[#result+1]=p end
     end
     table.sort(result, function(a, b)
@@ -290,7 +297,7 @@ function Workshop:GetProfessionMasters(id)
         end
     end
     for name,list in pairs(nativeProfessions) do
-        if usable(name,'string') and usable(list,'table') and not found[name] and not records[name] then
+        if usable(name,'string') and usable(list,'table') and not found[name] and not recordBlocksNative(records[name]) then
             for _,p in ipairs(list) do
                 if usable(p,'table') and p.id==id then found[name]={name=name,native=true}; break end
             end
@@ -384,10 +391,6 @@ local function pluralUk(n, one, few, many)
     if mod10 >= 2 and mod10 <= 4 then return few end
     return many
 end
-local GATHERING_PROFESSIONS = {[186]=true, [182]=true, [393]=true}
-local SECONDARY_PROFESSIONS = {[185]=true, [129]=true, [356]=true}
-function Workshop:IsGatheringProfession(id) return GATHERING_PROFESSIONS[id] == true end
-function Workshop:IsSecondaryProfession(id) return SECONDARY_PROFESSIONS[id] == true end
 function Workshop:PluralUk(n, one, few, many) return pluralUk(n, one, few, many) end
 
 local function button(parent,text,x,y,width,callback,variant,options)
@@ -533,19 +536,13 @@ local function createWindow(parent)
     if colors.mutedText then f.heading:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
     f.professionCards={}
     local cardW = embedded and 288 or 232
-    local cardH = embedded and 82 or 42
+    local cardH = embedded and 82 or 54
     local stepX = embedded and 306 or 242
-    local stepY = embedded and 96 or 47
+    local stepY = embedded and 96 or 62
     local startX = embedded and 0 or 20
     local startY = embedded and -134 or y(-100)
-    local gridProfessions = {}
-    for _,p in ipairs(professions) do
-        if not GATHERING_PROFESSIONS[p.id] and (not embedded or not SECONDARY_PROFESSIONS[p.id]) then
-            gridProfessions[#gridProfessions+1]=p
-        end
-    end
     local cols = 3
-    for i,p in ipairs(gridProfessions) do
+    for i,p in ipairs(professions) do
         local entry=p; local col=(i-1)%cols; local line=math.floor((i-1)/cols)
         local card=button(content,'',startX+col*stepX,startY-line*stepY,cardW,function()
             if OldKraken.WorkshopRecipes then OldKraken.WorkshopRecipes:ShowProfession(entry.id) end
@@ -566,11 +563,11 @@ local function createWindow(parent)
         local icon=card:CreateTexture(nil,'ARTWORK'); icon:SetSize(iconSize,iconSize); icon:SetPoint('LEFT',card,'LEFT',embedded and 16 or 12,0); icon:SetTexture(image and image[1] or 134400)
         local textLeft = embedded and 72 or 45
         local name=card:CreateFontString(nil,'OVERLAY','GameFontNormal')
-        name:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -12 or -5); name:SetWidth(cardW - textLeft - 14); name:SetJustifyH('LEFT'); name:SetWordWrap(false); name:SetText(entry.name)
+        name:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -12 or -9); name:SetWidth(cardW - textLeft - 14); name:SetJustifyH('LEFT'); name:SetWordWrap(false); name:SetText(entry.name)
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(name, embedded and 14 or 13, true) end
         if colors.brandGold then name:SetTextColor(colors.brandGold[1], colors.brandGold[2], colors.brandGold[3]) end
         local detail=card:CreateFontString(nil,'OVERLAY','GameFontHighlightSmall')
-        detail:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -34 or -24); detail:SetWidth(cardW - textLeft - 14); detail:SetJustifyH('LEFT'); detail:SetWordWrap(false)
+        detail:SetPoint('TOPLEFT',card,'TOPLEFT',textLeft,embedded and -34 or -30); detail:SetWidth(cardW - textLeft - 14); detail:SetJustifyH('LEFT'); detail:SetWordWrap(false)
         if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(detail, 12) end
         if colors.mutedText then detail:SetTextColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3]) end
         card.detail=detail
