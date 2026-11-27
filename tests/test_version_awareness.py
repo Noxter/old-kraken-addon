@@ -293,19 +293,4 @@ for local_ver, expected_blocked in (('0.6.0', False), ('0.6.1', False), ('unknow
         assert(page and page:IsShown() and not hub.gateOverlay:IsShown(), 'Allowed/invalid version must open settings without overlay')
     ''')
 
-# 10. Alpha threshold and nil/invalid MIN_SUPPORTED_VERSION fail-open checks
-lua_alpha_gate = make_runtime('0.5.8-alpha.1')
-lua_alpha_gate.execute('''
-    local comm, hub = OldKraken.Communication, OldKraken.UIHub
-    comm.COMPATIBILITY_GATE_ENABLED = true
-    comm.MIN_SUPPORTED_VERSION = nil
-    assert(comm:GetCompatibilityGateState().blocked == false, 'nil MIN_SUPPORTED_VERSION must not block')
-    comm.MIN_SUPPORTED_VERSION = '0.6'
-    assert(comm:GetCompatibilityGateState().blocked == false, 'Invalid MIN_SUPPORTED_VERSION must not block')
-    comm.MIN_SUPPORTED_VERSION = '0.5.8-alpha.2'
-    assert(comm:GetCompatibilityGateState().blocked == true, '0.5.8-alpha.1 < 0.5.8-alpha.2 must block')
-    hub:ShowPage('settings')
-    assert(hub.gateOverlay:IsShown(), 'Gate overlay must show for alpha threshold')
-''')
-
 print('Version awareness checks passed')

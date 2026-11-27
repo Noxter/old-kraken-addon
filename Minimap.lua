@@ -119,9 +119,6 @@ local function updatePosition(self)
     if not scale or scale <= 0 then return end
     local angle = math.deg(math.atan2(cursorY / scale - y, cursorX / scale - x)) % 360
     OldKraken.DB.settings.minimapAngle = angle
-    if type(OldKraken.DB.settings.minimap) == 'table' then
-        OldKraken.DB.settings.minimap.minimapPos = angle
-    end
     place(angle)
 end
 
@@ -156,7 +153,7 @@ end
 
 local function createOwnButton(db)
     if not Minimap then return end
-    local angle = tonumber(type(db.settings.minimap) == 'table' and db.settings.minimap.minimapPos or nil) or tonumber(db.settings.minimapAngle)
+    local angle = tonumber(db.settings.minimapAngle)
     if not angle or angle ~= angle or angle < 0 or angle >= 360 then angle = 225 end
     button = CreateFrame('Button', 'OldKrakenMinimapButton', Minimap)
     button:SetSize(32, 32)
