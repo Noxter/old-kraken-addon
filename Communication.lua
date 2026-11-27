@@ -590,6 +590,22 @@ function Communication:CompareVersions(left, right)
     return 0
 end
 Communication.UPDATE_URL = 'https://www.curseforge.com/wow/addons/old-kraken'
+Communication.COMPATIBILITY_GATE_ENABLED = false
+Communication.MIN_SUPPORTED_VERSION = nil
+
+function Communication:GetCompatibilityGateState()
+    local localVersion = self:GetLocalVersion()
+    local minVersion = self.MIN_SUPPORTED_VERSION
+    if self.COMPATIBILITY_GATE_ENABLED ~= true or type(minVersion) ~= 'string' or minVersion == '' then
+        return {blocked = false, localVersion = localVersion, minVersion = minVersion}
+    end
+    local cmp = self:CompareVersions(localVersion, minVersion)
+    return {
+        blocked = cmp == -1,
+        localVersion = localVersion,
+        minVersion = minVersion,
+    }
+end
 function Communication:IsStableVersion(version)
     local parts = VersionParts(version)
     return parts ~= nil and parts[4] == 3
