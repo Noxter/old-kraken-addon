@@ -165,6 +165,7 @@ local function ensureFrame()
         if type(desc.SetJustifyH) == 'function' then desc:SetJustifyH('LEFT') end
         if type(desc.SetJustifyV) == 'function' then desc:SetJustifyV('TOP') end
         if type(desc.SetWordWrap) == 'function' then desc:SetWordWrap(true) end
+        if type(desc.SetSpacing) == 'function' then desc:SetSpacing(3) end
         desc:SetText(T(item.desc))
         desc:SetTextColor(0.86, 0.90, 0.96)
 
