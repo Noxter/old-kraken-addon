@@ -524,4 +524,108 @@ fnow = fnow + 4
 assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == false)
 ''')
 
+# Modern ChatFrameUtil.AddMessageEventFilter + Name-Realm WHISPER target vs short-name CHAT_MSG_SYSTEM bounce
+realm_lua = LuaRuntime(unpack_returned_tuples=True)
+realm_lua.execute('''
+chatUtilFilters = {}
+ChatFrameUtil = { AddMessageEventFilter = function(ev, fn) chatUtilFilters[ev] = fn end }
+ERR_CHAT_PLAYER_NOT_FOUND_S = "No player named '%s' is currently playing."
+function CreateFrame() return {RegisterEvent=function() end, SetScript=function() end} end
+function UnitName() return 'Tester' end
+function IsInGuild() return true end
+function GetGuildInfo() return 'Guild' end
+function GetServerTime() return 1234567890 end
+rnow = 200
+function GetTime() return rnow end
+function strsplit(d, s) return s:match('^([^%^]*)%^([^%^]*)%^([^%^]*)%^([^%^]*)$') end
+Enum = {SendAddonMessageResult = { Success=0 }}
+rsent = {}
+C_ChatInfo = { SendAddonMessage=function(_, msg, ch, tgt) rsent[#rsent + 1] = {msg = msg, ch = ch, tgt = tgt}; return 0 end }
+''')
+realm_lua.execute((Path(__file__).resolve().parents[1] / 'Communication.lua').read_text(encoding='utf-8'))
+realm_lua.execute('''
+local c = OldKraken.Communication
+c.ready = true
+c.GetRosterVersion = function(_, name)
+    if name == 'Базя Николаевич-Forever' or name == 'Базя Николаевич-Other' or name == 'Daythis Dru-Forever' or name == 'Alex-RealmA' or name == 'Alex-RealmB' then
+        return '0.5.9-alpha.1'
+    end
+end
+assert(type(chatUtilFilters.CHAT_MSG_SYSTEM) == 'function')
+
+-- Send WHISPER to Name-Realm, receive short-name EN bounce -> must suppress, drop queue, and block only that Name-Realm for 10s
+assert(c:SendProtocol('WRPAGE', string.rep('x', 200), 'Базя Николаевич-Forever'))
+c:Pump()
+assert(#rsent == 1 and rsent[1].tgt == 'Базя Николаевич-Forever')
+assert(#c.queue > 1)
+assert(chatUtilFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "No player named 'Базя Николаевич' is currently playing.") == true)
+assert(#c.queue == 0)
+
+-- Subsequent send to same Name-Realm within 10s is blocked before SendAddonMessage
+rnow = rnow + 5
+assert(c:SendProtocol('WRPAGE', 'later', 'Базя Николаевич-Forever'))
+c:Pump()
+assert(#rsent == 1 and #c.queue == 0)
+
+-- Other realm with same short name must NOT be blocked
+assert(c:SendProtocol('WRPAGE', 'other', 'Базя Николаевич-Other'))
+c:Pump()
+assert(#rsent == 2 and rsent[2].tgt == 'Базя Николаевич-Other')
+
+-- Ambiguous pending targets (Alex-RealmA and Alex-RealmB): short-name bounce must NOT drop or block either realm
+rnow = rnow + 10
+assert(c:SendProtocol('WRPAGE', 'a1', 'Alex-RealmA'))
+c:Pump()
+assert(c:SendProtocol('WRPAGE', 'b1', 'Alex-RealmB'))
+c:Pump()
+assert(c:SendProtocol('WRPAGE', string.rep('a', 200), 'Alex-RealmA'))
+assert(c:SendProtocol('WRPAGE', string.rep('b', 200), 'Alex-RealmB'))
+local qBeforeAmbig = #c.queue
+assert(qBeforeAmbig > 0)
+assert(chatUtilFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "No player named 'Alex' is currently playing.") == false)
+assert(#c.queue == qBeforeAmbig)
+local sentBefore = #rsent
+assert(c:SendProtocol('WRPAGE', 'a2', 'Alex-RealmA'))
+assert(c:SendProtocol('WRPAGE', 'b2', 'Alex-RealmB'))
+-- Drain queue to confirm neither Alex-RealmA nor Alex-RealmB was blocked
+while #c.queue > 0 do c:Pump() end
+local seenA, seenB = false, false
+for i = sentBefore + 1, #rsent do
+    if rsent[i].tgt == 'Alex-RealmA' then seenA = true end
+    if rsent[i].tgt == 'Alex-RealmB' then seenB = true end
+end
+assert(seenA and seenB)
+
+-- Ukrainian UALLF bounce pattern with Name-Realm target
+rnow = rnow + 10
+local sentBeforeUk = #rsent
+assert(c:SendProtocol('WRPAGE', string.rep('y', 200), 'Daythis Dru-Forever'))
+c:Pump()
+assert(#rsent == sentBeforeUk + 1 and #c.queue > 1)
+assert(chatUtilFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравця на ім'я «Daythis Dru» зараз немає в грі.") == true)
+assert(#c.queue == 0)
+''')
+
+# Fallback registration: ChatFrameUtil.AddMessageEventFilter errors -> falls back to ChatFrame_AddMessageEventFilter
+fb_lua = LuaRuntime(unpack_returned_tuples=True)
+fb_lua.execute('''
+fbFilters = {}
+ChatFrameUtil = { AddMessageEventFilter = function() error('modern filter unavailable') end }
+function ChatFrame_AddMessageEventFilter(ev, fn) fbFilters[ev] = fn end
+ERR_CHAT_PLAYER_NOT_FOUND_S = "No player named '%s' is currently playing."
+function CreateFrame() return {RegisterEvent=function() end, SetScript=function() end} end
+function UnitName() return 'Tester' end
+function IsInGuild() return true end
+function GetGuildInfo() return 'Guild' end
+function GetServerTime() return 1234567890 end
+function GetTime() return 300 end
+function strsplit(d, s) return s:match('^([^%^]*)%^([^%^]*)%^([^%^]*)%^([^%^]*)$') end
+Enum = {SendAddonMessageResult = { Success=0 }}
+C_ChatInfo = { SendAddonMessage=function() return 0 end }
+''')
+fb_lua.execute((Path(__file__).resolve().parents[1] / 'Communication.lua').read_text(encoding='utf-8'))
+fb_lua.execute('''
+assert(type(fbFilters.CHAT_MSG_SYSTEM) == 'function')
+''')
+
 print('Transport reliability regression checks passed')

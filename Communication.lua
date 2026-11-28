@@ -478,7 +478,33 @@ local function extractNotFoundWhisperTarget(msg)
     end
     local fallback = msg:match("^No player named '(.+)' is currently playing%.$")
     if type(fallback) == 'string' and fallback ~= '' then return fallback end
+    local ukFallback = msg:match("^Гравця на ім'я «(.+)» зараз немає в грі%.$")
+    if type(ukFallback) == 'string' and ukFallback ~= '' then return ukFallback end
     return nil
+end
+
+local function whisperShortName(name)
+    if type(name) ~= 'string' or name == '' then return nil end
+    return name:match('^([^%-]+)') or name
+end
+
+local function findPendingWhisperKey(target, now)
+    local direct = pendingWhisperSends[target]
+    if direct and direct.expires >= now and (direct.count or 0) > 0 then
+        return target, direct
+    end
+    local shortTarget = whisperShortName(target)
+    if not shortTarget or target:find('-', 1, true) then return nil, nil end
+    local matchedKey, matchedPending = nil, nil
+    for k, v in pairs(pendingWhisperSends) do
+        if v and v.expires >= now and (v.count or 0) > 0 and whisperShortName(k) == shortTarget then
+            if matchedKey ~= nil then
+                return nil, nil
+            end
+            matchedKey, matchedPending = k, v
+        end
+    end
+    return matchedKey, matchedPending
 end
 
 local function handleWhisperSystemMessage(self, msg, fromFilter)
@@ -493,13 +519,13 @@ local function handleWhisperSystemMessage(self, msg, fromFilter)
         whisperHandledTicks[target] = nil
         return true
     end
-    local pending = pendingWhisperSends[target]
-    if not pending or pending.expires < now or pending.count <= 0 then
+    local pendingKey, pending = findPendingWhisperKey(target, now)
+    if not pending then
         return false
     end
     pending.count = pending.count - 1
-    if pending.count <= 0 then pendingWhisperSends[target] = nil end
-    confirmedOfflineTargets[target] = now + 10
+    if pending.count <= 0 then pendingWhisperSends[pendingKey] = nil end
+    confirmedOfflineTargets[pendingKey] = now + 10
     whisperSuppressTicks[target] = now
     if fromFilter then whisperHandledTicks[target] = now end
     for i = #self.queue, 1, -1 do
@@ -507,7 +533,7 @@ local function handleWhisperSystemMessage(self, msg, fromFilter)
         if entry then
             local ch = entry.channel or (entry.job and entry.job.channel)
             local t = entry.target or (entry.job and entry.job.target)
-            if ch == 'WHISPER' and t == target then
+            if ch == 'WHISPER' and (t == pendingKey or t == target) then
                 local dropKind = (entry.job and entry.job.kind) or messageTrafficKind(entry.message)
                 local dropID = entry.job and entry.job.id
                 dropEntryOrJob(self, i, entry, 'targetOffline', false, 'targetOffline')
@@ -1517,10 +1543,16 @@ pcall(frame.RegisterEvent, frame, 'PLAYER_REGEN_ENABLED')
 pcall(frame.RegisterEvent, frame, 'GUILD_ROSTER_UPDATE')
 pcall(frame.RegisterEvent, frame, 'CHAT_MSG_SYSTEM')
 
-if type(ChatFrame_AddMessageEventFilter) == 'function' then
-    pcall(ChatFrame_AddMessageEventFilter, 'CHAT_MSG_SYSTEM', function(_, _, msg)
-        return handleWhisperSystemMessage(Communication, msg, true)
-    end)
+local function whisperSystemFilter(_, _, msg)
+    return handleWhisperSystemMessage(Communication, msg, true)
+end
+local modernSystemFilter = type(ChatFrameUtil) == 'table' and ChatFrameUtil.AddMessageEventFilter
+local registeredSystemFilter = false
+if type(modernSystemFilter) == 'function' then
+    registeredSystemFilter = pcall(modernSystemFilter, 'CHAT_MSG_SYSTEM', whisperSystemFilter)
+end
+if not registeredSystemFilter and type(ChatFrame_AddMessageEventFilter) == 'function' then
+    pcall(ChatFrame_AddMessageEventFilter, 'CHAT_MSG_SYSTEM', whisperSystemFilter)
 end
 
 local hookedTalentFrames = {}
