@@ -1,8 +1,8 @@
-# Перевірка Old Kraken (`0.5.8`)
+# Перевірка Old Kraken (`0.5.9`)
 
-Документ описує ручні та автоматизовані перевірки Old Kraken для WoW Forever `1.60.1 (70938)`. Окремі базові сценарії Group Finder, Events, Roster та Workshop перевірялися в грі на попередніх циклах; у `0.5.8` додатково перевірено `LibDBIcon-1.0` / кнопку мінімапи, компактні оголошення подій (`oldkraken:events`), вилучення збиральних і вторинних професій з активного UI, `/okr perf` і `/okr comm traffic` на одному клієнті (двоклієнтна `WHISPER`-перевірка `WRGET`/`WRPAGE` винесена в post-release validation). На обох клієнтах має бути однакова версія аддона та персонажі однієї гільдії.
+Документ описує ручні та автоматизовані перевірки Old Kraken для WoW Forever `1.60.1 (70938)`. У `0.5.9` (за результатами Live QA автора на клієнті Forever `1.60.1 (70938)`, 28 листопада 2026) прийнято: Group Finder Auto-close у підземеллі, WHISPER bounce / fallback та `UIStyle.Toggle`. (`ItemLinkLocale` винесено з релізу `0.5.9` на подальше доопрацювання в `alpha`.) На обох клієнтах має бути однакова версія аддона та персонажі однієї гільдії.
 
-Перед встановленням збережіть копії поточної папки `OldKraken` за межами `Interface/AddOns` та файлу SavedVariables `OldKraken.lua` у `WTF` (або всієї папки `WTF`). Поточна версія `0.5.8` використовує схему SavedVariables v3. Скопіюйте всі файли з релізного архіву всередину `Interface/AddOns/OldKraken`, зберігши назву папки та файл `OldKraken.toc`. Не встановлюйте архів поверх незбережених локальних змін Git.
+Перед встановленням збережіть копії поточної папки `OldKraken` за межами `Interface/AddOns` та файлу SavedVariables `OldKraken.lua` у `WTF` (або всієї папки `WTF`). Поточна версія `0.5.9` використовує схему SavedVariables v3. Скопіюйте всі файли з релізного архіву всередину `Interface/AddOns/OldKraken`, зберігши назву папки та файл `OldKraken.toc`. Не встановлюйте архів поверх незбережених локальних змін Git.
 
 ## Команди в грі
 
@@ -122,7 +122,7 @@ done
 
 ## Автоматизоване покриття
 
-Автоматизований набір запускається локально командою вище на Lua 5.1 runtime (`lupa 2.8`). Станом на 27 листопада 2026 він містить 66 тестових файлів; останній локальний запуск на `alpha` завершився успішно (`66/66` тестових файлів, включно з `test_realm_scope.py`, `test_workshop_migration.py`, `test_version_awareness.py`, `test_group_finder_chat.py`, `test_group_finder_activation.py`, `test_inline_player_profile.py`, `test_blackrock_spire_wings.py`, `test_group_alert_level_range.py`, `test_workshop_pending_learned.py`, `test_workshop_orders_localization_and_picker.py`, `test_chat_layout_switcher.py`, `test_perf_diagnostics.py`, `test_protocol_compat_matrix.py`, `test_workshop_orders_compat.py`):
+Автоматизований набір запускається локально командою вище на Lua 5.1 runtime (`lupa 2.8`). Станом на 28 листопада 2026 він містить 68 тестових файлів; останній локальний запуск на `release/0.5.9` завершився успішно (`68/68` тестових файлів, включно з `test_ui_toggle.py`, `test_group_dungeon_autoclose.py`, `test_realm_scope.py`, `test_workshop_migration.py`, `test_version_awareness.py`, `test_group_finder_chat.py`, `test_group_finder_activation.py`, `test_inline_player_profile.py`, `test_blackrock_spire_wings.py`, `test_group_alert_level_range.py`, `test_workshop_pending_learned.py`, `test_workshop_orders_localization_and_picker.py`, `test_chat_layout_switcher.py`, `test_perf_diagnostics.py`, `test_protocol_compat_matrix.py`, `test_workshop_orders_compat.py`):
 
 | Область | Що перевіряється автоматично |
 |---|---|

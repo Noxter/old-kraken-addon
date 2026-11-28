@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.9
+- **UI налаштувань (`Core.lua`, `UIHub.lua`):** додано компонент `UIStyle.Toggle` і переведено 5 булевих опцій вкладки «Налаштування» на 2-колонкові pill-перемикачі з unit-тестом `tests/test_ui_toggle.py`.
+- **Group Finder (`GroupFinder.lua`, `GroupFinderIntegration.lua`, `GroupFinderUI.lua`):** додано автоматичне закриття відкритого оголошення автора при вході в підземелля (з урахуванням `/reload` та синхронізацією `CANCEL`).
+- **Комунікація та діагностика (`Communication.lua`):** виправлено очищення відкладених `WHISPER`-завдань при асинхронному `CHAT_MSG_SYSTEM` bounce (включно з однозначним зіставленням `Name-Realm` vs `Name`, реєстрацією через `ChatFrameUtil.AddMessageEventFilter`, українським шаблоном `«...»`, 3-секундним вікном та 10-секундним блокуванням), а також додано деталізацію причин `txDrop` у `/okr comm traffic`.
+- **Майстерня (`WorkshopRecipes.lua`, `Workshop.lua`):** оптимізовано побудову індексу майстрів (`GetAllProfessionMasters` в один прохід, кешування відображуваних назв, ключів сортування та лічильників рецептів, пропуск зайвого `FindMasters` і розширене `/okr perf`-профілювання рендера).
+
 ## 0.5.8
 - **Minimap & LibDBIcon-1.0:** додано підтримку `LibDBIcon-1.0` / `LibDataBroker-1.1` (`OptionalDeps`), центрування fallback-іконки та синхронізацію `minimapAngle` і `minimap.minimapPos` при перетягуванні (`Minimap.lua`).
 - **Майстерня та ростер:** вилучено збиральні (`186, 182, 393`) і вторинні (`185, 129, 356`) професії з активного UI та нової обробки даних; старі записи залишаються інертними, `Workshop.lua` фільтрує їх через `LEGACY_IGNORED_PROFESSIONS`, а `WorkshopRecipes.lua` / `WorkshopOrders.lua` відхиляють їх на прийомі.
