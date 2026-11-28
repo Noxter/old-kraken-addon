@@ -437,15 +437,15 @@ now = now + 15
 assert(c:SendProtocol('WRPAGE', 'fresh', 'Rainira Moonveil'))
 c:Pump()
 assert(#sent == 2, 'after TTL expires and state is pruned, addon WHISPER must send normally')
-now = now + 5
+now = now + 11
 assert(not c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing."), 'expired pending send must be pruned and not match manual /w')
 
--- 5. Compromise behavior within active 3s pending window: 1st bounce consumes the 1 pending credit, 2nd bounce is not swallowed
+-- 5. Compromise behavior within active 10s pending window: 1st bounce consumes the 1 pending credit, 2nd bounce is not swallowed
 now = now + 15
 assert(c:SendProtocol('WRPAGE', 'win', 'Rainira Moonveil'))
 c:Pump()
 now = now + 1
-assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == true, 'within 3s window, 1st bounce consumes 1 credit')
+assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == true, 'within 10s window, 1st bounce consumes 1 credit')
 now = now + 1
 assert(c:OnSystemMessage("No player named 'Rainira Moonveil' is currently playing.") == false, 'after 1 credit is consumed, subsequent manual /w is not swallowed')
 
@@ -516,11 +516,16 @@ assert(c.traffic.byKind.WRPAGE.txDrops == 2, 'reverse order on same frame must d
 fnow = fnow + 1
 assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == false)
 
--- Successful addon WHISPER followed by expired RTT window: manual /w on same target must NOT be suppressed
+-- Successful addon WHISPER at exact 10s boundary (still active at +10, expired at +11)
 fnow = fnow + 15
 assert(c:SendProtocol('WRPAGE', 'ok', 'Rainira Moonveil'))
 c:Pump()
-fnow = fnow + 4
+fnow = fnow + 10
+assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == true)
+fnow = fnow + 15
+assert(c:SendProtocol('WRPAGE', 'ok2', 'Rainira Moonveil'))
+c:Pump()
+fnow = fnow + 11
 assert(chatFilters.CHAT_MSG_SYSTEM(nil, 'CHAT_MSG_SYSTEM', "Гравець [Rainira Moonveil] (офлайн) +.") == false)
 ''')
 
