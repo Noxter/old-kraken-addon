@@ -1594,6 +1594,9 @@ SlashCmdList["OLDKRAKEN"] = function(message)
     elseif command == 'workshop' or command == 'craft' then
         if OldKraken.Workshop then OldKraken.Workshop:Show() end
         return
+    elseif command == 'new' or command == 'whatsnew' then
+        if OldKraken.WhatsNew then OldKraken.WhatsNew:Show(true) end
+        return
     elseif command == 'events' or command == 'calendar' then
         if OldKraken.GuildEvents then OldKraken.GuildEvents:Show() end
         return

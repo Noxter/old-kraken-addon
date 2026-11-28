@@ -28,3 +28,4 @@ WorkshopOrders.lua
 WorkshopDeliveries.lua
 Minimap.lua
 ChatLayoutSwitcher.lua
+WhatsNew.lua
