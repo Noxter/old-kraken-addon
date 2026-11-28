@@ -8,6 +8,9 @@ local MAX_PENDING = 200
 local PENDING_TTL = 30
 local MAX_LATE = 200
 local LATE_TTL = 120
+local MAX_HELD = 100
+local HELD_TTL = 1.5
+local NEGATIVE_TTL = 30
 
 local cache = {}
 local cacheOrder = {}
@@ -33,6 +36,11 @@ local lateTail = 0
 local lateCount = 0
 local lateSeq = 0
 local lateTimer = false
+
+local heldQueue = {}
+local heldTimer = false
+local replaying = false
+local failedHold = {}
 
 local CHAT_EVENTS = {
     'CHAT_MSG_GUILD',
@@ -269,6 +277,11 @@ local function resolveItemName(id, noRequest)
     if ok and isAccessibleString(name) and name ~= '' then
         return name
     end
+    local failExp = failedHold[id]
+    if failExp ~= nil then
+        if failExp >= now() then return nil end
+        failedHold[id] = nil
+    end
     if not noRequest and requestItemLoad(id) then
         markLate(id)
     end
@@ -277,9 +290,10 @@ end
 
 function Module:LocalizeMessage(message, noRequest)
     if not isAccessibleString(message) or not message:find('|Hitem:', 1, true) then
-        return nil
+        return nil, nil
     end
     local seen = {}
+    local unresolved = nil
     local changed = false
     local out = message:gsub('(|Hitem:([^|]*)|h%[)(.-)(%]|h)', function(head, data, oldName, tail)
         if not isAccessibleString(oldName) then return nil end
@@ -294,6 +308,10 @@ function Module:LocalizeMessage(message, noRequest)
                     cachePut(id, name)
                 else
                     seen[id] = false
+                    if not noRequest and pendingItems[id] ~= nil then
+                        unresolved = unresolved or {}
+                        unresolved[id] = true
+                    end
                     return nil
                 end
             end
@@ -305,7 +323,7 @@ function Module:LocalizeMessage(message, noRequest)
         changed = true
         return head .. name .. tail
     end)
-    return changed and out or nil
+    return changed and out or nil, unresolved
 end
 
 local function fixShown()
@@ -362,12 +380,148 @@ local function scheduleFix()
     C_Timer.After(0.25, fixShown)
 end
 
-local function filterChat(_, _, message, ...)
+local function collectHoldIds(unresolved, currentTime)
+    if type(unresolved) ~= 'table' then return nil end
+    local holdIds = nil
+    for id in pairs(unresolved) do
+        local exp = failedHold[id]
+        if exp ~= nil and exp < currentTime then
+            failedHold[id] = nil
+            exp = nil
+        end
+        if exp == nil then
+            holdIds = holdIds or {}
+            holdIds[id] = true
+        end
+    end
+    return holdIds
+end
+
+local function replayHeldEntry(entry)
+    if type(entry) ~= 'table' or type(entry.chatFrame) ~= 'table'
+        or type(entry.chatFrame.MessageEventHandler) ~= 'function' then
+        return
+    end
+    replaying = true
+    pcall(entry.chatFrame.MessageEventHandler, entry.chatFrame, entry.event, unpack(entry.args, 1, entry.argCount))
+    replaying = false
+end
+
+local scheduleHeldTimeout
+
+local function flushExpiredHeld()
+    heldTimer = false
+    if #heldQueue == 0 then return end
+    local currentTime = now()
+    for id, exp in pairs(failedHold) do
+        if exp < currentTime then failedHold[id] = nil end
+    end
+    local ready = {}
+    local kept = {}
+    for _, entry in ipairs(heldQueue) do
+        if entry.expires <= currentTime then
+            for id in pairs(entry.pendingIds) do
+                local name = cache[id] or resolveItemName(id, true)
+                if name then
+                    cachePut(id, name)
+                else
+                    failedHold[id] = currentTime + NEGATIVE_TTL
+                end
+            end
+            ready[#ready + 1] = entry
+        else
+            kept[#kept + 1] = entry
+        end
+    end
+    heldQueue = kept
+    for _, entry in ipairs(ready) do
+        replayHeldEntry(entry)
+    end
+    if #heldQueue > 0 then
+        scheduleHeldTimeout()
+    end
+end
+
+scheduleHeldTimeout = function()
+    if heldTimer or #heldQueue == 0 then return end
+    if type(C_Timer) ~= 'table' or type(C_Timer.After) ~= 'function' then return end
+    heldTimer = true
+    C_Timer.After(0.25, flushExpiredHeld)
+end
+
+local function flushHeldByItem(id, success)
+    if #heldQueue == 0 then return end
+    local hasWaiter = false
+    for _, entry in ipairs(heldQueue) do
+        if entry.pendingIds[id] then
+            hasWaiter = true
+            break
+        end
+    end
+    if not hasWaiter then return end
+    local currentTime = now()
+    local resolvedName = nil
+    if success ~= false then
+        resolvedName = cache[id] or resolveItemName(id, true)
+        if resolvedName then cachePut(id, resolvedName) end
+    else
+        failedHold[id] = currentTime + NEGATIVE_TTL
+    end
+    local ready = {}
+    local kept = {}
+    for _, entry in ipairs(heldQueue) do
+        if entry.pendingIds[id] then
+            if success == false or resolvedName then
+                entry.pendingIds[id] = nil
+            end
+        end
+        if next(entry.pendingIds) == nil then
+            ready[#ready + 1] = entry
+        else
+            kept[#kept + 1] = entry
+        end
+    end
+    heldQueue = kept
+    for _, entry in ipairs(ready) do
+        replayHeldEntry(entry)
+    end
+end
+
+local function filterChat(chatFrame, event, message, ...)
+    if replaying then
+        if not isEnabled() or not isAccessibleString(message) or not message:find('|Hitem:', 1, true) then
+            return false
+        end
+        local localized = Module:LocalizeMessage(message, true)
+        if localized then
+            return false, localized, ...
+        end
+        return false
+    end
     if not isEnabled() then return false end
     if not isAccessibleString(message) or not message:find('|Hitem:', 1, true) then
         return false
     end
-    local localized = Module:LocalizeMessage(message)
+    local localized, unresolved = Module:LocalizeMessage(message)
+    local currentTime = now()
+    local holdIds = collectHoldIds(unresolved, currentTime)
+    if holdIds
+        and type(chatFrame) == 'table' and type(chatFrame.MessageEventHandler) == 'function'
+        and #heldQueue < MAX_HELD
+        and type(C_Timer) == 'table' and type(C_Timer.After) == 'function' then
+        local args = { message, ... }
+        local argCount = select('#', message, ...)
+        heldQueue[#heldQueue + 1] = {
+            chatFrame = chatFrame,
+            event = event,
+            args = args,
+            argCount = argCount,
+            pendingIds = holdIds,
+            expires = currentTime + HELD_TTL,
+        }
+        scheduleHeldTimeout()
+        return true
+    end
     if localized then
         return false, localized, ...
     end
@@ -405,6 +559,9 @@ frame:SetScript('OnEvent', function(_, event, id, success)
         registerFilter()
     elseif event == 'GET_ITEM_INFO_RECEIVED' or event == 'ITEM_DATA_LOAD_RESULT' then
         clearPending(id)
+        if isEnabled() then
+            flushHeldByItem(id, success)
+        end
         if success == false then
             clearLate(id)
         elseif lateItems[id] ~= nil and isEnabled() then

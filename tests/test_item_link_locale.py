@@ -691,3 +691,144 @@ lua_no_timer.execute(
     assert(transformCalls == 0)
     '''
 )
+
+# 19: Held message buffering until GET_ITEM_INFO_RECEIVED + HELD_TTL timeout + failedHold negative cache
+lua_held = make_client(
+    '''
+    delivered = {}
+    scheduledTimers = {}
+    C_Timer = {
+        After = function(delay, fn)
+            scheduledTimers[#scheduledTimers + 1] = { delay = delay, fn = fn }
+        end,
+    }
+    ChatFrame1 = {
+        MessageEventHandler = function(self, event, msg, sender, ...)
+            local filter = registered[event]
+            local drop, newMsg = filter(self, event, msg, sender, ...)
+            if not drop then
+                delivered[#delivered + 1] = { event = event, msg = newMsg or msg, sender = sender }
+            end
+        end,
+    }
+    '''
+)
+lua_held.execute(
+    '''
+    local filter = registered['CHAT_MSG_GUILD']
+    local ruMsg = 'WTS |Hitem:44001:0:0:0:0:0:0:0|h[Синий меч]|h'
+
+    -- Uncached item on ChatFrame1 is held (returns true, not delivered yet)
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', ruMsg, 'Vasya')
+    assert(#delivered == 0, 'uncached item message must be held until item info arrives')
+
+    -- Item resolves via GET_ITEM_INFO_RECEIVED -> replayed with localized name
+    itemNames[44001] = 'Blue Sword'
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 44001, true)
+    assert(#delivered == 1)
+    assert(delivered[1].msg == 'WTS |Hitem:44001:0:0:0:0:0:0:0|h[Blue Sword]|h')
+    assert(delivered[1].sender == 'Vasya')
+
+    -- Unresolvable item (e.g. custom ID 217265) times out after HELD_TTL (1.5s) and replays as-is
+    local badMsg = 'LF |Hitem:217265:0:0:0:0:0:0:0|h[Unknown]|h'
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', badMsg, 'Petya')
+    assert(#delivered == 1)
+    nowTime = nowTime + 2
+    for i = #scheduledTimers, 1, -1 do
+        local t = table.remove(scheduledTimers, i)
+        t.fn()
+    end
+    assert(#delivered == 2 and delivered[2].msg == badMsg)
+
+    -- Subsequent message with same timed-out ID is NOT held again and does not re-request within NEGATIVE_TTL
+    local reqBefore = requestCalls
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', badMsg, 'Petya')
+    assert(#delivered == 3 and requestCalls == reqBefore)
+
+    -- Two uncached IDs in one message: waits for both before replaying once
+    local twoMsg = 'Trade |Hitem:55001:0:0:0:0:0:0:0|h[A]|h for |Hitem:55002:0:0:0:0:0:0:0|h[B]|h'
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', twoMsg, 'Katya')
+    assert(#delivered == 3)
+    itemNames[55001] = 'Alpha'
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55001, true)
+    assert(#delivered == 3, 'must still wait for second uncached ID')
+    itemNames[55002] = 'Beta'
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55002, true)
+    assert(#delivered == 4 and delivered[4].msg == 'Trade |Hitem:55001:0:0:0:0:0:0:0|h[Alpha]|h for |Hitem:55002:0:0:0:0:0:0:0|h[Beta]|h')
+
+    -- Duplicate GET_ITEM_INFO_RECEIVED does not replay again
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55002, true)
+    assert(#delivered == 4)
+
+    -- Two uncached IDs: one fails (success=false), other succeeds -> replays with resolved one localized
+    local mixMsg = 'Mix |Hitem:55003:0:0:0:0:0:0:0|h[FailOne]|h and |Hitem:55004:0:0:0:0:0:0:0|h[GoodOne]|h'
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', mixMsg, 'Oleh')
+    assert(#delivered == 4)
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55003, false)
+    assert(#delivered == 4)
+    itemNames[55004] = 'ResolvedOne'
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55004, true)
+    assert(#delivered == 5 and delivered[5].msg == 'Mix |Hitem:55003:0:0:0:0:0:0:0|h[FailOne]|h and |Hitem:55004:0:0:0:0:0:0:0|h[ResolvedOne]|h')
+
+    -- Disabling localizeItemLinks while a message is held still delivers it via timeout/flush
+    local disMsg = 'Hold |Hitem:55005:0:0:0:0:0:0:0|h[Orig]|h'
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', disMsg, 'Ira')
+    assert(#delivered == 5)
+    OldKraken.DB.settings.localizeItemLinks = false
+    nowTime = nowTime + 2
+    for i = #scheduledTimers, 1, -1 do
+        local t = table.remove(scheduledTimers, i)
+        t.fn()
+    end
+    assert(#delivered == 6 and delivered[6].msg == disMsg)
+    OldKraken.DB.settings.localizeItemLinks = true
+
+    -- MAX_HELD = 100 cap: 100 held, 101st passes through immediately, all 100 flush once on resolve
+    local baseDelivered = #delivered
+    for i = 1, 100 do
+        ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', 'Batch |Hitem:55006:0:0:0:0:0:0:0|h[BatchItem]|h #' .. i, 'User')
+    end
+    assert(#delivered == baseDelivered, 'first 100 messages must be held')
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', 'Batch |Hitem:55006:0:0:0:0:0:0:0|h[BatchItem]|h #101', 'User')
+    assert(#delivered == baseDelivered + 1, '101st message when heldQueue is full must pass through')
+    itemNames[55006] = 'BatchLocalized'
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55006, true)
+    assert(#delivered == baseDelivered + 101, 'all 100 held messages must replay once')
+    -- Unrelated failed event for 55009 while 55008 is held must NOT negatively cache 55009
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', 'Wait |Hitem:55008:0:0:0:0:0:0:0|h[W8]|h', 'Nina')
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55009, false)
+    local reqBeforeUnrelated = requestCalls
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', 'Wait |Hitem:55009:0:0:0:0:0:0:0|h[W9]|h', 'Nina')
+    assert(requestCalls == reqBeforeUnrelated + 1, 'unrelated failure must not block RequestLoadItemDataByID for 55009')
+    itemNames[55008] = 'Wait8'
+    itemNames[55009] = 'Wait9'
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55008, true)
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55009, true)
+    assert(#delivered == baseDelivered + 103)
+    '''
+)
+
+# 20: Missing C_Timer.After never holds message on ChatFrame1
+lua_held_no_timer = make_client(
+    '''
+    delivered = {}
+    C_Timer = nil
+    ChatFrame1 = {
+        MessageEventHandler = function(self, event, msg, sender, ...)
+            local filter = registered[event]
+            local drop, newMsg = filter(self, event, msg, sender, ...)
+            if not drop then
+                delivered[#delivered + 1] = { event = event, msg = newMsg or msg, sender = sender }
+            end
+        end,
+    }
+    '''
+)
+lua_held_no_timer.execute(
+    '''
+    ChatFrame1:MessageEventHandler('CHAT_MSG_GUILD', 'NoTimer |Hitem:55007:0:0:0:0:0:0:0|h[Raw]|h', 'Max')
+    assert(#delivered == 1)
+    '''
+)
+
+print('ItemLinkLocale checks passed')
