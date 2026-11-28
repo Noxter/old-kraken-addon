@@ -369,6 +369,7 @@ lua_gm.execute('''
         tbl[name] = function(...) orig(...); fn(...) end
     end
     frames = {}
+    gmListeners = {}
     rosterToggles = 0
     hiddenPanel = nil
     addedButtons = {}
@@ -406,7 +407,7 @@ lua_gm.execute('''
         UIStyle = { Colors = { panel = {0,0,0}, panelEdge = {1,1,1}, brandGold = {1,1,0} }, EmblemPath = function() return 'e' end },
         GuildRoster = { Toggle = function() rosterToggles = rosterToggles + 1 end },
         GroupFinder = { Toggle = function() end },
-        On = function() end,
+        On = function(_, ev, fn) gmListeners[ev] = fn end,
     }
     function CreateFrame()
         local f = {
@@ -436,6 +437,7 @@ lua_gm.execute('''
             local btn = {
                 menu = menu, label = label, callback = callback, layoutIndex = 10, shown = true,
                 IsShown = function(self) return self.shown end,
+                Hide = function(self) self.shown = false end,
                 GetText = function(self) return self.label end,
                 GetParent = function(self) return self.menu end,
             }
@@ -480,6 +482,17 @@ lua_gm.execute('''
     addedButtons[2].callback()
     assert(hiddenPanel == GameMenuFrame, 'clicking GameMenu button must hide GameMenuFrame')
     assert(rosterToggles == 1, 'clicking GameMenu button must toggle GuildRoster')
+
+    -- 6g. Disabling showGameMenuButton hides already-created button via GAME_MENU_BUTTON_SETTING and skips AddButton on InitButtons
+    assert(addedButtons[2]:IsShown() == true)
+    OldKraken.DB = { settings = { showGameMenuButton = false } }
+    gmListeners['GAME_MENU_BUTTON_SETTING']()
+    assert(addedButtons[2]:IsShown() == false, 'GAME_MENU_BUTTON_SETTING must hide existing GameMenu button')
+    GameMenuFrame:InitButtons()
+    assert(#addedButtons == 2, 'InitButtons while disabled must not add duplicate button')
+    GameMenuFrame:ReleaseButtonsForTest()
+    GameMenuFrame:InitButtons()
+    assert(#addedButtons == 2, 'must not add GameMenu button when showGameMenuButton is false')
 ''')
 
 print('Minimap and Communities checks passed')

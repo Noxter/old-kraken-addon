@@ -541,6 +541,7 @@ local function createSettings(parent)
     local workshopButton = toggle(T('Замовлення Майстерні'), 18, -396, 256)
     local minimapButton = toggle(T('Кнопка на мінімапі'), 286, -396, 256)
     local itemLinksButton = toggle(T('Назви предметів у чаті'), 18, -438, 256)
+    local gameMenuButton = toggle(T('Кнопка в ігровому меню'), 286, -438, 256)
     local previewButton = button('', 18, -490, 256)
     local resetPositionsButton = button(T('Скинути позиції банерів'), 286, -490, 256)
 
@@ -598,6 +599,7 @@ local function createSettings(parent)
         setToggle(workshopButton, T('Замовлення Майстерні'), type(settings) ~= 'table' or settings.workshopOrderAlerts ~= false)
         setToggle(minimapButton, T('Кнопка на мінімапі'), type(settings) ~= 'table' or settings.showMinimapButton ~= false)
         setToggle(itemLinksButton, T('Назви предметів у чаті'), type(settings) == 'table' and settings.localizeItemLinks == true)
+        setToggle(gameMenuButton, T('Кнопка в ігровому меню'), type(settings) ~= 'table' or settings.showGameMenuButton ~= false)
         previewButton:SetText(T('Тест банера: ') .. T(previewLabels[previewIndex]))
         local comm = OldKraken.Communication
         local newest, localVersion = comm and type(comm.GetNewestKnownVersion) == 'function' and comm:GetNewestKnownVersion()
@@ -652,6 +654,13 @@ local function createSettings(parent)
         if type(settings) ~= 'table' then return end
         settings.localizeItemLinks = not (settings.localizeItemLinks == true)
         if type(OldKraken.Fire) == 'function' then OldKraken:Fire('ITEM_LINK_LOCALE_SETTING') end
+        refreshAlertButtons()
+    end)
+    gameMenuButton:SetScript('OnClick', function()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        if type(settings) ~= 'table' then return end
+        settings.showGameMenuButton = settings.showGameMenuButton == false
+        if type(OldKraken.Fire) == 'function' then OldKraken:Fire('GAME_MENU_BUTTON_SETTING') end
         refreshAlertButtons()
     end)
     previewButton:SetScript('OnClick', function()

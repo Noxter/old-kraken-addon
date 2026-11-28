@@ -325,6 +325,11 @@ end
 local GAME_MENU_LABEL = '|cff2ec4b6Old Kraken|r'
 local gameMenuHooked = false
 local gameMenuButton = nil
+local function isGameMenuButtonEnabled()
+    local settings = OldKraken.DB and OldKraken.DB.settings
+    return type(settings) ~= 'table' or settings.showGameMenuButton ~= false
+end
+
 local function onGameMenuClick()
     if SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION and type(PlaySound) == 'function' then
         pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION)
@@ -350,7 +355,25 @@ local function findGameMenuChild(menu, label, fallback)
     return nil
 end
 
+local function hideGameMenuButton(menu)
+    if gameMenuButton and type(gameMenuButton.GetText) == 'function' and gameMenuButton:GetText() == GAME_MENU_LABEL
+        and type(gameMenuButton.Hide) == 'function' then
+        gameMenuButton:Hide()
+    end
+    if type(menu) == 'table' then
+        local existing = findGameMenuChild(menu, GAME_MENU_LABEL)
+        if existing and type(existing.Hide) == 'function' then
+            existing:Hide()
+        end
+    end
+    gameMenuButton = nil
+end
+
 local function placeGameMenuButton(menu)
+    if not isGameMenuButtonEnabled() then
+        hideGameMenuButton(menu)
+        return
+    end
     if not (menu and gameMenuButton and type(gameMenuButton.IsShown) == 'function' and gameMenuButton:IsShown()) then return end
     if type(gameMenuButton.GetText) == 'function' and gameMenuButton:GetText() ~= GAME_MENU_LABEL then return end
     local addonsLabel = type(ADDONS) == 'string' and ADDONS or 'AddOns'
@@ -370,6 +393,10 @@ local function attachGameMenuButton()
     gameMenuHooked = true
     hooksecurefunc(GameMenuFrame, 'InitButtons', function(menu)
         if type(menu) ~= 'table' then return end
+        if not isGameMenuButtonEnabled() then
+            hideGameMenuButton(menu)
+            return
+        end
         local existing = findGameMenuChild(menu, GAME_MENU_LABEL)
         if existing then
             gameMenuButton = existing
@@ -394,7 +421,23 @@ if not attachGameMenuButton() then
     end)
 end
 
+local function updateGameMenuVisibility()
+    if not isGameMenuButtonEnabled() then
+        hideGameMenuButton(GameMenuFrame)
+        if type(GameMenuFrame) == 'table' and type(GameMenuFrame.MarkDirty) == 'function' then
+            pcall(GameMenuFrame.MarkDirty, GameMenuFrame)
+        end
+        return
+    end
+    if type(GameMenuFrame) == 'table' and type(GameMenuFrame.IsShown) == 'function' and GameMenuFrame:IsShown()
+        and type(GameMenuFrame.InitButtons) == 'function' then
+        pcall(GameMenuFrame.InitButtons, GameMenuFrame)
+        placeGameMenuButton(GameMenuFrame)
+    end
+end
+
 OldKraken:On('MINIMAP_BUTTON_SETTING', updateMinimapVisibility)
+OldKraken:On('GAME_MENU_BUTTON_SETTING', updateGameMenuVisibility)
 OldKraken:On('GROUP_FINDER_CHANGED', updateGroupIndicator)
 OldKraken:On('GROUP_FINDER_OFFLINE_CHANGED', updateGroupIndicator)
 local indicatorEvents = CreateFrame('Frame')

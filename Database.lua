@@ -33,6 +33,7 @@ local DEFAULTS = {
         language = 'ukUA',
         smartNotifications = true,
         showMinimapButton = true,
+        showGameMenuButton = true,
         localizeItemLinks = true,
         minimap = {},
         versionIndicator = true,
