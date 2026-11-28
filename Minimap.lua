@@ -246,8 +246,8 @@ local function attachCommunitiesButton()
         or (type(CommunitiesFrame.GuildInfoTab) == 'table' and type(CommunitiesFrame.GuildInfoTab.GetPoint) == 'function' and CommunitiesFrame.GuildInfoTab)
     local tabW = lastTab and type(lastTab.GetWidth) == 'function' and tonumber(lastTab:GetWidth()) or 0
     local tabH = lastTab and type(lastTab.GetHeight) == 'function' and tonumber(lastTab:GetHeight()) or 0
-    local btnW = (tabW and tabW >= 32) and tabW or 40
-    local btnH = (tabH and tabH >= 32) and tabH or 40
+    local btnW = math.max((tabW and tabW >= 32) and (tabW + 4) or 40, 38)
+    local btnH = math.max((tabH and tabH >= 32) and (tabH + 4) or 40, 38)
     communitiesButton:SetSize(btnW, btnH)
     if type(CommunitiesFrame.GetFrameStrata) == 'function' then
         communitiesButton:SetFrameStrata(CommunitiesFrame:GetFrameStrata() or 'MEDIUM')
@@ -283,7 +283,7 @@ local function attachCommunitiesButton()
     end
     local icon = communitiesButton:CreateTexture(nil, 'ARTWORK')
     icon:SetPoint('CENTER')
-    icon:SetSize(math.floor(btnW * 0.8), math.floor(btnH * 0.8))
+    icon:SetSize(math.floor(btnW * 0.92), math.floor(btnH * 0.92))
     icon:SetTexture(OldKraken.UIStyle.EmblemPath())
     communitiesButton:SetHighlightTexture('Interface\\Buttons\\ButtonHilight-Square', 'ADD')
     communitiesButton:SetScript('OnClick', function(_, mouseButton)
@@ -318,6 +318,68 @@ else
         if addonName == 'Blizzard_Communities' and CommunitiesFrame then
             attachCommunitiesButton()
             self:UnregisterEvent('ADDON_LOADED')
+        end
+    end)
+end
+
+local gameMenuHooked = false
+local gameMenuButton = nil
+local function onGameMenuClick()
+    if SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION and type(PlaySound) == 'function' then
+        pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION)
+    end
+    if type(HideUIPanel) == 'function' and GameMenuFrame then
+        pcall(HideUIPanel, GameMenuFrame)
+    end
+    if OldKraken.GuildRoster and type(OldKraken.GuildRoster.Toggle) == 'function' then
+        OldKraken.GuildRoster:Toggle()
+    end
+end
+
+local function placeGameMenuButton(menu)
+    if not (menu and gameMenuButton and type(gameMenuButton.IsShown) == 'function' and gameMenuButton:IsShown()) then return end
+    if type(menu.GetChildren) ~= 'function' then return end
+    local addonsLabel = type(ADDONS) == 'string' and ADDONS or 'AddOns'
+    local target = nil
+    for _, child in ipairs({ menu:GetChildren() }) do
+        if child ~= gameMenuButton and type(child.IsShown) == 'function' and child:IsShown() and child.layoutIndex and type(child.GetText) == 'function' then
+            local text = child:GetText()
+            if text == addonsLabel or text == 'AddOns' then
+                target = child
+                break
+            end
+        end
+    end
+    if not target then return end
+    gameMenuButton.layoutIndex = target.layoutIndex - 0.001
+    gameMenuButton.topPadding = nil
+    if type(menu.MarkDirty) == 'function' then menu:MarkDirty() end
+end
+
+local function attachGameMenuButton()
+    if gameMenuHooked or type(hooksecurefunc) ~= 'function' or type(GameMenuFrame) ~= 'table'
+        or type(GameMenuFrame.InitButtons) ~= 'function'
+        or type(MainMenuFrameMixin) ~= 'table' or type(MainMenuFrameMixin.AddButton) ~= 'function' then
+        return false
+    end
+    gameMenuHooked = true
+    hooksecurefunc(GameMenuFrame, 'InitButtons', function(menu)
+        if type(menu) ~= 'table' then return end
+        gameMenuButton = MainMenuFrameMixin.AddButton(menu, '|cff2ec4b6Old Kraken|r', onGameMenuClick)
+    end)
+    if type(GameMenuFrame.HookScript) == 'function' then
+        pcall(GameMenuFrame.HookScript, GameMenuFrame, 'OnShow', placeGameMenuButton)
+    end
+    return true
+end
+
+if not attachGameMenuButton() then
+    local gameMenuLoader = CreateFrame('Frame')
+    pcall(gameMenuLoader.RegisterEvent, gameMenuLoader, 'PLAYER_LOGIN')
+    pcall(gameMenuLoader.RegisterEvent, gameMenuLoader, 'ADDON_LOADED')
+    gameMenuLoader:SetScript('OnEvent', function(self)
+        if attachGameMenuButton() then
+            self:UnregisterAllEvents()
         end
     end)
 end

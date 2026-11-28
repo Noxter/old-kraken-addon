@@ -361,4 +361,67 @@ lua_legacy_err.execute('''
     assert(math.abs(pt[4] - expectedX) < 1e-6 and math.abs(pt[5] - expectedY) < 1e-6)
 ''')
 
+# 6. GameMenuFrame integration: hooks InitButtons via hooksecurefunc, adds button, hides GameMenuFrame and toggles GuildRoster
+lua_gm = LuaRuntime(unpack_returned_tuples=True)
+lua_gm.execute('''
+    local hooks = {}
+    function hooksecurefunc(tbl, name, fn)
+        local orig = tbl[name]
+        tbl[name] = function(...) orig(...); fn(...) end
+    end
+    rosterToggles = 0
+    hiddenPanel = nil
+    addedButtons = {}
+    markedDirty = 0
+    function HideUIPanel(p) hiddenPanel = p end
+    addonsChild = {
+        layoutIndex = 3,
+        topPadding = 20,
+        IsShown = function() return true end,
+        GetText = function() return 'AddOns' end,
+    }
+    GameMenuFrame = {
+        InitButtons = function() end,
+        HookScript = function(self, ev, fn) self.hooks = self.hooks or {}; self.hooks[ev] = fn end,
+        GetChildren = function() return addonsChild, addedButtons[1] end,
+        MarkDirty = function() markedDirty = markedDirty + 1 end,
+    }
+    MainMenuFrameMixin = {
+        AddButton = function(menu, label, callback)
+            local btn = { menu = menu, label = label, callback = callback, layoutIndex = 10, IsShown = function() return true end }
+            addedButtons[#addedButtons + 1] = btn
+            return btn
+        end
+    }
+    OldKraken = {
+        UIStyle = { Colors = { panel = {0,0,0}, panelEdge = {1,1,1}, brandGold = {1,1,0} }, EmblemPath = function() return 'e' end },
+        GuildRoster = { Toggle = function() rosterToggles = rosterToggles + 1 end },
+        GroupFinder = { Toggle = function() end },
+        On = function() end,
+    }
+    function CreateFrame()
+        return {
+            SetSize=function() end, SetFrameStrata=function() end, SetFrameLevel=function() end,
+            SetPoint=function() end, RegisterForClicks=function() end, EnableMouse=function() end,
+            SetHighlightTexture=function() end, SetScript=function() end, RegisterEvent=function() end,
+            CreateTexture=function() return {SetAllPoints=function() end, SetColorTexture=function() end, SetPoint=function() end, SetSize=function() end, SetTexture=function() end, SetWidth=function() end, SetHeight=function() end} end,
+            Hide=function() end, Show=function() end,
+        }
+    end
+''')
+lua_gm.execute((Path(__file__).resolve().parents[1] / 'Minimap.lua').read_text(encoding='utf-8'))
+lua_gm.execute('''
+    GameMenuFrame:InitButtons()
+    assert(#addedButtons == 1, 'GameMenuFrame:InitButtons must add Old Kraken button')
+    assert(addedButtons[1].menu == GameMenuFrame)
+    assert(addedButtons[1].label:find('Old Kraken', 1, true) ~= nil)
+    GameMenuFrame.hooks.OnShow(GameMenuFrame)
+    assert(addedButtons[1].layoutIndex < addonsChild.layoutIndex, 'button must be placed before AddOns')
+    assert(addedButtons[1].topPadding == nil and addonsChild.topPadding == 20, 'must keep section gap above AddOns')
+    assert(markedDirty == 1)
+    addedButtons[1].callback()
+    assert(hiddenPanel == GameMenuFrame, 'clicking GameMenu button must hide GameMenuFrame')
+    assert(rosterToggles == 1, 'clicking GameMenu button must toggle GuildRoster')
+''')
+
 print('Minimap and Communities checks passed')
