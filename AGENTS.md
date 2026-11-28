@@ -23,7 +23,7 @@
 
 ### Розмір коду
 
-20 Lua-файлів. Найбільші: `GroupFinderUI.lua` (2865), `WorkshopRecipes.lua` (1918), `GuildEvents.lua` (1677), `GuildRoster.lua` (1590), `WorkshopOrders.lua` (1401), `Core.lua` (1307).
+21 Lua-файл. Найбільші: `GroupFinderUI.lua` (2865), `WorkshopRecipes.lua` (1918), `GuildEvents.lua` (1677), `GuildRoster.lua` (1590), `WorkshopOrders.lua` (1401), `Core.lua` (1307).
 
 ---
 
@@ -49,10 +49,10 @@
 Database.lua          Locale.lua          Core.lua            UIHub.lua
 Communication.lua     GuildRoster.lua     ActivityCatalog.lua
 GroupFinder.lua       GroupFinderIntegration.lua   GroupFinderChat.lua
-GroupFinderUI.lua     GroupFinderAPI.lua           GuildEvents.lua
-Workshop.lua          WorkshopRecipes.lua          WorkshopSync.lua
-WorkshopOrders.lua    WorkshopDeliveries.lua       Minimap.lua
-ChatLayoutSwitcher.lua
+ItemLinkLocale.lua    GroupFinderUI.lua            GroupFinderAPI.lua
+GuildEvents.lua       Workshop.lua                 WorkshopRecipes.lua
+WorkshopSync.lua      WorkshopOrders.lua           WorkshopDeliveries.lua
+Minimap.lua           ChatLayoutSwitcher.lua
 ```
 
 Наслідки, які не можна порушувати:
@@ -183,7 +183,7 @@ ChatLayoutSwitcher.lua
 for test in tests/test_*.py; do python "$test" || exit 1; done
 ```
 
-Усі 66 мусять пройти. Потім — ручні сценарії з `TESTING.md` (у грі), бо автоматика не покриває реальний клієнт.
+Усі 69 мусять пройти. Потім — ручні сценарії з `TESTING.md` (у грі), бо автоматика не покриває реальний клієнт.
 
 ### Чого не робити
 
