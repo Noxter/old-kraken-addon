@@ -3,7 +3,7 @@
 Інструкції для AI-агентів (OpenCode, Codex, Copilot, Antigravity, Gemini CLI, Claude Code) у цьому репозиторії.
 Файл **не дублює** `README.md` і `TESTING.md` — він фіксує те, що агент мусить знати, щоб не ламати аддон і не вигадувати API.
 
-> **Цей файл описує актуальний стан коду (`0.5.9-alpha.1` у `alpha`, `0.5.8` у `main`).** Обидві гілки містять повну структуру аддона (20 файлів), схема БД v3.
+> **Цей файл описує актуальний стан коду (`0.5.10-alpha.1` у `alpha`, `0.5.9` у `main`).** Обидві гілки містять повну структуру аддона (20 файлів у `main`, 21 із `ItemLinkLocale.lua` у `alpha`), схема БД v3.
 >
 > **Посилання тут — на імена функцій, констант і розділів, а не на номери рядків.** Гілка `alpha` рухається швидко, тож номери рядків застарівають. Шукай за символом: `grep -rn "ReceiveGroup" --include="*.lua" .`
 
@@ -20,6 +20,7 @@
 - Доступні хелпери WoW: `strsplit`, `strjoin`, `tinsert`, `tremove`, `wipe`, `format`, `pcall`, `C_Timer.After/NewTicker`, `GetTime`, `GetServerTime`, `hooksecurefunc`.
 - **Без XML** — весь UI будується кодом. **Без обов'язкових зовнішніх бібліотек** (допускається лише optional-інтеграція `LibStub`/`LibDataBroker-1.1`/`LibDBIcon-1.0` через `OptionalDeps` і `pcall` із вбудованим fallback у `Minimap.lua`; без Ace3). **Без робочих маркерів `TODO`/`FIXME`/`XXX`/`HACK`** — заборонено додавати їх у код і документацію; обмеження описуй прозою в коментарях і документації.
 - **Мова:** українська за замовчуванням, англійська через налаштування. Для нового тексту інтерфейсу додавай англійський відповідник у `Locale.lua`. Коментарі, ідентифікатори й назви функцій — англійською.
+- **CurseForge:** https://www.curseforge.com/wow/addons/old-kraken
 
 ### Розмір коду
 
@@ -33,8 +34,8 @@
 
 | Шлях | Гілка / стан | Призначення |
 |---|---|---|
-| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка (`0.5.9-alpha.1`)** |
-| `~/Projects/old-kraken-addon/` | `main` | **релізна гілка (`0.5.8`)** |
+| `~/Projects/old-kraken-alpha/` | `alpha` (ця копія) | **актуальна розробка (`0.5.10-alpha.1`)** |
+| `~/Projects/old-kraken-addon/` | `main` | **релізна гілка (`0.5.9`)** |
 | `~/Projects/copilot-worktrees/old-kraken-addon/copilot-prewarm-fluffy-winner` | detached worktree | службовий |
 
 **Перед початком роботи завжди:** `git status -sb` + `git log --oneline -1` у `old-kraken-alpha`. Не роби `git reset --hard`, `git checkout .`, `git stash` без підтвердження користувача.
