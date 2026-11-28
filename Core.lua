@@ -323,6 +323,77 @@ function OldKraken.UIStyle.Button(button, variant, options)
     button:SetHighlightTexture(highlight)
 end
 
+function OldKraken.UIStyle.Toggle(parent, text, x, y, width)
+    local control = CreateFrame('Button', nil, parent, 'UIPanelButtonTemplate')
+    OldKraken.UIStyle.Button(control, nil, {rounded = true})
+    control:SetSize(width or 256, 34)
+    control:SetPoint('TOPLEFT', parent, 'TOPLEFT', x or 0, y or 0)
+    control:SetText('')
+    local hiddenFs = control:GetFontString()
+    if hiddenFs then
+        if type(hiddenFs.SetAlpha) == 'function' then hiddenFs:SetAlpha(0) end
+        if type(hiddenFs.Hide) == 'function' then hiddenFs:Hide() end
+    end
+    control.baseText = text or ''
+    control.isOldKrakenToggle = true
+
+    local colors = OldKraken.UIStyle.Colors
+    local track = CreateFrame('Frame', nil, control)
+    track:SetSize(36, 20)
+    track:SetPoint('RIGHT', control, 'RIGHT', -10, 0)
+    local trackFill, trackRing = slicePill(track, 'BACKGROUND', nil, 6)
+    control.track = track
+    control.trackFill = trackFill
+    control.trackRing = trackRing
+
+    local knob = track:CreateTexture(nil, 'OVERLAY')
+    knob:SetSize(14, 14)
+    local base = 'Interface\\AddOns\\' .. (OldKraken and OldKraken.name or 'OldKraken') .. '\\Media\\'
+    knob:SetTexture(base .. 'PillFill.tga')
+    control.knob = knob
+
+    local label = control:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
+    label:SetPoint('LEFT', control, 'LEFT', 12, 0)
+    label:SetPoint('RIGHT', track, 'LEFT', -8, 0)
+    label:SetJustifyH('LEFT')
+    if label.SetWordWrap then label:SetWordWrap(false) end
+    OldKraken.UIStyle.Font(label, 13)
+    label:SetTextColor(colors.text[1], colors.text[2], colors.text[3])
+    label:SetText(text or '')
+    control.label = label
+
+    function control:SetChecked(enabled)
+        local on = enabled and true or false
+        self.checked = on
+        local stateText = on and 'увімк.' or 'вимк.'
+        if type(OldKraken.Translate) == 'function' then
+            stateText = OldKraken.Translate(stateText)
+        end
+        self:SetText(self.baseText .. ': ' .. stateText)
+        local fillColor = on and colors.primaryButton or colors.scrollTrack
+        local ringColor = on and colors.selEdge or colors.buttonEdge
+        for _, t in ipairs(trackFill) do
+            t:SetVertexColor(unpack(fillColor))
+            t.color = fillColor
+        end
+        for _, t in ipairs(trackRing) do
+            t:SetVertexColor(unpack(ringColor))
+            t.color = ringColor
+        end
+        knob:ClearAllPoints()
+        if on then
+            knob:SetPoint('RIGHT', track, 'RIGHT', -3, 0)
+            knob:SetVertexColor(colors.text[1], colors.text[2], colors.text[3], 1)
+        else
+            knob:SetPoint('LEFT', track, 'LEFT', 3, 0)
+            knob:SetVertexColor(colors.mutedText[1], colors.mutedText[2], colors.mutedText[3], 1)
+        end
+    end
+
+    control:SetChecked(false)
+    return control
+end
+
 function OldKraken.UIStyle.Input(editBox, options)
     options = options or {}
     local name = editBox:GetName()
