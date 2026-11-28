@@ -504,7 +504,14 @@ local function createSettings(parent)
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(alertsLabel, 15, true) end
     alertsLabel:SetText(T('Сповіщення'))
 
-    local smartButton = button('', 18, -272, 282)
+    local function toggle(text, x, y, width)
+        if OldKraken.UIStyle and type(OldKraken.UIStyle.Toggle) == 'function' then
+            return OldKraken.UIStyle.Toggle(page, text, x, y, width)
+        end
+        return button(text, x, y, width)
+    end
+
+    local smartButton = toggle(T('Розумні сповіщення'), 18, -272, 256)
     local smartHint = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
     smartHint:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -312)
     smartHint:SetWidth(524)
@@ -516,7 +523,11 @@ local function createSettings(parent)
     local function refreshSmartButton()
         local settings = OldKraken.DB and OldKraken.DB.settings
         local enabled = type(settings) ~= 'table' or settings.smartNotifications ~= false
-        smartButton:SetText(T('Розумні сповіщення') .. ': ' .. (enabled and ('|cff69dc8c' .. T('увімк.') .. '|r') or ('|cff9aa5b1' .. T('вимк.') .. '|r')))
+        if rawget(smartButton, 'isOldKrakenToggle') then
+            smartButton:SetChecked(enabled)
+        else
+            smartButton:SetText(T('Розумні сповіщення') .. ': ' .. (enabled and ('|cff69dc8c' .. T('увімк.') .. '|r') or ('|cff9aa5b1' .. T('вимк.') .. '|r')))
+        end
     end
     smartButton:SetScript('OnClick', function()
         local settings = OldKraken.DB and OldKraken.DB.settings
@@ -525,10 +536,10 @@ local function createSettings(parent)
         refreshSmartButton()
     end)
 
-    local groupFinderButton = button('', 18, -354, 256)
-    local guildEventsButton = button('', 286, -354, 256)
-    local workshopButton = button('', 18, -396, 256)
-    local minimapButton = button('', 286, -396, 256)
+    local groupFinderButton = toggle(T('Пошук груп'), 18, -354, 256)
+    local guildEventsButton = toggle(T('Події гільдії'), 286, -354, 256)
+    local workshopButton = toggle(T('Замовлення Майстерні'), 18, -396, 256)
+    local minimapButton = toggle(T('Кнопка на мінімапі'), 286, -396, 256)
     local previewButton = button('', 18, -450, 256)
     local resetPositionsButton = button(T('Скинути позиції банерів'), 286, -450, 256)
 
@@ -562,16 +573,20 @@ local function createSettings(parent)
         local settings = OldKraken.DB and OldKraken.DB.settings
         return type(settings) ~= 'table' or settings.guildEventNotifications ~= false
     end
+    local function setToggle(control, baseText, enabled)
+        if rawget(control, 'isOldKrakenToggle') then
+            control:SetChecked(enabled)
+        else
+            control:SetText(baseText .. ': ' .. (enabled and ('|cff69dc8c' .. T('увімк.') .. '|r') or ('|cff9aa5b1' .. T('вимк.') .. '|r')))
+        end
+    end
     local function refreshAlertButtons()
         local settings = OldKraken.DB and OldKraken.DB.settings
-        local function state(enabled)
-            return enabled and ('|cff69dc8c' .. T('увімк.') .. '|r') or ('|cff9aa5b1' .. T('вимк.') .. '|r')
-        end
         refreshSmartButton()
-        groupFinderButton:SetText(T('Пошук груп') .. ': ' .. state(isGroupAlertsOn()))
-        guildEventsButton:SetText(T('Події гільдії') .. ': ' .. state(isEventAlertsOn()))
-        workshopButton:SetText(T('Замовлення Майстерні') .. ': ' .. state(type(settings) ~= 'table' or settings.workshopOrderAlerts ~= false))
-        minimapButton:SetText(T('Кнопка на мінімапі') .. ': ' .. state(type(settings) ~= 'table' or settings.showMinimapButton ~= false))
+        setToggle(groupFinderButton, T('Пошук груп'), isGroupAlertsOn())
+        setToggle(guildEventsButton, T('Події гільдії'), isEventAlertsOn())
+        setToggle(workshopButton, T('Замовлення Майстерні'), type(settings) ~= 'table' or settings.workshopOrderAlerts ~= false)
+        setToggle(minimapButton, T('Кнопка на мінімапі'), type(settings) ~= 'table' or settings.showMinimapButton ~= false)
         previewButton:SetText(T('Тест банера: ') .. T(previewLabels[previewIndex]))
         local comm = OldKraken.Communication
         local newest, localVersion = comm and type(comm.GetNewestKnownVersion) == 'function' and comm:GetNewestKnownVersion()
