@@ -322,6 +322,7 @@ else
     end)
 end
 
+local GAME_MENU_LABEL = '|cff2ec4b6Old Kraken|r'
 local gameMenuHooked = false
 local gameMenuButton = nil
 local function onGameMenuClick()
@@ -336,21 +337,25 @@ local function onGameMenuClick()
     end
 end
 
-local function placeGameMenuButton(menu)
-    if not (menu and gameMenuButton and type(gameMenuButton.IsShown) == 'function' and gameMenuButton:IsShown()) then return end
-    if type(menu.GetChildren) ~= 'function' then return end
-    local addonsLabel = type(ADDONS) == 'string' and ADDONS or 'AddOns'
-    local target = nil
+local function findGameMenuChild(menu, label, fallback)
+    if type(menu.GetChildren) ~= 'function' then return nil end
     for _, child in ipairs({ menu:GetChildren() }) do
-        if child ~= gameMenuButton and type(child.IsShown) == 'function' and child:IsShown() and child.layoutIndex and type(child.GetText) == 'function' then
+        if type(child.IsShown) == 'function' and child:IsShown() and type(child.GetText) == 'function' then
             local text = child:GetText()
-            if text == addonsLabel or text == 'AddOns' then
-                target = child
-                break
+            if text == label or (fallback and text == fallback) then
+                return child
             end
         end
     end
-    if not target then return end
+    return nil
+end
+
+local function placeGameMenuButton(menu)
+    if not (menu and gameMenuButton and type(gameMenuButton.IsShown) == 'function' and gameMenuButton:IsShown()) then return end
+    if type(gameMenuButton.GetText) == 'function' and gameMenuButton:GetText() ~= GAME_MENU_LABEL then return end
+    local addonsLabel = type(ADDONS) == 'string' and ADDONS or 'AddOns'
+    local target = findGameMenuChild(menu, addonsLabel, 'AddOns')
+    if not (target and target ~= gameMenuButton and target.layoutIndex) then return end
     gameMenuButton.layoutIndex = target.layoutIndex - 0.001
     gameMenuButton.topPadding = nil
     if type(menu.MarkDirty) == 'function' then menu:MarkDirty() end
@@ -365,7 +370,12 @@ local function attachGameMenuButton()
     gameMenuHooked = true
     hooksecurefunc(GameMenuFrame, 'InitButtons', function(menu)
         if type(menu) ~= 'table' then return end
-        gameMenuButton = MainMenuFrameMixin.AddButton(menu, '|cff2ec4b6Old Kraken|r', onGameMenuClick)
+        local existing = findGameMenuChild(menu, GAME_MENU_LABEL)
+        if existing then
+            gameMenuButton = existing
+            return
+        end
+        gameMenuButton = MainMenuFrameMixin.AddButton(menu, GAME_MENU_LABEL, onGameMenuClick)
     end)
     if type(GameMenuFrame.HookScript) == 'function' then
         pcall(GameMenuFrame.HookScript, GameMenuFrame, 'OnShow', placeGameMenuButton)
