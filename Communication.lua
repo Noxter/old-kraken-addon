@@ -663,10 +663,10 @@ local function runPump(self)
     if sendChannel == 'WHISPER' and type(sendTarget) == 'string' and sendTarget ~= '' then
         local pending = pendingWhisperSends[sendTarget]
         if not pending or pending.expires < now then
-            pendingWhisperSends[sendTarget] = { count = 1, expires = now + 3 }
+            pendingWhisperSends[sendTarget] = { count = 1, expires = now + 10 }
         else
             pending.count = pending.count + 1
-            pending.expires = now + 3
+            pending.expires = now + 10
         end
     end
     finishEntry(self,index,true)
