@@ -6,6 +6,8 @@ OldKraken.ItemLinkLocale = Module
 local MAX_CACHE = 1024
 local MAX_PENDING = 200
 local PENDING_TTL = 30
+local MAX_LATE = 200
+local LATE_TTL = 120
 
 local cache = {}
 local cacheOrder = {}
@@ -21,6 +23,16 @@ local pendingHead = 1
 local pendingTail = 0
 local pendingCount = 0
 local pendingSeq = 0
+
+local lateItems = {}
+local lateOrderId = {}
+local lateOrderTs = {}
+local lateOrderSeq = {}
+local lateHead = 1
+local lateTail = 0
+local lateCount = 0
+local lateSeq = 0
+local lateTimer = false
 
 local CHAT_EVENTS = {
     'CHAT_MSG_GUILD',
@@ -113,52 +125,60 @@ local function cachePut(key, name)
     cacheCount = cacheCount + 1
 end
 
-local function compactPendingQueue()
+local function compactTokenQueue(items, orderId, orderTs, orderSeq, head, tail)
     local newTail = 0
-    for i = pendingHead, pendingTail do
-        local id = pendingOrderId[i]
-        local ts = pendingOrderTs[i]
-        local seq = pendingOrderSeq[i]
-        pendingOrderId[i] = nil
-        pendingOrderTs[i] = nil
-        pendingOrderSeq[i] = nil
-        if id ~= nil and pendingItems[id] == seq then
+    for i = head, tail do
+        local id = orderId[i]
+        local ts = orderTs[i]
+        local seq = orderSeq[i]
+        orderId[i] = nil
+        orderTs[i] = nil
+        orderSeq[i] = nil
+        if id ~= nil and items[id] == seq then
             newTail = newTail + 1
-            pendingOrderId[newTail] = id
-            pendingOrderTs[newTail] = ts
-            pendingOrderSeq[newTail] = seq
+            orderId[newTail] = id
+            orderTs[newTail] = ts
+            orderSeq[newTail] = seq
         end
     end
     return 1, newTail
 end
 
-local function purgeExpiredPending(currentTime)
-    while pendingHead <= pendingTail do
-        local id = pendingOrderId[pendingHead]
-        local entryTs = pendingOrderTs[pendingHead]
-        local entrySeq = pendingOrderSeq[pendingHead]
-        if id == nil or pendingItems[id] ~= entrySeq then
-            pendingOrderId[pendingHead] = nil
-            pendingOrderTs[pendingHead] = nil
-            pendingOrderSeq[pendingHead] = nil
-            pendingHead = pendingHead + 1
-        elseif currentTime > 0 and entryTs > 0 and (currentTime - entryTs) >= PENDING_TTL then
-            pendingOrderId[pendingHead] = nil
-            pendingOrderTs[pendingHead] = nil
-            pendingOrderSeq[pendingHead] = nil
-            pendingHead = pendingHead + 1
-            pendingItems[id] = nil
-            pendingCount = pendingCount > 0 and (pendingCount - 1) or 0
+local function purgeTokenQueue(items, orderId, orderTs, orderSeq, head, tail, count, maxCount, ttl, currentTime)
+    while head <= tail do
+        local id = orderId[head]
+        local entryTs = orderTs[head]
+        local entrySeq = orderSeq[head]
+        if id == nil or items[id] ~= entrySeq then
+            orderId[head] = nil
+            orderTs[head] = nil
+            orderSeq[head] = nil
+            head = head + 1
+        elseif currentTime > 0 and entryTs > 0 and (currentTime - entryTs) >= ttl then
+            orderId[head] = nil
+            orderTs[head] = nil
+            orderSeq[head] = nil
+            head = head + 1
+            items[id] = nil
+            count = count > 0 and (count - 1) or 0
         else
             break
         end
     end
-    if pendingCount == 0 then
-        pendingHead = 1
-        pendingTail = 0
-    elseif pendingHead > MAX_PENDING * 4 then
-        pendingHead, pendingTail = compactPendingQueue()
+    if count == 0 then
+        head = 1
+        tail = 0
+    elseif head > maxCount * 4 then
+        head, tail = compactTokenQueue(items, orderId, orderTs, orderSeq, head, tail)
     end
+    return head, tail, count
+end
+
+local function purgeExpiredPending(currentTime)
+    pendingHead, pendingTail, pendingCount = purgeTokenQueue(
+        pendingItems, pendingOrderId, pendingOrderTs, pendingOrderSeq,
+        pendingHead, pendingTail, pendingCount, MAX_PENDING, PENDING_TTL, currentTime
+    )
 end
 
 local function clearPending(id)
@@ -171,7 +191,8 @@ local function requestItemLoad(id)
     if type(C_Item) ~= 'table' or type(C_Item.RequestLoadItemDataByID) ~= 'function' then return false end
     local currentTime = now()
     purgeExpiredPending(currentTime)
-    if pendingItems[id] ~= nil or pendingCount >= MAX_PENDING then return false end
+    if pendingItems[id] ~= nil then return true end
+    if pendingCount >= MAX_PENDING then return false end
     pendingSeq = pendingSeq + 1
     local seq = pendingSeq
     pendingItems[id] = seq
@@ -185,6 +206,34 @@ local function requestItemLoad(id)
         clearPending(id)
         return false
     end
+    return true
+end
+
+local function purgeExpiredLate(currentTime)
+    lateHead, lateTail, lateCount = purgeTokenQueue(
+        lateItems, lateOrderId, lateOrderTs, lateOrderSeq,
+        lateHead, lateTail, lateCount, MAX_LATE, LATE_TTL, currentTime
+    )
+end
+
+local function clearLate(id)
+    if lateItems[id] == nil then return end
+    lateItems[id] = nil
+    lateCount = lateCount > 0 and (lateCount - 1) or 0
+end
+
+local function markLate(id)
+    local currentTime = now()
+    purgeExpiredLate(currentTime)
+    if lateItems[id] ~= nil or lateCount >= MAX_LATE then return false end
+    lateSeq = lateSeq + 1
+    local seq = lateSeq
+    lateItems[id] = seq
+    lateTail = lateTail + 1
+    lateOrderId[lateTail] = id
+    lateOrderTs[lateTail] = currentTime
+    lateOrderSeq[lateTail] = seq
+    lateCount = lateCount + 1
     return true
 end
 
@@ -213,18 +262,20 @@ local function parseItemPayload(data)
     return id, f7
 end
 
-local function resolveItemName(id)
+local function resolveItemName(id, noRequest)
     local fn = getItemInfoFn()
     if not fn then return nil end
     local ok, name = pcall(fn, id)
     if ok and isAccessibleString(name) and name ~= '' then
         return name
     end
-    requestItemLoad(id)
+    if not noRequest and requestItemLoad(id) then
+        markLate(id)
+    end
     return nil
 end
 
-function Module:LocalizeMessage(message)
+function Module:LocalizeMessage(message, noRequest)
     if not isAccessibleString(message) or not message:find('|Hitem:', 1, true) then
         return nil
     end
@@ -238,7 +289,7 @@ function Module:LocalizeMessage(message)
         if name == nil then
             name = cache[id]
             if name == nil then
-                name = resolveItemName(id)
+                name = resolveItemName(id, noRequest)
                 if name then
                     cachePut(id, name)
                 else
@@ -255,6 +306,60 @@ function Module:LocalizeMessage(message)
         return head .. name .. tail
     end)
     return changed and out or nil
+end
+
+local function fixShown()
+    lateTimer = false
+    if not isEnabled() or lateCount == 0 then return end
+    purgeExpiredLate(now())
+    if lateCount == 0 then return end
+    local doneIds = {}
+    local doneSet = {}
+    for id in pairs(lateItems) do
+        local name = cache[id] or resolveItemName(id, true)
+        if name then
+            cachePut(id, name)
+            doneIds[#doneIds + 1] = id
+            doneSet[id] = true
+        end
+    end
+    for _, id in ipairs(doneIds) do
+        clearLate(id)
+    end
+    if #doneIds == 0 then return end
+
+    local function has(entry)
+        if type(entry) ~= 'table' or not isAccessibleString(entry.message) then return false end
+        if not entry.message:find('|Hitem:', 1, true) then return false end
+        for idStr in entry.message:gmatch('|Hitem:(%d+):') do
+            local id = tonumber(idStr)
+            if id and doneSet[id] then return true end
+        end
+        return false
+    end
+
+    local function fix(entry)
+        if type(entry) ~= 'table' or not isAccessibleString(entry.message) then return end
+        local localized = Module:LocalizeMessage(entry.message, true)
+        if localized then
+            entry.message = localized
+        end
+    end
+
+    local numWindows = tonumber(NUM_CHAT_WINDOWS) or 10
+    for i = 1, numWindows do
+        local chatFrame = _G and _G['ChatFrame' .. i]
+        if type(chatFrame) == 'table' and type(chatFrame.TransformMessages) == 'function' then
+            pcall(chatFrame.TransformMessages, chatFrame, has, fix)
+        end
+    end
+end
+
+local function scheduleFix()
+    if lateTimer or lateCount == 0 then return end
+    if type(C_Timer) ~= 'table' or type(C_Timer.After) ~= 'function' then return end
+    lateTimer = true
+    C_Timer.After(0.25, fixShown)
 end
 
 local function filterChat(_, _, message, ...)
@@ -295,10 +400,15 @@ local frame = CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
 pcall(frame.RegisterEvent, frame, 'GET_ITEM_INFO_RECEIVED')
 pcall(frame.RegisterEvent, frame, 'ITEM_DATA_LOAD_RESULT')
-frame:SetScript('OnEvent', function(_, event, id)
+frame:SetScript('OnEvent', function(_, event, id, success)
     if event == 'PLAYER_LOGIN' then
         registerFilter()
     elseif event == 'GET_ITEM_INFO_RECEIVED' or event == 'ITEM_DATA_LOAD_RESULT' then
         clearPending(id)
+        if success == false then
+            clearLate(id)
+        elseif lateItems[id] ~= nil and isEnabled() then
+            scheduleFix()
+        end
     end
 end)

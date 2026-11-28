@@ -463,3 +463,231 @@ lua_db.execute(
     assert(dbMigrated.settings.localizeItemLinks == true)
     '''
 )
+
+
+# 17: Post-update via TransformMessages (debounced, noRequest, failure/unrelated guards, secret guard, LATE_TTL)
+lua_post = make_client(
+    '''
+    NUM_CHAT_WINDOWS = 3
+    scheduledTimers = {}
+    transformCalls = 0
+    C_Timer = {
+        After = function(delay, fn)
+            scheduledTimers[#scheduledTimers + 1] = { delay = delay, fn = fn }
+        end,
+    }
+
+    local function makeChatFrame(entries)
+        return {
+            entries = entries,
+            TransformMessages = function(self, pred, xform)
+                transformCalls = transformCalls + 1
+                for _, entry in ipairs(self.entries) do
+                    if pred(entry) then
+                        xform(entry)
+                    end
+                end
+            end,
+        }
+    end
+
+    local secretLine = '|Hitem:12345:0:0:0:0:0:0:0|h[SecretLine]|h'
+    secretValues[secretLine] = true
+
+    ChatFrame1 = makeChatFrame({
+        { message = 'Перший: |cff0070dd|Hitem:12345:0:0:0:0:0:0:0|h[Blue Sword]|h|r!' },
+        { message = 'Інше повідомлення без предмета' },
+        { message = secretLine },
+    })
+    ChatFrame2 = nil
+    ChatFrame3 = makeChatFrame({
+        { message = 'Шепіт: |cff0070dd|Hitem:12345:0:0:0:0:0:0:0|h[Blue Sword]|h|r' },
+    })
+    '''
+)
+lua_post.execute(
+    '''
+    local filter = registered['CHAT_MSG_GUILD']
+
+    -- 1. Uncached item in chat passes through and registers in late queue
+    local n = select('#', filter(nil, 'CHAT_MSG_GUILD', ChatFrame1.entries[1].message, 'Bob'))
+    assert(n == 1 and requestCalls == 1)
+
+    -- 2. Unrelated item load (not seen in chat) must NOT schedule TransformMessages
+    itemNames[44444] = 'Чужий предмет'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 44444, true)
+    assert(#scheduledTimers == 0 and transformCalls == 0)
+
+    -- 3. Failed load (success == false) clears late entry and does NOT schedule TransformMessages
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:22222:0:0:0:0:0:0:0|h[Missing]|h', 'Bob')
+    assert(requestCalls == 2)
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 22222, false)
+    assert(#scheduledTimers == 0 and transformCalls == 0)
+
+    -- 4. Event with missing data inside fixShown does NOT call RequestLoadItemDataByID (noRequest = true)
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:33333:0:0:0:0:0:0:0|h[NoData]|h', 'Bob')
+    assert(requestCalls == 3)
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 33333, true)
+    assert(#scheduledTimers == 1 and scheduledTimers[1].delay == 0.25)
+    scheduledTimers[1].fn()
+    assert(requestCalls == 3 and transformCalls == 0)
+
+    -- 5. Successful load updates ChatFrame1 and ChatFrame3 via TransformMessages without extra RequestLoadItemDataByID
+    itemNames[12345] = 'Синій меч'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 12345, true)
+    assert(#scheduledTimers == 2)
+    scheduledTimers[2].fn()
+    assert(transformCalls == 2)
+    assert(requestCalls == 3)
+    assert(ChatFrame1.entries[1].message == 'Перший: |cff0070dd|Hitem:12345:0:0:0:0:0:0:0|h[Синій меч]|h|r!')
+    assert(ChatFrame1.entries[2].message == 'Інше повідомлення без предмета')
+    assert(ChatFrame3.entries[1].message == 'Шепіт: |cff0070dd|Hitem:12345:0:0:0:0:0:0:0|h[Синій меч]|h|r')
+
+    -- 6. Disabled toggle during scheduled fixShown skips TransformMessages
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:55555:0:0:0:0:0:0:0|h[Off]|h', 'Bob')
+    itemNames[55555] = 'Вимкнений'
+    eventHandler(nil, 'GET_ITEM_INFO_RECEIVED', 55555, true)
+    OldKraken.DB.settings.localizeItemLinks = false
+    scheduledTimers[3].fn()
+    assert(transformCalls == 2)
+
+    -- 7. LATE_TTL (120s) expiration frees slots after 200 entries
+    OldKraken.DB.settings.localizeItemLinks = true
+    nowTime = 200
+    for i = 1, 200 do
+        filter(nil, 'CHAT_MSG_GUILD', '|Hitem:' .. (71000 + i) .. ':0:0:0:0:0:0:0|h[L]|h', 'Bob')
+    end
+    nowTime = 321
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:79999:0:0:0:0:0:0:0|h[FreshLate]|h', 'Bob')
+    itemNames[79999] = 'Свіжий'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 79999, true)
+    scheduledTimers[#scheduledTimers].fn()
+    assert(transformCalls == 4) -- fixShown ran TransformMessages on ChatFrame1 and ChatFrame3 for 79999
+    '''
+)
+
+
+# 18: lateItems guards: missing RequestLoadItemDataByID, pcall error, MAX_PENDING full, already-pending, no C_Timer.After
+lua_late_no_req = make_client(
+    '''
+    NUM_CHAT_WINDOWS = 1
+    scheduledTimers = {}
+    transformCalls = 0
+    C_Timer = {
+        After = function(delay, fn)
+            scheduledTimers[#scheduledTimers + 1] = { delay = delay, fn = fn }
+        end,
+    }
+    ChatFrame1 = {
+        TransformMessages = function() transformCalls = transformCalls + 1 end,
+    }
+    C_Item.RequestLoadItemDataByID = nil
+    '''
+)
+lua_late_no_req.execute(
+    '''
+    local filter = registered['CHAT_MSG_GUILD']
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:1001:0:0:0:0:0:0:0|h[NoReq]|h', 'Bob')
+    itemNames[1001] = 'БезЗапиту'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 1001, true)
+    assert(#scheduledTimers == 0 and transformCalls == 0)
+    '''
+)
+
+lua_late_err = make_client(
+    '''
+    NUM_CHAT_WINDOWS = 1
+    scheduledTimers = {}
+    transformCalls = 0
+    C_Timer = {
+        After = function(delay, fn)
+            scheduledTimers[#scheduledTimers + 1] = { delay = delay, fn = fn }
+        end,
+    }
+    ChatFrame1 = {
+        TransformMessages = function() transformCalls = transformCalls + 1 end,
+    }
+    C_Item.RequestLoadItemDataByID = function() error('req fail') end
+    '''
+)
+lua_late_err.execute(
+    '''
+    local filter = registered['CHAT_MSG_GUILD']
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:1002:0:0:0:0:0:0:0|h[ErrReq]|h', 'Bob')
+    itemNames[1002] = 'Помилка'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 1002, true)
+    assert(#scheduledTimers == 0 and transformCalls == 0)
+    '''
+)
+
+lua_late_cap_and_dup = make_client(
+    '''
+    NUM_CHAT_WINDOWS = 1
+    scheduledTimers = {}
+    transformCalls = 0
+    C_Timer = {
+        After = function(delay, fn)
+            scheduledTimers[#scheduledTimers + 1] = { delay = delay, fn = fn }
+        end,
+    }
+    ChatFrame1 = {
+        entries = {
+            { message = 'Чат: |Hitem:90001:0:0:0:0:0:0:0|h[First]|h' },
+        },
+        TransformMessages = function(self, pred, xform)
+            transformCalls = transformCalls + 1
+            for _, entry in ipairs(self.entries) do
+                if pred(entry) then xform(entry) end
+            end
+        end,
+    }
+    '''
+)
+lua_late_cap_and_dup.execute(
+    '''
+    local filter = registered['CHAT_MSG_GUILD']
+    -- Fill MAX_PENDING = 200 (90001 is #1)
+    for i = 1, 200 do
+        filter(nil, 'CHAT_MSG_GUILD', '|Hitem:' .. (90000 + i) .. ':0:0:0:0:0:0:0|h[P]|h', 'Bob')
+    end
+    assert(requestCalls == 200)
+
+    -- 201st item hits MAX_PENDING -> not requested and NOT added to lateItems
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:99999:0:0:0:0:0:0:0|h[Over]|h', 'Bob')
+    assert(requestCalls == 200)
+    itemNames[99999] = 'ПонадЛіміт'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 99999, true)
+    assert(#scheduledTimers == 0 and transformCalls == 0)
+
+    -- Already-pending item (90001) sent again while pending: markLate remains allowed and updates ChatFrame1
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:90001:0:0:0:0:0:0:0|h[First]|h', 'Bob')
+    assert(requestCalls == 200)
+    itemNames[90001] = 'ПершийЛокалізований'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 90001, true)
+    assert(#scheduledTimers == 1)
+    scheduledTimers[1].fn()
+    assert(transformCalls == 1)
+    assert(ChatFrame1.entries[1].message == 'Чат: |Hitem:90001:0:0:0:0:0:0:0|h[ПершийЛокалізований]|h')
+    '''
+)
+
+lua_no_timer = make_client(
+    '''
+    NUM_CHAT_WINDOWS = 1
+    transformCalls = 0
+    C_Timer = nil
+    ChatFrame1 = {
+        entries = { { message = '|Hitem:1003:0:0:0:0:0:0:0|h[NoTimer]|h' } },
+        TransformMessages = function() transformCalls = transformCalls + 1 end,
+    }
+    '''
+)
+lua_no_timer.execute(
+    '''
+    local filter = registered['CHAT_MSG_GUILD']
+    filter(nil, 'CHAT_MSG_GUILD', '|Hitem:1003:0:0:0:0:0:0:0|h[NoTimer]|h', 'Bob')
+    itemNames[1003] = 'БезТаймера'
+    eventHandler(nil, 'ITEM_DATA_LOAD_RESULT', 1003, true)
+    assert(transformCalls == 0)
+    '''
+)
