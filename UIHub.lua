@@ -473,7 +473,7 @@ local function createSettings(parent)
     local colors = OldKraken.UIStyle and OldKraken.UIStyle.Colors
     if OldKraken.UIStyle and OldKraken.UIStyle.Panel then
         OldKraken.UIStyle.Panel(page, 0, -48, 560, 166)
-        OldKraken.UIStyle.Panel(page, 0, -230, 560, 276)
+        OldKraken.UIStyle.Panel(page, 0, -230, 560, 318)
     end
 
     local label = page:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
@@ -534,7 +534,7 @@ local function createSettings(parent)
     local itemLinksButton = button('', 18, -492, 256)
 
     local versionLabel = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -540)
+    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -564)
     versionLabel:SetWidth(524)
     versionLabel:SetJustifyH('LEFT')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(versionLabel, 13) end
