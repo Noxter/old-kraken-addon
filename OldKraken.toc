@@ -17,6 +17,7 @@ ActivityCatalog.lua
 GroupFinder.lua
 GroupFinderIntegration.lua
 GroupFinderChat.lua
+ItemLinkLocale.lua
 GroupFinderUI.lua
 GroupFinderAPI.lua
 GuildEvents.lua

@@ -531,9 +531,10 @@ local function createSettings(parent)
     local minimapButton = button('', 286, -396, 256)
     local previewButton = button('', 18, -450, 256)
     local resetPositionsButton = button(T('Скинути позиції банерів'), 286, -450, 256)
+    local itemLinksButton = button('', 18, -492, 256)
 
     local versionLabel = page:CreateFontString(nil, 'OVERLAY', 'GameFontHighlightSmall')
-    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -520)
+    versionLabel:SetPoint('TOPLEFT', page, 'TOPLEFT', 18, -540)
     versionLabel:SetWidth(524)
     versionLabel:SetJustifyH('LEFT')
     if OldKraken.UIStyle.Font then OldKraken.UIStyle.Font(versionLabel, 13) end
@@ -547,6 +548,15 @@ local function createSettings(parent)
         end
     end)
     minimapButton:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    itemLinksButton:SetScript('OnEnter', function(self)
+        if GameTooltip then
+            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+            GameTooltip:SetText(T('Назви предметів у чаті'))
+            GameTooltip:AddLine(T('Підміняє видимі назви item-посилань у чаті на мову вашого клієнта (лише з кешу клієнта, без мережевого обміну).'), 1, 1, 1, true)
+            GameTooltip:Show()
+        end
+    end)
+    itemLinksButton:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
     local previewKinds = {'group', 'request', 'event', 'workshop'}
     local previewLabels = {'група', 'заявка', 'подія', 'майстерня'}
     local previewIndex = 1
@@ -572,6 +582,7 @@ local function createSettings(parent)
         guildEventsButton:SetText(T('Події гільдії') .. ': ' .. state(isEventAlertsOn()))
         workshopButton:SetText(T('Замовлення Майстерні') .. ': ' .. state(type(settings) ~= 'table' or settings.workshopOrderAlerts ~= false))
         minimapButton:SetText(T('Кнопка на мінімапі') .. ': ' .. state(type(settings) ~= 'table' or settings.showMinimapButton ~= false))
+        itemLinksButton:SetText(T('Назви предметів у чаті') .. ': ' .. state(type(settings) == 'table' and settings.localizeItemLinks == true))
         previewButton:SetText(T('Тест банера: ') .. T(previewLabels[previewIndex]))
         local comm = OldKraken.Communication
         local newest, localVersion = comm and type(comm.GetNewestKnownVersion) == 'function' and comm:GetNewestKnownVersion()
@@ -621,6 +632,13 @@ local function createSettings(parent)
         if type(OldKraken.Fire) == 'function' then OldKraken:Fire('MINIMAP_BUTTON_SETTING') end
         refreshAlertButtons()
     end)
+    itemLinksButton:SetScript('OnClick', function()
+        local settings = OldKraken.DB and OldKraken.DB.settings
+        if type(settings) ~= 'table' then return end
+        settings.localizeItemLinks = not (settings.localizeItemLinks == true)
+        if type(OldKraken.Fire) == 'function' then OldKraken:Fire('ITEM_LINK_LOCALE_SETTING') end
+        refreshAlertButtons()
+    end)
     previewButton:SetScript('OnClick', function()
         local kind = previewKinds[previewIndex]
         previewIndex = previewIndex % #previewKinds + 1
@@ -638,6 +656,7 @@ local function createSettings(parent)
         OldKraken:On('GUILD_EVENTS_ALERT_SETTING', refreshAlertButtons)
         OldKraken:On('WORKSHOP_ALERT_SETTING', refreshAlertButtons)
         OldKraken:On('MINIMAP_BUTTON_SETTING', refreshAlertButtons)
+        OldKraken:On('ITEM_LINK_LOCALE_SETTING', refreshAlertButtons)
         OldKraken:On('VERSION_STATUS_CHANGED', refreshAlertButtons)
         OldKraken:On('VERSION_SETTING_CHANGED', refreshAlertButtons)
     end

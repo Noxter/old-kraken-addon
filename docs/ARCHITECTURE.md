@@ -209,6 +209,13 @@
 - `SetArtwork(texture, activity)`: рейди — з `Media/Raids/<Name>.tga`; решта — за fileID з fallback `7963779`. Для fileID ≥ 7000000 інший `SetTexCoord`.
 - `validActivity` у `GuildEvents` **виводиться з каталогу** — додаючи активність, онови лише каталог + (за потреби) мапінг арту.
 
+### ItemLinkLocale (`ItemLinkLocale.lua`)
+
+Локальна локалізація видимих назв предметів у чат-посиланнях `|Hitem:...|h[Назва]|h` під мову клієнта (опція `DB.settings.localizeItemLinks`, за замовчуванням `true`).
+
+- Реєструє фільтр ідемпотентно по кожній події через `ChatFrameUtil.AddMessageEventFilter` (з фолбеком на `ChatFrame_AddMessageEventFilter`) для 19 подій `CHAT_MSG_*` (включно з `CHAT_MSG_LOOT`), без затримування або повторного диспатчу повідомлень, без мережевої синхронізації та без `OnUpdate`/таймерів.
+- Працює лише з локального кешу: обмежений FIFO-кеш (`MAX_CACHE = 1024`) без негативного кешування; посилання з випадковим суфіксом (`f7 ~= 0`) у межах MVP залишаються без змін. Якщо предмет не в кеші, поточне повідомлення проходить без змін, а завантаження ініціюється дедупліковано через `C_Item.RequestLoadItemDataByID` (до `MAX_PENDING = 200`, негайне звільнення при помилці `pcall`, очищення по `GET_ITEM_INFO_RECEIVED` / `ITEM_DATA_LOAD_RESULT` або ліниве витіснення за `PENDING_TTL = 30` с) для наступних повідомлень.
+
 ---
 
 ## 11. Команди `/okr`
